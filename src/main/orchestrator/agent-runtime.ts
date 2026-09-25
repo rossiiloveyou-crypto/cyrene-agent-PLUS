@@ -102,6 +102,25 @@ export interface AgentRunFinishedContext {
   conversationId: string;
   channel?: string;
   runId?: string;
+  /**
+   * 说话人的稳定标识 `<channel>:<senderId>`（P2 归属透传）。
+   *
+   * 由渠道入口（channels/bootstrap.ts）组合，沿
+   * agent-runtime → build-options → memory-scheduler 一路透传到 L2 落库。
+   * 桌面路径不传（桌面对话没有 `msg.senderId`），此时记忆不带归属。
+   */
+  personKey?: string;
+  /** 说话人昵称；仅用于把 judge 输出的 `subjectNames` 映射回 personKey。 */
+  speakerName?: string;
+  /** 本轮 user 消息在渠道 transcript 里的 id（P1 产出），用于建立「记忆 → 原话」指针。 */
+  userMessageId?: string;
+  /**
+   * 会话类型（`IncomingMessage.chatType`）。
+   *
+   * 唯一用途：私聊里允许"单人会话兜底"（映射不上人名时把主体判为对端）。
+   * 群聊不兜底 —— 群里"只有一个人说过话"不等于"记忆关于他"。
+   */
+  chatType?: string;
 }
 
 export interface AgentRuntime {
@@ -185,8 +204,8 @@ export function createAgentRuntime(rawDeps: AgentRuntimeDeps): AgentRuntime {
       sceneEmbeddingIndex: rawDeps.getSceneEmbeddingIndex(),
       getSceneEmbeddingProvider: (() =>
         rawDeps.getSceneEmbeddingProvider() as unknown) as BuildOptionsDeps["getSceneEmbeddingProvider"],
-      buildAlwaysOnContext: ((userText, messages) =>
-        buildAlwaysOnContext(userText, messages as any)) as BuildOptionsDeps["buildAlwaysOnContext"],
+      buildAlwaysOnContext: ((userText, messages, trace) =>
+        buildAlwaysOnContext(userText, messages as any, trace)) as BuildOptionsDeps["buildAlwaysOnContext"],
       buildRelationshipContext,
       buildModePrompt,
       buildToolSystemPrompt: ((mode, enabledTools) =>
@@ -294,7 +313,16 @@ export function createAgentRuntime(rawDeps: AgentRuntimeDeps): AgentRuntime {
         onRunFinishedDeps,
         context.channel as ChannelId | undefined,
         context.conversationId,
-        { runId: context.runId, source: context.source, mode: context.mode },
+        {
+          runId: context.runId,
+          source: context.source,
+          mode: context.mode,
+          // P2 归属：undefined 时下游整体退化（不写 speakerIds/subjectIds/sourceMessageIds）
+          personKey: context.personKey,
+          speakerName: context.speakerName,
+          userMessageId: context.userMessageId,
+          chatType: context.chatType,
+        },
       );
       // 调用方应只在成功终态进入收尾；此处再守住插件事件契约，避免未来新增入口误报完成。
       const terminalStatus = result.terminal?.status;

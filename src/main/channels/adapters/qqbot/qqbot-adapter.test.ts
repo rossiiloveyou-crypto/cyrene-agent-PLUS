@@ -8,11 +8,9 @@ const mockedSettings = vi.hoisted(() => ({
     enabled: false,
     listenMode: "loopback" as const,
     port: 0,
-    allowedPrivateUserIds: [],
     allowedGroupIds: [],
     groupRequireMention: true as const,
     groupReplyStyle: "reply-and-mention" as const,
-    groupToolPolicy: "off" as const,
     groupMemoryPolicy: "shared-personal" as const,
   },
   qqbot: {
@@ -29,12 +27,18 @@ const mockedSettings = vi.hoisted(() => ({
   rateLimitPerChannel: 100,
   ttsEnabled: false,
   stickerEnabled: false,
-  mirrorToDesktop: false,
   toolSandbox: "all" as const,
+  toolAccess: { groupMemberGate: true, toolGate: true, entries: [] },
+  keywords: { intercept: [] as string[], trigger: [] as string[] },
+  audit: { recordSuccessTurns: false },
 }));
 
 vi.mock("electron", () => ({
   app: { getPath: () => process.env.TEMP ?? process.cwd() },
+}));
+
+vi.mock("../../audit-events", () => ({
+  recordMessageBlocked: vi.fn(),
 }));
 
 vi.mock("../../settings-store", async (importOriginal) => {
@@ -92,12 +96,14 @@ vi.mock("./qqbot-ws-client", () => ({
 
 import { QqBotAdapter, isQqBotEventAllowed, normalizeQqBotEvent } from "./qqbot-adapter";
 import type { IncomingMessage, OutgoingMessage } from "../../types";
+import { recordMessageBlocked } from "../../audit-events";
 
 const adapters: QqBotAdapter[] = [];
 
 afterEach(async () => {
   for (const adapter of adapters.splice(0)) await adapter.stop();
   apiState.sent.length = 0;
+  vi.mocked(recordMessageBlocked).mockClear();
 });
 
 function c2cEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -194,6 +200,59 @@ describe("QqBotAdapter", () => {
     }));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(adapter.getStatus().detail?.lastRejectedOpenid).toBe("STRANGER000000000000000000001");
+  });
+
+  it("未加白的单聊与群 @ 写控制台拦截记录（触发方式分别为 private / mention）", async () => {
+    const adapter = new QqBotAdapter();
+    adapters.push(adapter);
+    await adapter.start();
+
+    wsState.options.onDispatch("C2C_MESSAGE_CREATE", c2cEvent({
+      id: "msg-stranger-record",
+      author: { user_openid: "STRANGER000000000000000000001" },
+      content: "在吗",
+    }));
+    wsState.options.onDispatch("GROUP_AT_MESSAGE_CREATE", groupEvent({
+      id: "msg-group-at",
+      group_openid: "OTHERGROUP0000000000000000000001",
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(vi.mocked(recordMessageBlocked)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(recordMessageBlocked).mock.calls[0][0]).toMatchObject({
+      channel: "qqbot",
+      chatType: "private",
+      senderId: "STRANGER000000000000000000001",
+      trigger: "private",
+    });
+    expect(vi.mocked(recordMessageBlocked).mock.calls[1][0]).toMatchObject({
+      channel: "qqbot",
+      chatType: "group",
+      chatId: "OTHERGROUP0000000000000000000001",
+      trigger: "mention",
+    });
+  });
+
+  it("群全量推来的普通群消息（没 @ 机器人）不算请求：丢弃但不写拦截记录", async () => {
+    const adapter = new QqBotAdapter();
+    adapters.push(adapter);
+    await adapter.start();
+
+    let delivered = 0;
+    adapter.onMessage = async () => {
+      delivered++;
+      return null;
+    };
+    wsState.options.onDispatch("GROUP_MESSAGE_CREATE", groupEvent({
+      id: "msg-group-full",
+      group_openid: "OTHERGROUP0000000000000000000001",
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(delivered).toBe(0);
+    expect(recordMessageBlocked).not.toHaveBeenCalled();
+    // 「最近被拒的 openid」只是加白名单引导（UI 提示），不属于控制台拦截记录，照旧刷新
+    expect(adapter.getStatus().detail?.lastRejectedOpenid).toBe("OTHERGROUP0000000000000000000001");
   });
 
   it("delivers whitelisted messages to onMessage and sends passive replies with msg_seq", async () => {

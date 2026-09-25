@@ -11,6 +11,16 @@ export interface CompressionTransactionInput {
   triggerText: string;
   sourceConversationId: string;
   sources: CompressionSource[];
+  /** 记忆域：总结继承被压缩条目的域，缺失表示 legacy（无域）。 */
+  scope?: string;
+  /**
+   * P2 归属：总结继承被压缩条目的**并集**（说话人 / 关于谁）。
+   *
+   * 为什么是并集而不是"混合的就不写"：并集保留完整信息，
+   * 「总结里含被删者怎么办」是 P3 删除策略的事（总概览 §4.4），P2 只保证信息不丢。
+   */
+  speakerIds?: string[];
+  subjectIds?: string[];
 }
 
 export interface CompressionTransactionDeps {
@@ -22,8 +32,11 @@ export interface CompressionTransactionDeps {
     isSummary: true;
     subEntryIds: string[];
     syncStatus: "pending_sync";
+    scope?: string;
+    speakerIds?: string[];
+    subjectIds?: string[];
   }): Promise<{ id: string }>;
-  addSummaryVector(text: string, l2Id: string, metadata: Record<string, unknown>): Promise<string>;
+  addSummaryVector(text: string, l2Id: string, metadata: Record<string, unknown>, scopeId?: string): Promise<string>;
   markSummarySynced(l2Id: string, ragId: string): Promise<unknown>;
   archiveSources(ids: string[]): Promise<void>;
   restoreSources(sources: CompressionSource[]): Promise<void>;
@@ -46,6 +59,10 @@ export async function commitMemoryCompression(
     isSummary: true,
     subEntryIds,
     syncStatus: "pending_sync",
+    ...(input.scope ? { scope: input.scope } : {}),
+    // P2 归属：空数组不落字段（与 memory-manager.writeL2 同一约定）
+    ...(input.speakerIds?.length ? { speakerIds: input.speakerIds } : {}),
+    ...(input.subjectIds?.length ? { subjectIds: input.subjectIds } : {}),
   });
 
   let summaryRagId: string | undefined;
@@ -55,7 +72,7 @@ export async function commitMemoryCompression(
       isSummary: true,
       subEntryIds,
       source: "memory_compressor",
-    });
+    }, input.scope);
     await deps.markSummarySynced(summary.id, summaryRagId);
     archiveStarted = true;
     await deps.archiveSources(subEntryIds);

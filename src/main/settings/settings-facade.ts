@@ -13,6 +13,7 @@ import {
 import { normalizeUiTheme } from "../../shared/ui-theme";
 import { normalizeUiIcon } from "../../shared/ui-icon";
 import { normalizeChatAppearance } from "../../shared/chat-appearance";
+import { DEFAULT_CHAT_APPEARANCE } from "../../shared/chat-appearance";
 import {
   normalizeChatSocialContextEnabled,
   normalizeDefaultChatMode,
@@ -25,6 +26,7 @@ import { normalizeWindowVisibilitySettings } from "../window-visibility-settings
 import { normalizeCitaSettings } from "../cita/settings";
 import { getGeneralSettingsPath } from "../settings-store";
 import type { GeneralSettings } from "./general-settings";
+import { DEFAULT_GROUP_CONTEXT_LIMIT, normalizeGroupContextLimit } from "./general-settings";
 import { DEFAULT_MOSSLAND_TTS_MODEL } from "../../shared/tts-types";
 import type { ToolModeOverrides } from "../orchestrator/tools/registry/tool-registry";
 import type { ConversationMode } from "../../shared/chat-types";
@@ -39,6 +41,7 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   plugins: {},
   maxParallelToolCalls: 4,
   citaEnabled: false,
+  groupContextLimit: DEFAULT_GROUP_CONTEXT_LIMIT,
   citaSemanticEngine: "remote",
   chatSocialContextEnabled: false,
   momentsEnabled: true,
@@ -47,6 +50,7 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   cyreneMomentsReactionsEnabled: true,
   momentsCharacterReactionsEnabled: true,
   momentsLiveliness: "quiet",
+  usageBadgeColor: DEFAULT_CHAT_APPEARANCE.usageBadgeColor,
   petAlwaysOnTop: true,
   petVisible: true,
   petZoom: 1,
@@ -185,6 +189,7 @@ export function normalizeGeneralSettings(
       ),
     ),
     maxParallelToolCalls: normalizeMaxParallelToolCalls(input?.maxParallelToolCalls),
+    groupContextLimit: normalizeGroupContextLimit(input?.groupContextLimit),
     citaEnabled: cita.enabled,
     citaSemanticEngine: cita.semanticEngine,
     chatSocialContextEnabled: normalizeChatSocialContextEnabled(input?.chatSocialContextEnabled),

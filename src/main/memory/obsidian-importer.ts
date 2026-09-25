@@ -167,7 +167,7 @@ export async function importL2Markdown(md: string): Promise<ImportResult> {
   try {
     const newRagId = await addL2MemoryVector(content, id, {
       triggerText: existing.triggerText,
-    });
+    }, existing.scope);
     await memoryStore.markL2SyncStatus(id, "synced", newRagId);
     // 尽力清理旧向量：失败不影响回流结果，残留旧向量已被 ragId 过滤屏蔽，
     // 启动一致性检查还会兜底清理

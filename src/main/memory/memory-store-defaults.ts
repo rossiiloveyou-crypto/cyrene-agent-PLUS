@@ -1,7 +1,12 @@
 import { L0Profile, L1Profile, MemoryStore } from "./memory-types"
 import { getMemoryLanguage } from "../locale-context"
 
-export const CURRENT_MEMORY_SCHEMA_VERSION = 2
+/**
+ * 记忆存储 schema 版本。
+ * v3：L2 条目带 `scope`（记忆域）。v2 及更早由启动期闸门（memory-schema-gate）
+ *     在加载前整体清空重建，不存在自动迁移路径。
+ */
+export const CURRENT_MEMORY_SCHEMA_VERSION = 3
 
 export function createDefaultL0(): L0Profile {
   return {

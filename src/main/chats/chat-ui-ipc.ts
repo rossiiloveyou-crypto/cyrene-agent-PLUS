@@ -41,6 +41,20 @@ export interface ChatUiIpcDependencies {
 // 活动会话不再用模块变量记录：activeChatTargetRegistry 同时维护会话、模式、
 // 渲染目标标识与失效监听，供语音输入租约冻结提交目标使用。
 
+/**
+ * 待发送的「打开某个侧栏面板」请求。
+ * 冷启动时渲染端还没注册监听，先缓存，等 CHATS_REACT_READY 再补发。
+ */
+let pendingChatPanel: string | null = null;
+
+function flushPendingChatPanel(): void {
+  if (!pendingChatPanel) return;
+  const win = reactChatWindow;
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send(IPC.CHAT_OPEN_PANEL, pendingChatPanel);
+  pendingChatPanel = null;
+}
+
 /** 兼容旧语义：当前活动会话 ID（无目标或欢迎页时为 null）。 */
 export function getActiveChatSessionId(): string | null {
   return activeChatTargetRegistry.getActive()?.sessionId ?? null;
@@ -235,9 +249,15 @@ export function registerChatUiIpc(deps: ChatUiIpcDependencies): void {
   // 注意：必须用 deps.windowManager 实时读取 getter，不能在注册时解构。
   // registerChatUiIpc 在模块加载阶段调用，那时 windowManager 仍为 null，
   // 解构会捕获 null 并导致后续 ?. 永远短路，按钮点了打不开窗口。
-  ipc.handle(IPC.CHATS_OPEN_IN_REACT_WINDOW, (_event, sessionId: string) => {
+  ipc.handle(IPC.CHATS_OPEN_IN_REACT_WINDOW, (_event, sessionId: string, panel?: unknown) => {
     if (typeof sessionId !== "string" || sessionId.trim().length === 0) return false;
+    const requestedPanel = typeof panel === "string" && panel ? panel : null;
+    if (requestedPanel) pendingChatPanel = requestedPanel;
+    // 窗口已存在时 openReactChatWindow 会同步切会话，此时面板请求可直接补发；
+    // 冷启动（窗口刚创建）要等渲染端 notifyReactReady，否则事件早于监听注册。
+    const reused = Boolean(reactChatWindow && !reactChatWindow.isDestroyed());
     void deps.windowManager?.openReactChatWindow(sessionId);
+    if (reused) flushPendingChatPanel();
     return true;
   });
 
@@ -250,6 +270,7 @@ export function registerChatUiIpc(deps: ChatUiIpcDependencies): void {
     if (pending) {
       win.webContents.send(IPC.CHATS_REACT_SWITCH_SESSION, pending);
     }
+    flushPendingChatPanel();
   });
 
   // 聊天窗口启动/切换会话时上报当前活跃目标（会话 + 模式 + 渲染目标标识）；

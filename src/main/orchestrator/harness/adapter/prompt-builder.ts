@@ -38,8 +38,26 @@ export function materializeHarnessStartTranscript(input: {
     kind: input.kind,
     revision,
     runId: input.runId,
-    content: parts.join("\n\n---\n\n"),
+    content: wrapInternalContext(input.kind, parts.join("\n\n---\n\n")),
   }));
+}
+
+/**
+ * 把运行时事实裹进 `<internal_context>`。
+ *
+ * ⚠️ 包这一层不是为了好看：内部 transcript 消息的 `role` 只能是 `user`
+ * （见 internal-transcript.ts），而它紧跟在**用户那轮真话后面**。
+ * 不包的话，同一上下文里就有两条 user 消息，模型无法区分
+ * "哪条是用户打的字、哪条是机器塞的环境事实"——实测会被读成
+ * "用户又粘贴了一大串运行环境/配置进来"，于是回一句
+ * "你剪贴板又捣蛋啦"，甚至把这段原文当成用户原话复述回去。
+ * 包上后与 ChatLoop 尾部注入的 `<runtime_context>` 同族，且与
+ * chat-time-context.ts 的 Internal Context Policy 对齐
+ * （该策略明确要求：内部上下文可以用于推理，但**不得出现在用户可见回复里**，
+ * 不得引用、复述、解释，也不得暴露标签名）。
+ */
+function wrapInternalContext(kind: "run_start" | "recovery", content: string): string {
+  return `<internal_context type="${kind}">\n${content}\n</internal_context>`;
 }
 
 export function buildHarnessPromptLayers(

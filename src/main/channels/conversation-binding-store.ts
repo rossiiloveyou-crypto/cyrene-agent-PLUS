@@ -17,25 +17,25 @@ export interface ExternalChannelChat {
   lastAt: number;
 }
 
-export interface ChannelConversationBinding {
-  sessionId: string;
-  conversationId: string;
-  updatedAt: number;
-}
-
+/**
+ * 磁盘结构。
+ *
+ * ⚠️ 旧版本还会写一个 `bindings` 字段（渠道会话 ↔ 桌面对话的镜像绑定）。
+ * 该功能已删除：这里刻意**不声明** `bindings`，让读取时的 `JSON.parse` 结果
+ * 天然忽略旧 key（多一个未知字段不会报错），并且下一次 `persist()` 写回时
+ * 它会自动消失 —— 即"旧配置多一个 key 应被忽略而非报错"。
+ */
 interface PersistedBindingState {
   version: typeof STORE_VERSION;
   externalChats: ExternalChannelChat[];
-  bindings: ChannelConversationBinding[];
 }
 
 export interface ChannelConversationBindingSnapshot {
   externalChats: ExternalChannelChat[];
-  bindings: ChannelConversationBinding[];
 }
 
 function emptyState(): PersistedBindingState {
-  return { version: STORE_VERSION, externalChats: [], bindings: [] };
+  return { version: STORE_VERSION, externalChats: [] };
 }
 
 /** 渠道 id 校验：内置渠道（wechat/feishu/qq/qqbot）之外，插件可注册
@@ -61,19 +61,13 @@ function isExternalChat(value: unknown): value is ExternalChannelChat {
     && Number.isFinite(chat.lastAt);
 }
 
-function isBinding(value: unknown): value is ChannelConversationBinding {
-  if (!value || typeof value !== "object") return false;
-  const binding = value as Partial<ChannelConversationBinding>;
-  return typeof binding.sessionId === "string"
-    && binding.sessionId.length > 0
-    && binding.sessionId.length <= 128
-    && typeof binding.conversationId === "string"
-    && binding.conversationId.length > 0
-    && binding.conversationId.length <= 128
-    && typeof binding.updatedAt === "number"
-    && Number.isFinite(binding.updatedAt);
-}
-
+/**
+ * 见过的外部会话观察记录（`channels/context-bindings.json`）。
+ *
+ * 这是「记忆区块成员选择器」的唯一数据源，也是手动加群后补全群名的来源 ——
+ * 删掉它区块就选不出成员了。历史上它还存过"渠道会话 → 桌面对话"的镜像绑定，
+ * 那部分已随镜像功能一并删除，见 PersistedBindingState 的注释。
+ */
 export class ChannelConversationBindingStore {
   private state: PersistedBindingState | null = null;
   private dirty = false;
@@ -95,18 +89,13 @@ export class ChannelConversationBindingStore {
       || previous.senderName !== chat.senderName;
     const externalChats = state.externalChats.filter((item) => item.sessionId !== chat.sessionId);
     externalChats.push({ ...chat });
+    // 上限只淘汰最久未活跃的观察记录（历史上"已绑定会话优先保留"的裁剪逻辑
+    // 随镜像绑定一起删除，现在统一按最近活跃排序）。
     externalChats.sort((a, b) => b.lastAt - a.lastAt);
-    // 已绑定聊天必须稳定保留；上限只淘汰未绑定的旧观察记录，
-    // 否则大量新聊天会让用户选定的上下文绑定无声失效。
-    const boundSessionIds = new Set(state.bindings.map((binding) => binding.sessionId));
-    const boundChats = externalChats.filter((item) => boundSessionIds.has(item.sessionId));
-    const unboundChats = externalChats.filter((item) => !boundSessionIds.has(item.sessionId));
-    const maxUnbound = Math.max(0, this.maxExternalChats - boundChats.length);
-    state.externalChats = [...boundChats, ...unboundChats.slice(0, maxUnbound)]
-      .sort((a, b) => b.lastAt - a.lastAt);
+    state.externalChats = externalChats.slice(0, this.maxExternalChats);
     this.dirty = true;
     const now = Date.now();
-    // 仅合并显示时间戳；新聊天、元数据及绑定变更仍立即落盘。
+    // 仅合并显示时间戳；新聊天与元数据变更仍立即落盘。
     if (metadataChanged || now < this.lastPersistAt || now - this.lastPersistAt >= OBSERVATION_WRITE_INTERVAL_MS) {
       this.persist();
     }
@@ -116,70 +105,47 @@ export class ChannelConversationBindingStore {
     if (this.dirty) this.persist();
   }
 
-  bind(sessionId: string, conversationId: string, updatedAt = Date.now()): void {
-    const state = this.load();
-    if (!state.externalChats.some((chat) => chat.sessionId === sessionId)) {
-      throw new Error("Unknown external chat");
-    }
-    if (!conversationId || conversationId.length > 128) {
-      throw new Error("Invalid conversation id");
-    }
-    state.bindings = state.bindings.filter((binding) => binding.sessionId !== sessionId);
-    state.bindings.push({ sessionId, conversationId, updatedAt });
-    this.persist();
-  }
-
-  unbind(sessionId: string): boolean {
-    const state = this.load();
-    const next = state.bindings.filter((binding) => binding.sessionId !== sessionId);
-    if (next.length === state.bindings.length) return false;
-    state.bindings = next;
-    this.persist();
-    return true;
-  }
-
-  resolve(sessionId: string): string | null {
-    return this.load().bindings.find((binding) => binding.sessionId === sessionId)?.conversationId ?? null;
-  }
-
   list(): ChannelConversationBindingSnapshot {
     const state = this.load();
     return {
       externalChats: state.externalChats.map((chat) => ({ ...chat })),
-      bindings: state.bindings.map((binding) => ({ ...binding })),
     };
+  }
+
+  /**
+   * 忘掉若干会话观察记录并落盘（P3 擦除某人）。
+   *
+   * ⚠️ 调用方只允许传**私聊** sessionId：`externalChats` 同时是「记忆区块成员选择器」的
+   * 唯一数据源，群记录被删掉就等于区块选不出群了。本方法本身只按 sessionId 精确删除，
+   * 不做 chatType 判断也不做模糊匹配 —— 剩下的记录（尤其是群）原样保留并立即 persist()。
+   * 返回实际移除的条数；一个都没命中时不落盘（无脏写）。
+   */
+  forget(sessionIds: readonly string[]): number {
+    if (sessionIds.length === 0) return 0;
+    const doomed = new Set(sessionIds);
+    const state = this.load();
+    const before = state.externalChats.length;
+    state.externalChats = state.externalChats.filter((chat) => !doomed.has(chat.sessionId));
+    const removed = before - state.externalChats.length;
+    if (removed > 0) this.persist();
+    return removed;
   }
 
   private load(): PersistedBindingState {
     if (this.state) return this.state;
     try {
+      // 旧文件可能带 bindings 字段；这里只校验自己认识的字段，多余 key 直接忽略。
       const parsed = JSON.parse(fs.readFileSync(this.filePath, "utf8")) as Partial<PersistedBindingState>;
       if (parsed.version !== STORE_VERSION
         || !Array.isArray(parsed.externalChats)
-        || !parsed.externalChats.every(isExternalChat)
-        || !Array.isArray(parsed.bindings)
-        || !parsed.bindings.every(isBinding)) {
+        || !parsed.externalChats.every(isExternalChat)) {
         this.state = emptyState();
       } else {
-        const knownSessions = new Set(parsed.externalChats.map((chat) => chat.sessionId));
-        const boundSessionIds = new Set(
-          parsed.bindings
-            .filter(isBinding)
-            .map((binding) => binding.sessionId),
-        );
-        const boundChatCount = parsed.externalChats.filter((chat) => boundSessionIds.has(chat.sessionId)).length;
-        const unboundChats = parsed.externalChats.filter((chat) => !boundSessionIds.has(chat.sessionId));
-        const maxUnbound = Math.max(0, this.maxExternalChats - boundChatCount);
         this.state = {
           version: STORE_VERSION,
           externalChats: [...parsed.externalChats]
             .sort((a, b) => b.lastAt - a.lastAt)
-            .filter((chat) => boundSessionIds.has(chat.sessionId))
-            .concat(unboundChats
-              .sort((a, b) => b.lastAt - a.lastAt)
-              .slice(0, maxUnbound))
-            .sort((a, b) => b.lastAt - a.lastAt),
-          bindings: parsed.bindings.filter((binding) => knownSessions.has(binding.sessionId)),
+            .slice(0, this.maxExternalChats),
         };
       }
     } catch {

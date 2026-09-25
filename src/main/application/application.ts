@@ -15,6 +15,7 @@ import type { PreReadyResult } from "./pre-ready";
 import type { ShellResult } from "./shell-bootstrap";
 import type { CoreResult } from "./core-bootstrap";
 import type { BackgroundHandle } from "./background";
+import { isStartupAborted } from "./startup-abort";
 
 export interface ApplicationDependencies {
   app: Pick<App, "whenReady" | "quit" | "on" | "removeListener">;
@@ -83,6 +84,22 @@ export function createApplication(deps: ApplicationDependencies): Application {
     async handleFatalStartup(error: unknown): Promise<void> {
       if (fatalHandled) return;
       fatalHandled = true;
+
+      // 用户主动中止（如记忆格式升级时选了"退出应用"）：不是故障，不弹错误框。
+      if (isStartupAborted(error)) {
+        deps.logFatal(error);
+        const splash = context?.shell.splashWindow ?? shell?.splashWindow;
+        if (splash && !splash.isDestroyed()) {
+          try {
+            splash.close();
+          } catch { /* ignore */ }
+        }
+        await deps.shutdown.requestControlledShutdown({
+          reason: "startup-aborted",
+          finalAction: () => deps.app.quit(),
+        });
+        return;
+      }
 
       const phase = deps.readiness.getPhase();
       if (FATAL_CAPABLE_PHASES.includes(phase)) {

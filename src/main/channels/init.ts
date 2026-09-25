@@ -9,7 +9,9 @@
 //   - shutdownChannels()：停 adapter + inbound-server，并复位两个 flag
 //
 // 注意：startChannels 必须晚于 initRAG / initMcpManager / loadModelSettings。
-import { app, BrowserWindow } from "electron";
+import * as fs from "fs";
+import * as path from "path";
+import { app, BrowserWindow, dialog, shell } from "electron";
 import { IPC } from "../../shared/ipc-channels";
 import { createIpcScope, type IpcScope } from "../application/ipc-scope";
 import {
@@ -18,22 +20,35 @@ import {
 } from "./settings-store";
 import { channelManager } from "./manager";
 import type { MessageHandler } from "./types";
-import { getChannelConversationBindingStore } from "./conversation-binding-store";
-import { listSessions, getSession } from "../chats/chats-store";
-import {
-  bindContextConversation,
-  getContextBindingSnapshot,
-  unbindContextConversation,
-} from "./conversation-binding-api";
 import { startInboundServer, stopInboundServer } from "./inbound-server";
 import { FeishuAdapter } from "./adapters/feishu";
 import { ILinkBotAdapter, loadCredentials } from "./adapters/wechat/ilink-bot-adapter";
 import { NapCatAdapter } from "./adapters/qq/napcat-adapter";
 import { QqBotAdapter } from "./adapters/qqbot/qqbot-adapter";
 import { getRecentLog, clearLog, reloadLogFromDisk } from "./message-log";
+import {
+  clearAudit,
+  findAudit,
+  getAudit,
+  reloadAuditFromDisk,
+  subscribeAudit,
+  type ChannelAuditEntry,
+} from "./audit-log";
+import { parseKeywordLines } from "./keyword-policy";
+import { normalizeToolAccessConfig } from "./tool-access";
 import { logger, LogTag } from "../logger";
 
 const LOG = "[ChannelsInit]";
+
+/** 关键词 txt 导入的文件选择器（每行一个关键词）。 */
+const DIALOG_OPTIONS = {
+  title: "导入关键词文件",
+  properties: ["openFile" as const],
+  filters: [
+    { name: "文本文件", extensions: ["txt"] },
+    { name: "全部文件", extensions: ["*"] },
+  ],
+};
 
 let initialized = false;
 let started = false;
@@ -50,6 +65,8 @@ export function setChannelsConversationLifecycle(lifecycle: typeof conversationL
 let wxAdapter: ILinkBotAdapter | null = null;
 let qqAdapter: NapCatAdapter | null = null;
 let qqBotAdapter: QqBotAdapter | null = null;
+/** 工具审计的实时推送订阅（shutdown 时解除） */
+let auditUnsubscribe: (() => void) | null = null;
 
 export interface InitializeChannelsOptions {
   ipc?: IpcScope;
@@ -78,6 +95,8 @@ export function initializeChannels(options: InitializeChannelsOptions): void {
   if (initialized) return;
   initialized = true;
   reloadLogFromDisk();
+  reloadAuditFromDisk();
+  auditUnsubscribe = subscribeAudit((entry) => broadcastAudit(entry));
 
   // 将当前子系统的消息入口注入渠道管理器。
   channelManager.setDispatcher(async (msg) => {
@@ -146,6 +165,8 @@ export async function startChannels(signal?: AbortSignal): Promise<void> {
 export async function shutdownChannels(): Promise<void> {
   await channelManager.stopAll();
   await stopInboundServer();
+  auditUnsubscribe?.();
+  auditUnsubscribe = null;
   initialized = false;
   started = false;
 }
@@ -311,24 +332,82 @@ function registerChannelsIpc(
     return { ok: true };
   });
 
-  ipc.handle(IPC.CHANNELS_CONTEXT_BINDINGS_GET, () => {
-    return getContextBindingSnapshot(getChannelConversationBindingStore(), listSessions());
+  // 渠道控制台：白名单与权限 + 审计（工具调用 / 消息拦截 / 对话失败）
+  ipc.handle(IPC.CHANNELS_TOOL_ACCESS_GET, () => loadChannelsSettings().toolAccess);
+  ipc.handle(IPC.CHANNELS_TOOL_ACCESS_SAVE, (_e, patch: unknown) => {
+    const current = loadChannelsSettings().toolAccess;
+    const incoming = (patch ?? {}) as Partial<typeof current>;
+    // UI 可能只改总开关、只改名单、或只改某条权限；未传的字段保持原值，
+    // 避免把白名单清空。
+    const next = normalizeToolAccessConfig({
+      groupMemberGate: incoming.groupMemberGate ?? current.groupMemberGate,
+      toolGate: incoming.toolGate ?? current.toolGate,
+      entries: incoming.entries ?? current.entries,
+    });
+    saveChannelsSettings({ toolAccess: next });
+    reloadDispatcherSettings();
+    return next;
   });
-
-  ipc.handle(IPC.CHANNELS_CONTEXT_BIND, (_e, payload: unknown) => {
-    return bindContextConversation(
-      getChannelConversationBindingStore(),
-      payload,
-      (conversationId) => getSession(conversationId) !== null,
-    );
+  ipc.handle(IPC.CHANNELS_AUDIT_GET, (_e, limit: unknown) => {
+    const n = typeof limit === "number" && limit > 0 ? Math.min(limit, 500) : 200;
+    return getAudit(n);
   });
-
-  ipc.handle(IPC.CHANNELS_CONTEXT_UNBIND, (_e, sessionId: unknown) => {
-    return unbindContextConversation(getChannelConversationBindingStore(), sessionId);
+  ipc.handle(IPC.CHANNELS_AUDIT_CLEAR, () => {
+    clearAudit();
+    return { ok: true };
+  });
+  // 详情页「查看完整内容」：直接用系统默认程序打开该条的日志文件
+  ipc.handle(IPC.CHANNELS_AUDIT_OPEN_LOG, async (_e, id: unknown) => {
+    const entry = typeof id === "string" ? findAudit(id) : null;
+    if (!entry) return { ok: false, error: "找不到该条审计记录（可能已被清空）" };
+    if (!entry.logPath) return { ok: false, error: "该条记录没有日志文件" };
+    try {
+      const error = await shell.openPath(entry.logPath);
+      return error ? { ok: false, error, path: entry.logPath } : { ok: true, path: entry.logPath };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err), path: entry.logPath };
+    }
+  });
+  ipc.handle(IPC.CHANNELS_AUDIT_REVEAL_LOG, (_e, id: unknown) => {
+    const entry = typeof id === "string" ? findAudit(id) : null;
+    if (!entry?.logPath) return { ok: false, error: "该条记录没有日志文件" };
+    try {
+      shell.showItemInFolder(entry.logPath);
+      return { ok: true, path: entry.logPath };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err), path: entry.logPath };
+    }
+  });
+  // 关键词配置：偏好设置页读写（拦截词 / 触发词）
+  ipc.handle(IPC.CHANNELS_KEYWORDS_IMPORT_TXT, async () => {
+    try {
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      const result = win
+        ? await dialog.showOpenDialog(win, DIALOG_OPTIONS)
+        : await dialog.showOpenDialog(DIALOG_OPTIONS);
+      if (result.canceled || result.filePaths.length === 0) return { ok: false, canceled: true };
+      const file = result.filePaths[0];
+      const text = fs.readFileSync(file, "utf8");
+      return { ok: true, keywords: parseKeywordLines(text), fileName: path.basename(file) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 }
 
-/** 工具：把所有 BrowserWindow 广播 channels 状态变更（UI 轮询用）。 */
+/** 工具：把新产生的渠道审计推送给所有窗口（「控制台」实时刷新）。 */
+export function broadcastAudit(entry: ChannelAuditEntry): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    try {
+      win.webContents.send(IPC.CHANNELS_AUDIT_APPENDED, entry);
+    } catch (err) {
+      console.warn(LOG, "广播渠道审计失败:", err);
+    }
+  }
+}
+
+/** 工具：把所有 BrowserWindow 广播渠道状态变更（UI 轮询用）。 */
 export function broadcastChannelsStatus(): void {
   const status = channelManager.getAllStatus();
   for (const win of BrowserWindow.getAllWindows()) {

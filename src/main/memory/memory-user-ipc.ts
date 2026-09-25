@@ -1,4 +1,4 @@
-import { dialog } from "electron";
+import { app, dialog } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { IPC } from "../../shared/ipc-channels";
@@ -6,6 +6,15 @@ import { createIpcScope, type IpcScope } from "../application/ipc-scope";
 import { getStickerManagerConfig, setStickerEnabled } from "../orchestrator/sticker-settings";
 import { addUserSticker, deleteUserSticker } from "../sticker-storage";
 import { loadMemoryPanelData } from "./panel";
+import { deleteAllMemory } from "./memory-deletion";
+import {
+  type MemoryManagerView,
+  deleteMemoryManager,
+  listMemoryManager,
+  queryMemoryManager,
+  traceMemorySource,
+} from "./memory-console";
+import { executePersonErase, previewPersonErase } from "./person-erasure";
 import { deleteImportedDoc } from "../rag";
 import { loadUserProfile, saveUserProfile, getAvatarPath } from "../settings-store";
 import { addMcpServer, removeMcpServer, listMcpServers } from "../orchestrator/mcp-manager";
@@ -45,6 +54,11 @@ function broadcastToAuxWindows(channel: string, payload: unknown): void {
 
 const L0_EDITABLE_KEYS = ["preferredName", "occupation", "longTermInterests", "language", "permanentNote"];
 const L1_EDITABLE_KEYS = ["recentGoals", "recentPreferences", "currentProject"];
+
+/** 记忆管理控制台的三个视图；非法值一律回落到「按人」。 */
+function normalizeManagerView(value: unknown): MemoryManagerView {
+  return value === "zones" || value === "sessions" ? value : "people";
+}
 
 export function registerMemoryUserToolIpc(deps: MemoryUserToolIpcDependencies): void {
   const { embeddingIndexService } = deps;
@@ -138,6 +152,76 @@ export function registerMemoryUserToolIpc(deps: MemoryUserToolIpcDependencies): 
 
   // Memory panel
   ipc.handle(IPC.MEMORY_PANEL_GET_DATA, () => loadMemoryPanelData());
+
+  // 删除全部记忆。
+  // 删除后进程内还有 memoryStore / entityGraph / JsonVectorStore 三处缓存，
+  // 不重启就会把旧数据写回磁盘 → 一律要求重启（UI 提供"立即重启"）。
+  ipc.handle(IPC.MEMORY_DELETE_ALL, () => {
+    const result = deleteAllMemory();
+    return {
+      ok: result.failed.length === 0,
+      deleted: result.deleted,
+      failed: result.failed,
+      restartRequired: true,
+    };
+  });
+
+  ipc.handle(IPC.APP_RESTART, () => {
+    app.relaunch();
+    app.quit();
+    return { ok: true };
+  });
+
+  // ── 记忆管理控制台（Phase 3 P3 §3.16） ──
+  //
+  // 六条通道的服务端。三个"只读"（list / query / trace）+ 一个级联删除 + 两个擦除。
+  // ⚠️ `MEMORY_ERASE_PERSON` **不进 `restartRequired` 流程**：擦除全程走内存缓存失效
+  // （memoryStore 原地 mutate、l2DmaeManager.loadStates()、entityGraph 原地移除、
+  // vectorstore 自带 markIndexDirty），这是与「删除全部记忆」最大的体验差别。
+  ipc.handle(IPC.MEMORY_MANAGER_LIST, async (_event, payload: { view?: string }) => {
+    const view = normalizeManagerView(payload?.view);
+    return listMemoryManager(view);
+  });
+
+  ipc.handle(IPC.MEMORY_MANAGER_QUERY, async (_event, payload: { view?: string; key?: string }) => {
+    const view = normalizeManagerView(payload?.view);
+    const key = typeof payload?.key === "string" ? payload.key : "";
+    return queryMemoryManager(view, key);
+  });
+
+  ipc.handle(IPC.MEMORY_MANAGER_DELETE, async (_event, payload: {
+    ids?: unknown;
+    view?: unknown;
+    key?: unknown;
+  }) => {
+    const ids = Array.isArray(payload?.ids)
+      ? payload.ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+      : [];
+    const view = payload?.view === undefined ? undefined : normalizeManagerView(payload.view);
+    const key = typeof payload?.key === "string" ? payload.key : undefined;
+    return deleteMemoryManager({ ids, view, key });
+  });
+
+  // 预演：只读。解析不出 personKey 时抛错 —— UI 必须能区分"预演失败"与"没有可删的东西"。
+  ipc.handle(IPC.MEMORY_ERASE_PREVIEW, async (_event, payload: { personKey?: string }) => {
+    const personKey = typeof payload?.personKey === "string" ? payload.personKey : "";
+    if (!personKey) throw new Error("缺少 personKey");
+    return previewPersonErase(personKey);
+  });
+
+  // 执行擦除。可能跑几十秒，UI 侧要有 loading 态。
+  ipc.handle(IPC.MEMORY_ERASE_PERSON, async (_event, payload: { personKey?: string; previewId?: string }) => {
+    const personKey = typeof payload?.personKey === "string" ? payload.personKey : "";
+    const previewId = typeof payload?.previewId === "string" ? payload.previewId : "";
+    if (!personKey || !previewId) throw new Error("缺少 personKey 或 previewId");
+    return executePersonErase(personKey, previewId);
+  });
+
+  ipc.handle(IPC.MEMORY_TRACE_SOURCE, async (_event, payload: { memoryId?: string }) => {
+    const memoryId = typeof payload?.memoryId === "string" ? payload.memoryId : "";
+    if (!memoryId) return { entries: [], missing: true };
+    return traceMemorySource(memoryId);
+  });
 
   ipc.handle(IPC.MEMORY_PANEL_DELETE_IMPORTED_DOC, (_event, payload: { importId: string; fileName?: string }) => {
     const deleted = deleteImportedDoc(payload.importId, payload.fileName);

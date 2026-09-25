@@ -1,0 +1,552 @@
+/* ===== 模型面板 · API 配置区（原设置窗口「API 设置」面板的 React 版） =====
+   视觉语言与 ModelModePanel.css 对齐：同样的 --cy-* 变量、圆角与强调色。 */
+
+.api-config {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-sizing: border-box;
+  padding: 18px 28px 32px;
+  border-top: 1px solid var(--cy-border, #f2f2f2);
+  background: var(--cy-bg-workspace, #fff);
+  user-select: none;
+  /* 保持自然高度，不参与压缩：滚动由外层 .model-panel 统一负责 */
+  flex: 0 0 auto;
+}
+
+.api-config--loading {
+  padding: 40px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.api-config__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.api-config__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.api-config__subtitle,
+.api-config__section-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.api-config__section-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--cy-text, #1d1d1f);
+}
+
+/* ── 已保存档案 ─────────────────────────────────────────── */
+
+.api-config__profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.api-config__profiles-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.api-config__profile-count {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.api-config__profile-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+@media (max-width: 760px) {
+  .api-config__profile-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.api-config__profile-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--cy-bg-page, #f8f7f6);
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  font: inherit;
+}
+
+.api-config__profile-card:hover {
+  border-color: var(--cy-pill-border, #ff9fbd);
+}
+
+.api-config__profile-card.is-active {
+  border-color: var(--cy-accent, #ff5b8a);
+  background: var(--cy-bg-active, #fde0ed);
+}
+
+.api-config__profile-name {
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cy-text, #1d1d1f);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.api-config__profile-meta {
+  max-width: 100%;
+  font-size: 11px;
+  color: var(--cy-text-muted, #8e8e93);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.api-config__profile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.api-config__badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--cy-accent, #ff5b8a);
+  background: var(--cy-bg-active, #fde0ed);
+  border-radius: 999px;
+}
+
+.api-config__badge--vision {
+  color: #7d3557;
+  background: var(--cy-pill-bg, #fff9fb);
+  border: 1px solid var(--cy-pill-border, #ff9fbd);
+}
+
+.api-config__empty {
+  grid-column: 1 / -1;
+  padding: 18px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--cy-text-muted, #8e8e93);
+  background: var(--cy-bg-page, #f8f7f6);
+  border-radius: 12px;
+}
+
+/* ── 表单基础 ───────────────────────────────────────────── */
+
+.api-config__form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.api-config__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+@media (max-width: 760px) {
+  .api-config__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.api-config__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.api-config__field--full {
+  grid-column: 1 / -1;
+}
+
+.api-config__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.api-config__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.api-config__input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--cy-text, #1d1d1f);
+  background: var(--cy-bg-page, #f8f7f6);
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.api-config__input:focus {
+  border-color: var(--cy-pill-border, #ff9fbd);
+  box-shadow: 0 0 0 3px rgba(255, 91, 138, 0.1);
+}
+
+.api-config__hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.api-config__website-link {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--cy-accent, #ff5b8a);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.api-config__website-link:hover {
+  text-decoration: underline;
+}
+
+.api-config__icon-btn {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  font-size: 14px;
+  color: var(--cy-text-muted, #8e8e93);
+  background: var(--cy-bg-page, #f8f7f6);
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.api-config__icon-btn:hover {
+  color: var(--cy-accent, #ff5b8a);
+  border-color: var(--cy-pill-border, #ff9fbd);
+}
+
+/* ── 预设 / 协议卡片 ─────────────────────────────────────── */
+
+.api-config__preset-cards,
+.api-config__transport-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.api-config__preset-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  font: inherit;
+  background: var(--cy-bg-page, #f8f7f6);
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.api-config__preset-card:hover:not(:disabled) {
+  border-color: var(--cy-pill-border, #ff9fbd);
+}
+
+.api-config__preset-card.is-active {
+  border-color: var(--cy-accent, #ff5b8a);
+  background: var(--cy-bg-active, #fde0ed);
+}
+
+.api-config__preset-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.api-config__preset-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.api-config__preset-logo img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.api-config__preset-name {
+  font-size: 12.5px;
+  color: var(--cy-text, #1d1d1f);
+  white-space: nowrap;
+}
+
+/* ── 自定义端点说明卡 ────────────────────────────────────── */
+
+.api-config__custom-endpoint {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--cy-bg-page, #f8f7f6);
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 12px;
+}
+
+.api-config__custom-endpoint-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.api-config__custom-endpoint-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.api-config__custom-endpoint-mode {
+  display: flex;
+  flex-shrink: 0;
+  padding: 2px;
+  background: var(--cy-bg-workspace, #fff);
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 999px;
+}
+
+.api-config__mode-btn {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--cy-text-muted, #8e8e93);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.api-config__mode-btn.is-active {
+  color: #fff;
+  background: var(--cy-accent, #ff5b8a);
+}
+
+/* ── 开关行 / 覆盖选项 ───────────────────────────────────── */
+
+.api-config__switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--cy-bg-page, #f8f7f6);
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 12px;
+}
+
+.api-config__switch-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.api-config__switch {
+  flex-shrink: 0;
+  width: 34px;
+  height: 18px;
+  appearance: none;
+  background: var(--cy-border, #f2f2f2);
+  border-radius: 999px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+.api-config__switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+
+.api-config__switch:checked {
+  background: var(--cy-accent, #ff5b8a);
+}
+
+.api-config__switch:checked::after {
+  transform: translateX(16px);
+}
+
+.api-config__overrides {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--cy-bg-page, #f8f7f6);
+  border: 1px dashed var(--cy-border, #f2f2f2);
+  border-radius: 12px;
+}
+
+.api-config__overrides-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.api-config__overrides .api-config__switch-row {
+  background: var(--cy-bg-workspace, #fff);
+}
+
+/* ── 视觉模型 / 说明 / 按钮 ──────────────────────────────── */
+
+.api-config__note {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--cy-text-muted, #8e8e93);
+  background: var(--cy-bg-page, #f8f7f6);
+  border-radius: 10px;
+}
+
+.api-config__vision {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 12px;
+}
+
+.api-config__vision-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.api-config__vision-body .api-config__grid {
+  width: 100%;
+}
+
+.api-config__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.api-config__status {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.api-config__status.is-ok {
+  color: #1f9d55;
+}
+
+.api-config__status.is-error {
+  color: #ff453a;
+}
+
+.api-config__action {
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.api-config__action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.api-config__action--primary {
+  color: #fff;
+  background: var(--cy-accent, #ff5b8a);
+}
+
+.api-config__action--primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.api-config__action--ghost {
+  color: var(--cy-text, #1d1d1f);
+  background: var(--cy-bg-page, #f8f7f6);
+  border-color: var(--cy-border, #f2f2f2);
+}
+
+.api-config__action--ghost:hover:not(:disabled) {
+  color: var(--cy-accent, #ff5b8a);
+  border-color: var(--cy-pill-border, #ff9fbd);
+}
+
+.api-config__action--danger {
+  color: #ff453a;
+  background: rgba(255, 69, 58, 0.08);
+  border-color: rgba(255, 69, 58, 0.24);
+}
+
+.api-config__action--danger:hover:not(:disabled) {
+  background: rgba(255, 69, 58, 0.14);
+}

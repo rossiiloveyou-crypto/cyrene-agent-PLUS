@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { BrowserWindow } from "electron";
 import type { IpcScope } from "../application/ipc-scope";
-import { IPC } from "../../shared/ipc-channels";
 import type { PluginPromptMode, PluginTurnStatus } from "../../plugins/api";
 import { loadGeneralSettings } from "../settings/settings-facade";
 import { loadModelSettings, loadVisionConfig, resolveModelSettingsProfile } from "../settings/model-settings";
@@ -19,13 +18,15 @@ import type { TtsSynthesisService } from "../services/tts/tts-synthesis-service"
 import { buildChannelAttachmentInputs } from "./agent-input";
 import { loadChannelsSettings } from "./settings-store";
 import { enforceChannelAgentPolicy, resolveChannelAgentPolicy } from "./agent-policy";
-import { appendMessage, getSession, listSessions } from "../chats/chats-store";
+import { applyChannelToolGuard } from "./tool-guard";
+import { recordTurnFailure, recordTurnSuccess } from "./audit-events";
+import { runWithConversationScope } from "../conversation-usage-store";
+import { buildPersonKey } from "../memory/person-attribution";
 import { getChannelConversationBindingStore } from "./conversation-binding-store";
 import { ChannelDispatcher, type DispatcherDeps } from "./dispatcher";
 import {
   createChannelContext,
   formatChannelUserText,
-  type BoundConversationMessageMetadata,
 } from "./channel-context";
 import { appendHistory, migrateHistory } from "./history-log";
 import { createKeyedQueue } from "./keyed-queue";
@@ -67,6 +68,23 @@ export interface ChannelsSubsystemDeps {
   publishLifecycle?: LifecyclePublisher;
 }
 
+/** 轮次终态 → 控制台里可读的失败原因。 */
+function describeTerminal(status: string, reason?: string): string {
+  const suffix = reason ? `（${reason}）` : "";
+  switch (status) {
+    case "timeout":
+      return reason === "max_rounds"
+        ? `对话超时：达到最大轮次${suffix}`
+        : `对话超时${suffix}`;
+    case "cancelled":
+      return `对话被取消${suffix}`;
+    case "runtime_error":
+      return `运行时错误${suffix}`;
+    default:
+      return `非成功终态：${status}${suffix}`;
+  }
+}
+
 /**
  * 组装渠道子系统。构造期只创建对象并连接依赖，
  * 不做任何初始化/启动 —— initialize / start / shutdown 必须显式调用。
@@ -77,7 +95,9 @@ export function createChannelsSubsystem(
 ): ChannelsSubsystem {
   const loadRecentChannelHistory = async (sessionId: string, limit: number) => {
     const { loadRecentHistory } = await import("./history-log");
-    return loadRecentHistory(sessionId, limit);
+    // 滑动窗口只放正式对话轮；未触发昔涟的群友发言交给
+    // buildAlwaysOnContext 的【群聊近期上下文】块，避免同一批消息注入两遍。
+    return loadRecentHistory(sessionId, limit, { conversationOnly: true });
   };
 
   const observeExternalChat: DispatcherDeps["observeExternalChat"] = (sessionId, msg) => {
@@ -91,78 +111,39 @@ export function createChannelsSubsystem(
     });
   };
 
-  const resolveBoundConversationId = (sessionId: string): string | null => {
-    const conversationId = getChannelConversationBindingStore().resolve(sessionId);
-    return conversationId && listSessions().some((session) => session.id === conversationId) ? conversationId : null;
-  };
-
-  const loadBoundConversationHistory = async (conversationId: string, limit: number) => {
-    const session = getSession(conversationId);
-    if (!session) return [];
-    return session.messages
-      .filter((message) => (message.role === "user" || message.role === "model") && message.content.trim().length > 0)
-      .slice(-limit)
-      .map((message) => ({
-        role: message.role === "model" ? "assistant" as const : "user" as const,
-        content: message.modelContext?.trim() || message.content,
-      }));
-  };
-
-  const appendBoundConversationMessage = (
-    conversationId: string,
-    role: "user" | "assistant",
-    content: string,
-    metadata: BoundConversationMessageMetadata,
-  ) => {
-    const session = appendMessage(conversationId, {
-      id: randomUUID(),
-      role: role === "assistant" ? "model" : "user",
-      content,
-      at: Date.now(),
-      modelContext: metadata.modelContext,
-      sticker: metadata.sticker,
-      channelSource: {
-        channel: metadata.channel,
-        chatType: metadata.chatType,
-        senderName: metadata.senderName,
-      },
-    });
-    if (!session) throw new Error("Bound conversation no longer exists");
-    const win = deps.getReactChatWindow();
-    if (win && !win.isDestroyed()) {
-      try {
-        win.webContents.send(IPC.CHATS_CHANGED);
-      } catch (err) {
-        console.warn("[Channels] bound conversation refresh failed:", err);
-      }
-    }
-  };
-
   const buildAndRunAgent: DispatcherDeps["buildAndRunAgent"] = async (
     msg,
     sessionId,
     priorMessages,
+    userMessageId,
   ) => {
     const channelResult: { text: string; sticker: string | null } = { text: "", sticker: null };
 
+    // P2 归属：说话人的稳定标识。
+    // 组合点放在这里，因为只有这一层同时持有 channel 与 senderId
+    //（私聊与群聊都有值，不依赖 transcript 的 speakerId —— 私聊不写那个字段）。
+    const personKey = buildPersonKey(msg.channel, msg.senderId);
+
     const sandbox = loadChannelsSettings().toolSandbox;
-    const policy = resolveChannelAgentPolicy(sandbox, {
-      channel: msg.channel,
-      chatType: msg.chatType,
-    });
+    const policy = resolveChannelAgentPolicy(sandbox);
     const allTools = toolRegistry.getEnabledTools();
     const exposedTools = policy.exposeTools ? allTools : [];
     console.log(
       "[Channels] bot run:",
-      `msg.channel=${msg.channel} sandbox=${sandbox} tools=${exposedTools.length}/${allTools.length} priorMsgs=${priorMessages?.length ?? 0}`,
+      `msg.channel=${msg.channel} chatType=${msg.chatType} sandbox=${sandbox} tools=${exposedTools.length}/${allTools.length} priorMsgs=${priorMessages?.length ?? 0}`,
     );
 
+    // 群聊历史在 history-log 里已被剥掉 `[群聊发送者：…]` 前缀（结构化到 speakerName），
+    // 这里必须把说话人补回正文，否则多人群聊里"谁说的"会丢失，全部看起来像请求方说的。
     const historyMessages = (priorMessages ?? [])
       .filter((m) => typeof m.content === "string" && m.content.trim().length > 0)
-      .map((m) => ({
-        role: m.role as "user" | "assistant" | "system",
-        content: m.content,
-      }));
+      .map((m) => {
+        const speaker = m.speakerName || m.speakerId;
+        return {
+          role: m.role as "user" | "assistant" | "system",
+          content: speaker ? `[${speaker}]: ${m.content}` : m.content,
+        };
+      });
 
     // 图片发送策略也基于解析后的配置（默认档案）——顶层镜像可能是全空的空壳
     const channelModelSettings = resolveModelSettingsProfile(loadModelSettings());
@@ -204,15 +185,31 @@ export function createChannelsSubsystem(
       attachments: attachmentInputs.attachments,
       imageAttachments: attachmentInputs.imageAttachments,
       channel: msg.channel,
+      chatType: msg.chatType ?? "private",
       executionMode: policy.executionMode,
       ...(policy.executionMode === "chat" ? {
         userTurnId: `${msg.channel}:${msg.senderId}:${msg.at.toISOString()}:user`,
         assistantTurnId: `${msg.channel}:${msg.senderId}:${msg.at.toISOString()}:assistant`,
       } : {}),
     });
-    options.tools = policy.exposeTools
+    // 工具白名单在「执行层」逐次判定：非白名单用户的调用会被拦截并写入
+    // 「工具调用控制台」审计，所以模型仍然看得到工具目录。
+    const grantedTools = policy.exposeTools
       ? [...(options.capabilities?.tools ?? exposedTools)]
       : [];
+    const channelTools = applyChannelToolGuard(grantedTools, {
+      channel: msg.channel,
+      chatType: msg.chatType ?? "private",
+      chatId: msg.chatId,
+      senderId: msg.senderId,
+      ...(msg.senderName ? { senderName: msg.senderName } : {}),
+      sessionId,
+    });
+    options.tools = channelTools;
+    // run-preparation 优先读 capabilities.tools，这里必须一起换掉，否则守卫被绕过。
+    if (options.capabilities) {
+      options.capabilities = { ...options.capabilities, tools: channelTools };
+    }
     enforceChannelAgentPolicy(options, policy);
 
     const threadId = `thread-${sessionId}-${Date.now()}`;
@@ -230,30 +227,84 @@ export function createChannelsSubsystem(
       mode,
     });
     let lifecycleStatus: PluginTurnStatus = "runtime_error";
+    // 轮次级审计主体（成功/失败都记在这里，失败永远记，成功由控制台开关决定）
+    const auditSubject = {
+      channel: msg.channel,
+      chatType: msg.chatType ?? "private",
+      chatId: msg.chatId,
+      senderId: msg.senderId,
+      ...(msg.senderName ? { senderName: msg.senderName } : {}),
+      sessionId,
+      ...(msg.trigger ? { trigger: msg.trigger } : {}),
+    };
     try {
       const reply = await new Promise<string>((resolve, reject) => {
-        agent.runWithEvents(options).subscribe({
+        // 渠道轮次同样归属到自己的渠道会话（绑定桌面会话时用量徽章也能看到这部分消耗）
+        runWithConversationScope(sessionId, () => agent.runWithEvents(options).subscribe({
           complete: () => {
             resolve(agent.lastResult?.reply ?? "");
           },
           error: (err) => reject(err instanceof Error ? err : new Error(String(err))),
-        });
+        }));
       });
       lifecycleStatus = agent.lastResult?.terminal?.status ?? "success";
       channelResult.text = reply;
       // Observable 在超时终态下也会正常 complete；只有成功终态才能进入记忆、表情等成功收尾。
       const terminalStatus = agent.lastResult?.terminal?.status;
+      const runDurationMs = Date.now() - runStartedAt;
       if (agent.lastResult && (terminalStatus === undefined || terminalStatus === "success")) {
         const finished = await deps.agentRuntime.onRunFinished(agent.lastResult, agentUserText, {
           source: "channel",
           mode,
           conversationId: sessionId,
           channel: msg.channel,
+          // P2 归属：沿 build-options → memory-scheduler 透传到 L2 落库。
+          // ⚠️ 这里在 runWithConversationScope 之外，ALS 已经退出，必须显式透传。
+          personKey,
+          ...(msg.senderName ? { speakerName: msg.senderName } : {}),
+          ...(userMessageId ? { userMessageId } : {}),
+          chatType: msg.chatType ?? "private",
         });
         channelResult.sticker = finished.sticker;
       }
+      // 失败轮次（超时/取消/运行时错误）与可选的成功轮次都写进控制台
+      try {
+        if (terminalStatus && terminalStatus !== "success") {
+          recordTurnFailure(auditSubject, {
+            userText: agentUserText,
+            reply,
+            reason: describeTerminal(terminalStatus, agent.lastResult?.terminal?.reason),
+            detail: agent.lastResult?.terminal?.reason
+              ? `terminal.status=${terminalStatus}\nterminal.reason=${agent.lastResult.terminal.reason}`
+              : `terminal.status=${terminalStatus}`,
+            durationMs: runDurationMs,
+          });
+        } else if (loadChannelsSettings().audit.recordSuccessTurns) {
+          recordTurnSuccess(auditSubject, {
+            userText: agentUserText,
+            reply,
+            durationMs: runDurationMs,
+          });
+        }
+      } catch (auditError) {
+        console.warn("[Channels] 写轮次审计失败:", auditError);
+      }
       void indexConversationTurn(sessionId, agentUserText, reply);
       return channelResult;
+    } catch (error) {
+      // 智能体调用异常：同样记一条失败轮次，便于在控制台看到"哪句话把昔涟弄崩了"
+      try {
+        const message = error instanceof Error ? error.message : String(error);
+        recordTurnFailure(auditSubject, {
+          userText: agentUserText,
+          reason: `智能体调用异常：${message}`,
+          detail: error instanceof Error ? (error.stack ?? message) : message,
+          durationMs: Date.now() - runStartedAt,
+        });
+      } catch (auditError) {
+        console.warn("[Channels] 写失败轮次审计失败:", auditError);
+      }
+      throw error;
     } finally {
       // 无论成功、超时还是异常退出，轮次结束事件都要发布一次
       deps.publishLifecycle?.publishTurnFinished({
@@ -273,26 +324,9 @@ export function createChannelsSubsystem(
     return await deps.ttsSynthesisService.synthesizeChannelTts(text, cfg, context.channel);
   };
 
-  const broadcastChat: DispatcherDeps["broadcastChat"] = (event) => {
-    const win = deps.getReactChatWindow();
-    if (!win || win.isDestroyed()) return;
-    try {
-      win.webContents.send(IPC.AGUI_EVENT, {
-        type: "CUSTOM",
-        name: "cyrene.botMessage",
-        value: event,
-      });
-    } catch (err) {
-      console.warn("[Channels] botMessage 广播失败:", err);
-    }
-  };
-
   const context = createChannelContext({
-    resolveBoundConversationId,
     loadRecentChannelHistory,
-    loadBoundConversationHistory,
     appendChannelHistory: appendHistory,
-    appendBoundConversationMessage,
     migrateHistory,
   });
   const baseComposer = createOutgoingComposer({ synthesizeTts });
@@ -320,7 +354,6 @@ export function createChannelsSubsystem(
     loadSettings: loadChannelsSettings,
     loadGeneralSettings,
     observeExternalChat,
-    broadcastChat,
   });
 
   // 默认生命周期：委托到 init.ts 的显式操作（幂等）

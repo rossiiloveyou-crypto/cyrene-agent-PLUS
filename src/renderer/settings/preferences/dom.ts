@@ -1,4 +1,4 @@
-// Preferences 面板 DOM 引用（Sticker 子区）
+// Preferences 面板 DOM 引用（Sticker 子区 + 关键词子区）
 // 从 settings.ts 抽离。ESM 静态导入保证查询在 settings.ts 顶层代码之前执行。
 
 export const stickerEnabledInput = document.getElementById("sticker-enabled") as HTMLInputElement;
@@ -14,3 +14,12 @@ export const stickerAddPhrases = document.getElementById("sticker-add-phrases") 
 export const stickerAddError = document.getElementById("sticker-add-error") as HTMLElement;
 export const stickerAddConfirm = document.getElementById("sticker-add-confirm") as HTMLButtonElement;
 export const stickerAddCancel = document.getElementById("sticker-add-cancel") as HTMLButtonElement;
+
+// ── 拦截关键词 / 触发关键词 ──
+export const interceptKeywordsInput = document.getElementById("intercept-keywords") as HTMLTextAreaElement | null;
+export const interceptKeywordsImportBtn = document.getElementById("intercept-keywords-import") as HTMLButtonElement | null;
+export const interceptKeywordsClearBtn = document.getElementById("intercept-keywords-clear") as HTMLButtonElement | null;
+export const interceptKeywordsStatusEl = document.getElementById("intercept-keywords-status") as HTMLElement | null;
+export const triggerKeywordsInput = document.getElementById("trigger-keywords") as HTMLTextAreaElement | null;
+export const triggerKeywordsImportBtn = document.getElementById("trigger-keywords-import") as HTMLButtonElement | null;
+export const triggerKeywordsStatusEl = document.getElementById("trigger-keywords-status") as HTMLElement | null;

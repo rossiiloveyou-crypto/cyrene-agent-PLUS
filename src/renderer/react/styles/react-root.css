@@ -110,10 +110,25 @@ html, body {
   transition: left 0.25s ease;
 }
 
-.cy-page-windows {
+/* 右上角分组：用量徽章 + 窗口控件。
+   两者是同一行的 flex 兄弟节点，因此无论用量徽章显示与否、文字多长，
+   都不会被最小化/最大化/关闭按钮压住（旧版用两个独立绝对定位元素，右侧固定
+   right: 96px 的徽章会被右侧固定 right: 20px 的控件盖住）。 */
+.cy-page-top-right {
   position: absolute;
   top: 10px;
   right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 220px);
+}
+
+/* 顶栏「用量」徽章：位于模式切换与窗口控件之间 */
+.cy-page-usage {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 /* 用户头像与设置按钮已移入 .cy-page-sidebar-bottom */

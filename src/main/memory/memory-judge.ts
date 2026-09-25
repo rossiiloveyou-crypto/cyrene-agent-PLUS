@@ -1,4 +1,5 @@
 import { MemoryCandidate, L0_FIELD_DESCRIPTIONS, MemoryJudgeTurn } from "./memory-types"
+import { appendMemoryTrace } from "./memory-trace"
 import { invokeMemoryStructuredOutput, getDefaultMaxOutputTokens } from "./memory-llm-client"
 import { loadMemoryModelConfig } from "./memory-llm-shared"
 import { parseMemoryJudgeResult, validateMemoryJudgeBusiness, MemoryJudgeResult } from "./memory-schemas"
@@ -21,23 +22,71 @@ function postFilterCandidates(candidates: MemoryCandidate[]): MemoryCandidate[] 
     .filter((item) => !hasUnsupportedAbsolute(item.summary ?? item.content, item.evidenceQuotes ?? []))
 }
 
+export interface MemoryJudgeOptions {
+  /**
+   * 本批对话来自非 root 域（群聊 / 独立会话）时为 true：
+   * 提示词里明确只允许 L2 候选（L0/L1 在该域必然被 writeMemory 丢弃）。
+   * 缺省 false = 与 P2 之前完全一致的行为。
+   */
+  l2Only?: boolean
+}
+
 export class MemoryJudge {
   private buildL0FieldPrompt(): string {
     return Object.entries(L0_FIELD_DESCRIPTIONS)
       .map(([field, description]) => `  · ${field}：${description}`)
       .join('\n')
   }
+
+  /**
+   * 非 root 域（群聊 / 未归区的独立会话）的判定补充规则。
+   *
+   * 为什么要在**提示词里**说，而不是只在写盘时丢弃：
+   * `memory-manager.writeMemory` 已经有一道 `!isOwnerScope(scope) → continue`，
+   * 群聊里产出的 L0/L1 候选**本来就会被打回**。但 LLM 并不知道这一点，它会把
+   * 输出预算浪费在这些注定被丢弃的候选上 —— judge 的 maxOutputTokens 只有 800，
+   * 一旦被 L1 占满，真正要留的 L2（带 subjectNames）就会被截断成非法 JSON，
+   * 整个判定失败（实测：4 轮群聊 → 2 条 L1 → 被丢弃 → l2 = 0 条）。
+   * 所以在调用前就告诉它"这个域只有 L2 有意义"。
+   */
+  private buildNonRootScopeRules(): string[] {
+    return [
+      "",
+      "⚠️ 本批对话**不在主人（root）域**（来自群聊或独立会话），因此：",
+      "- 只能输出 layer=\"L2\" 的候选；**禁止输出 L0 / L1**。",
+      "  画像与近况只属于主人：非 root 域里的 L0 / L1 候选会被系统直接丢弃，输出它们等于白白浪费这次调用。",
+      "- 把每一位发言人都当成「这段对话里的一个具体的人」，**不要**把他当成「用户」或「主人」。",
+      "- 关于某个具体的人（例如小明）的事，就是一条正常的 L2 片段，照常输出 subjectNames 与 sourceTurnIndexes。",
+    ]
+  }
   async judgeRecentTurns(
     turns: MemoryJudgeTurn[],
     conversationId: string,
+    options: MemoryJudgeOptions = {},
   ): Promise<MemoryJudgeResult> {
     console.log(`[PMRS/Judge] 分析最近 ${turns.length} 轮对话...`)
+    // judge 是唯一一个"跑了但可能什么都不写盘"的环节：候选为空、被后置过滤拦掉、
+    // LLM 调用失败三条路径在磁盘上完全同形。手测/线上排查时无法区分，
+    // 所以这里把每次判定的结局落进记忆 trace（memory-trace.log）。
+    appendMemoryTrace({
+      op: "judge.run",
+      layer: "L2",
+      status: "ok",
+      details: { conversationId, turns: turns.length },
+    })
 
     try {
       const config = loadMemoryModelConfig()
       if (!config.apiKey) {
         console.error("[PMRS/Judge] LLM 调用失败: missing api key")
         console.log("[PMRS/Judge] 本轮无值得记录的信息")
+        appendMemoryTrace({
+          op: "judge.error",
+          layer: "L2",
+          status: "error",
+          error: "missing api key",
+          details: { conversationId },
+        })
         return { candidates: [], entities: [] }
       }
 
@@ -61,6 +110,7 @@ export class MemoryJudge {
         "- 近况 (L1)：用户近期目标或阶段性偏好，只能写近期状态，不要写成长期偏好。",
         "  识别到近况信息时，必须在 field 字段指定写入哪个格子，可用值：recentGoals / recentPreferences / currentProject。",
         "- 片段 (L2)：具体事件、经历、局部偏好、情绪背景、待观察信息。",
+        ...(options.l2Only ? this.buildNonRootScopeRules() : []),
         "",
         "判断原则：",
         "- 宁可漏记，不要误记",
@@ -101,6 +151,18 @@ export class MemoryJudge {
         "- 示例：用户说「我用 React 18.2 做的前端，部署在 vercel 上」→ sourceQuote=\"我用 React 18.2 做的前端，部署在 vercel 上\"",
         "- L0 / L1 候选不要输出 sourceQuote 字段",
         "",
+        "L2 归属抽取（与候选一起输出，复用本次调用，不额外开销）：",
+        "- L2 候选必须输出 subjectNames 字段：这条记忆主要关于谁（人名数组）",
+        "  规则：",
+        "  · 只填对话里出现过的具体人名，不要填「用户」「对方」「群友」这类泛指",
+        "  · 如果这条记忆和某个具体的人无关（例如纯粹的项目进展），subjectNames 返回空数组 []",
+        "  · 如果对话里有多个人，只填这条记忆真正关于的那个人",
+        "- L2 候选必须输出 sourceTurnIndexes 字段：这条记忆是从第几轮对话提取的（1-based 轮次号数组）",
+        "  · 例：从第 3 轮提取 → [3]；综合第 2、3 轮 → [2, 3]",
+        "- 示例：第 2 轮中小明说「我最近在学 Rust」→ subjectNames=[\"小明\"], sourceTurnIndexes=[2]",
+        "- 示例：第 4 轮中小红说「小明最近在学 Rust」→ subjectNames=[\"小明\"], sourceTurnIndexes=[4]",
+        "- L0 / L1 候选不要输出 subjectNames / sourceTurnIndexes 字段",
+        "",
         "输出结构：",
         "{",
         "  \"candidates\": [",
@@ -121,7 +183,9 @@ export class MemoryJudge {
         "      \"contextSummary\": \"最近多轮上下文概括，不超过80字\",",
         "      \"shouldWrite\": true,",
         "      \"reason\": \"为什么值得记，或为什么不写\",",
-        "      \"forbiddenOverclaims\": []",
+        "      \"forbiddenOverclaims\": [],",
+        "      \"subjectNames\": [\"小明\"],",
+        "      \"sourceTurnIndexes\": [2]",
         "    }",
         "  ],",
         "  \"entities\": [",
@@ -132,6 +196,7 @@ export class MemoryJudge {
         "片段不需要 field。近况必须指定 field（recentGoals / recentPreferences / currentProject）。",
         "L2 片段必须输出 slug 字段（精炼标题，≤20 字，仅中文/字母/数字/_/-），如 \"slug\": \"喜欢香菇\"。",
         "L2 片段必须输出 sourceQuote 字段（原文对话片段，≤500 字，允许标点/空格/emoji），如 \"sourceQuote\": \"我用 React 18.2 做的前端\"。",
+        "L2 片段必须输出 subjectNames（人名数组，和具体的人无关时给 []）与 sourceTurnIndexes（1-based 轮次号数组），如 \"subjectNames\": [\"小明\"], \"sourceTurnIndexes\": [2]。",
         "inferred / uncertain 不允许进入画像；如果还值得保留，只能放片段，或者 shouldWrite=false。",
         "没有值得记录的信息时，输出：{\"candidates\":[],\"entities\":[]}",
         "summary 和 evidenceQuotes 里禁止出现英文双引号，用「」替代。",
@@ -139,8 +204,12 @@ export class MemoryJudge {
         "slug 禁止包含标点、引号、空格、emoji；只能含中文/字母/数字/下划线/连字符。",
       ].join("\n")
 
+      // 每轮显式标出说话人：群聊里"谁说的"决定 subjectNames 能不能被映射回 personKey
+      // （名册由本批 turns 的 speakerName 建立，见 person-attribution.ts）。
+      // 桌面路径没有 personKey/speakerName，退回「用户」，与 P1 行为一致。
       const transcript = turns.map((turn, index) => [
         `第 ${index + 1} 轮：`,
+        `说话人：${turn.speakerName ?? "用户"}${turn.personKey ? `（${turn.personKey}）` : ""}`,
         `用户：${turn.userInput}`,
         `AI：${turn.assistantReply}`,
       ].join("\n")).join("\n\n")
@@ -169,6 +238,18 @@ export class MemoryJudge {
       }
 
       console.log(`[PMRS/Judge] 提取候选: ${filtered.length} 条（过滤后），实体: ${result.entities.length} 个`)
+      appendMemoryTrace({
+        op: "judge.result",
+        layer: "L2",
+        status: filtered.length > 0 ? "ok" : "skip",
+        details: {
+          conversationId,
+          raw: result.candidates.length,
+          kept: filtered.length,
+          entities: result.entities.length,
+          layers: filtered.map((item) => item.layer),
+        },
+      })
       console.log(
         `[PMRS/Judge] 候选详情: ${filtered.map((item) => item.layer === "L0" && item.field ? `${item.layer}.${item.field}(\"${(item.summary ?? item.content).slice(0, 20)}\", ${item.confidence.toFixed(2)})` : `${item.layer}(\"${(item.summary ?? item.content).slice(0, 20)}\", ${item.confidence.toFixed(2)})`).join(" ")}`,
       )
@@ -176,6 +257,13 @@ export class MemoryJudge {
     } catch (error) {
       console.error("[PMRS/Judge] LLM 调用失败:", error)
       console.log("[PMRS/Judge] 本轮无值得记录的信息")
+      appendMemoryTrace({
+        op: "judge.error",
+        layer: "L2",
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+        details: { conversationId, turns: turns.length },
+      })
       return { candidates: [], entities: [] }
     }
   }

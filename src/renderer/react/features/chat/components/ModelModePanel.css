@@ -1,4 +1,9 @@
-/* ===== 模型面板：搜索 + 两列卡片网格 ===== */
+/* ===== 模型面板：搜索 + 两列卡片网格 + 下方 API 配置区 =====
+   布局约定：整个面板是唯一的滚动容器。
+   模型列表与 API 配置都在同一份滚动文档流里，谁都不会被另一方压扁
+   —— 早期版本给 .model-panel__grid 设了 flex:1，又让 .api-config 保持
+   自然高度，结果网格被压缩到只剩一行高度（约 38px），模型卡片看不见、
+   点不到「设为默认」，表现为「默认模型窗口和 API 配置卡在一起」。 */
 .model-panel {
   display: flex;
   flex-direction: column;
@@ -20,6 +25,11 @@
   align-items: center;
   padding: 22px 28px 4px;
   flex-shrink: 0;
+  /* 滚动时标题与搜索框保持可见 */
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--cy-bg-workspace, #fff);
 }
 
 .model-panel__title {
@@ -59,9 +69,10 @@
 }
 
 .model-panel__grid {
-  flex: 1;
+  /* 自然高度：由内容决定，连同下方 API 配置一起交给 .model-panel 滚动。
+     绝不再参与「抢高度」的 flex 分配，否则会被 API 配置区压扁。 */
+  flex: 0 0 auto;
   min-width: 0;
-  min-height: 0;
   box-sizing: border-box;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

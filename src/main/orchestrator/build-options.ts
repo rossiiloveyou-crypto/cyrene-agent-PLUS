@@ -33,7 +33,7 @@ import type { SkillModeOverrides } from "../skills/types";
 import type { ChatMessage, OpenAIContentBlock } from "./vendors/types";
 import type { AguiRunInput } from "../agui-bridge";
 import type { RelationshipChannel, RelationshipTurnInput } from "../relationship/relationship-log";
-import type { ChannelId } from "../channels/types";
+import type { ChannelChatType, ChannelId } from "../channels/types";
 import { validateCaptionImagePath } from "../chat/image-caption";
 import {
   buildConversationTimeContext,
@@ -61,6 +61,28 @@ import type { RunCapabilities } from "./run-capabilities";
 import { buildStickerEmbeddingQuery } from "../sticker-query";
 import { isPlanReadOnly, getPlanState } from "./plan-mode";
 import { policyFor, type ToolRiskLevel } from "../permission-policy";
+import { resolveScopeId, rootScope } from "../zones/scope";
+import type { TurnAttribution } from "../memory/memory-types";
+import { normalizeGroupContextLimit } from "../settings/general-settings";
+
+/**
+ * 本轮运行所属的渠道会话快照，供 always-on 上下文按会话补充渠道专属内容。
+ *
+ * 为什么要显式传：渠道 sessionId 是 `channel:<渠道>:<sha256 前 16 位>`，
+ * 群/私聊在 ID 上不可辨识（群聊和私聊都是同一个 hash 形态），
+ * 所以 chatType 必须由渠道入口显式带下来，不能靠解析 sessionId 猜测。
+ */
+export interface ChannelTraceContext {
+  /** 渠道会话 ID：与 channels/history/*.jsonl 的文件键一致。 */
+  sessionId: string;
+  /** 群聊时用于追加群近期上下文块；私聊不追加。 */
+  chatType?: ChannelChatType;
+  /**
+   * 群上下文条数；由 build-options 从通用设置读出后注入。
+   * 走注入而不是让 orchestrator 直接 import settings——避免 settings ↔ orchestrator 循环依赖。
+   */
+  groupContextLimit?: number;
+}
 
 /** index.ts 模块级符号的最小可注入子集。
  *  类型故意用宽签名（unknown / 任意 shape）—— 因为 build-options 是纯消费者，
@@ -98,8 +120,10 @@ export interface BuildOptionsDeps {
   buildAlwaysOnContext: (
     userText: string,
     messages: ReadonlyArray<{ role: string; content?: string }>,
+    /** 本轮渠道会话信息；桌面聊天不传。群聊用于追加群近期上下文块。 */
+    trace?: ChannelTraceContext,
   ) => Promise<string>;
-  buildRelationshipContext: () => Promise<string>;
+  buildRelationshipContext: (scopeId?: string) => Promise<string>;
   /** 明确按模式构建基础人设，不再通过 style 文件名猜模式。 */
   buildModePrompt?: (mode: ConversationMode) => string;
   /** 工具规则与目录 system prompt（进入 harness stablePrefix）。仅含自动生成的工具目录。 */
@@ -169,7 +193,12 @@ export interface BuildOptionsDeps {
 /** onRunFinished 副作用所需的 deps（与 BuildOptionsDeps 部分重叠） */
 export interface OnRunFinishedDeps {
   loadModelSettings: () => ModelSettingsLite;
-  scheduleMemoryWrite: (userText: string, reply: string, conversationId?: string) => void;
+  scheduleMemoryWrite: (
+    userText: string,
+    reply: string,
+    conversationId?: string,
+    attribution?: TurnAttribution,
+  ) => void;
   scheduleSocialAtomExtraction?: (input: SocialExtractionInput) => void;
   inferRuntimeState: (userText: string, reply: string, flag: boolean) => { status: string };
   runtimeState: {
@@ -228,6 +257,8 @@ export interface StyleSettingsLite {
   /** 朋友圈总开关与 Chat 背景注入开关（moments-awareness 门控用）。 */
   momentsEnabled?: unknown;
   chatMomentsContextEnabled?: unknown;
+  /** 群聊近期上下文注入条数（设置-记忆）。缺省时 orchestrator 用自己的默认值。 */
+  groupContextLimit?: unknown;
   /** 工具-模式覆盖层（三模适配层）。未提供时按 modes 字段或全可见过滤。 */
   toolModeOverrides?: ToolModeOverrides;
   /** Chat 模式工具增强总开关。未提供时视为关闭（chat 无工具，现状行为）。 */
@@ -493,11 +524,16 @@ export async function buildAgentRunOptions(
     );
   }
 
+  const scopeId = resolveScopeId(input.sessionId);
+  // 私人生活数据（朋友圈 / 社交原子）只在 owner 域注入：群聊里不该出现你的生活痕迹。
+  const isOwnerScope = scopeId === rootScope();
   const socialContextEnabled = isChatMode
+    && isOwnerScope
     && styleSettings.chatSocialContextEnabled === true
     && Boolean(deps.buildChatSocialContext);
   // 朋友圈 Chat 背景：总开关与子开关都开启才注入（momentsEnabled && chatMomentsContextEnabled）
   const momentsContextEnabled = isChatMode
+    && isOwnerScope
     && styleSettings.chatMomentsContextEnabled === true
     && styleSettings.momentsEnabled === true
     && Boolean(deps.buildMomentsContext);
@@ -511,14 +547,24 @@ export async function buildAgentRunOptions(
 
   let alwaysOnContext = "";
   try {
-    alwaysOnContext = await perf.track("build_always_on_context", () => deps.buildAlwaysOnContext(latestUserText, slimMessages));
+    // 渠道入口带 chatType 下来，群聊才能追加「群聊近期上下文」（旁听到的群友发言）。
+    const trace: ChannelTraceContext | undefined = input.sessionId
+      ? {
+          sessionId: input.sessionId,
+          ...(input.chatType ? { chatType: input.chatType } : {}),
+          groupContextLimit: normalizeGroupContextLimit(styleSettings.groupContextLimit),
+        }
+      : undefined;
+    alwaysOnContext = await perf.track("build_always_on_context", () =>
+      deps.buildAlwaysOnContext(latestUserText, slimMessages, trace));
   } catch (err) {
     console.warn("[Cyrene] always-on context build failed:", err);
   }
 
   let relationshipContext = "";
   try {
-    relationshipContext = await perf.track("build_relationship_context", () => deps.buildRelationshipContext());
+    // 关系日志按域取：群里不该看到你和昔涟的私人关系线。
+    relationshipContext = await perf.track("build_relationship_context", () => deps.buildRelationshipContext(scopeId));
   } catch (err) {
     console.warn("[Cyrene] relationship context build failed:", err);
   }
@@ -927,7 +973,19 @@ export async function onAgentRunFinished(
   deps: OnRunFinishedDeps,
   channel?: ChannelId,
   conversationId?: string,
-  finishedContext?: { runId?: string; source?: "desktop" | "channel"; mode?: string },
+  finishedContext?: {
+    runId?: string;
+    source?: "desktop" | "channel";
+    mode?: string;
+    /** P2 归属：说话人 `<channel>:<senderId>`；桌面路径缺失。 */
+    personKey?: string;
+    /** P2 归属：说话人昵称（映射 subjectNames 用）。 */
+    speakerName?: string;
+    /** P2 归属：本轮 user 消息 id（P1 产出）。 */
+    userMessageId?: string;
+    /** P2 归属：会话类型，决定私聊是否允许"单人会话兜底"。 */
+    chatType?: string;
+  },
 ): Promise<{ sticker: string | null }> {
   const chatContent = result.reply;
   const sideEffectUserText = stripTurnModelContextForSideEffects(latestUserText);
@@ -952,7 +1010,14 @@ export async function onAgentRunFinished(
       now: socialContext.now,
     });
   } else {
-    deps.scheduleMemoryWrite(sideEffectUserText, chatContent, conversationId);
+    // P2：把本轮说话人归属一并交给记忆调度层。
+    // 桌面路径三个字段都是 undefined，scheduler 的归属解析整体退化，零行为变化。
+    deps.scheduleMemoryWrite(sideEffectUserText, chatContent, conversationId, {
+      personKey: finishedContext?.personKey,
+      speakerName: finishedContext?.speakerName,
+      messageId: finishedContext?.userMessageId,
+      chatType: finishedContext?.chatType,
+    });
   }
 
   // 朋友圈主动发帖评估：输入是事件产生时冻结的快照（runId/source/mode 由 agent-runtime 透传）
@@ -981,6 +1046,11 @@ export async function onAgentRunFinished(
       assistantText: chatContent,
       cyreneFeeling: deps.runtimeState.feeling ?? "平静",
       channel: channel ?? "desktop",
+      // 关系日志按域归属：群里发生的关系线索不该混进你和昔涟的私人关系线。
+      scope: resolveScopeId(conversationId),
+      // P3：给关系日志补上说话人归属，供「擦除某人」按人删除（存量条目只能靠原文指纹兜底）。
+      // 桌面路径为 undefined，行为与 P3 之前一致。
+      personKey: finishedContext?.personKey,
     });
   });
 

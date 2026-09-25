@@ -432,10 +432,19 @@ const settingsApi = {
   // 消息日志
   channelsLogGet: (limit?: number) => ipcRenderer.invoke(IPC.CHANNELS_LOG_GET, limit ?? 100),
   channelsLogClear: () => ipcRenderer.invoke(IPC.CHANNELS_LOG_CLEAR),
-  channelsContextBindingsGet: () => ipcRenderer.invoke(IPC.CHANNELS_CONTEXT_BINDINGS_GET),
-  channelsContextBind: (payload: { sessionId: string; conversationId: string }) =>
-    ipcRenderer.invoke(IPC.CHANNELS_CONTEXT_BIND, payload),
-  channelsContextUnbind: (sessionId: string) => ipcRenderer.invoke(IPC.CHANNELS_CONTEXT_UNBIND, sessionId),
+  // 渠道控制台：白名单 + 审计（工具调用 / 消息拦截 / 对话失败）
+  channelsToolAccessGet: () => ipcRenderer.invoke(IPC.CHANNELS_TOOL_ACCESS_GET),
+  channelsToolAccessSave: (patch: unknown) => ipcRenderer.invoke(IPC.CHANNELS_TOOL_ACCESS_SAVE, patch),
+  channelsAuditGet: (limit?: number) => ipcRenderer.invoke(IPC.CHANNELS_AUDIT_GET, limit ?? 200),
+  channelsAuditClear: () => ipcRenderer.invoke(IPC.CHANNELS_AUDIT_CLEAR),
+  channelsAuditOpenLog: (id: string) => ipcRenderer.invoke(IPC.CHANNELS_AUDIT_OPEN_LOG, id),
+  channelsAuditRevealLog: (id: string) => ipcRenderer.invoke(IPC.CHANNELS_AUDIT_REVEAL_LOG, id),
+  channelsKeywordsImportTxt: () => ipcRenderer.invoke(IPC.CHANNELS_KEYWORDS_IMPORT_TXT),
+  onChannelsAudit: (callback: (entry: unknown) => void) => {
+    const listener = (_e: unknown, entry: unknown) => callback(entry);
+    ipcRenderer.on(IPC.CHANNELS_AUDIT_APPENDED, listener);
+    return () => ipcRenderer.off(IPC.CHANNELS_AUDIT_APPENDED, listener);
+  },
   onChannelsInstallProgress: (callback: (p: { channel: string; phase: string; pct: number }) => void) => {
     const listener = (_e: unknown, progress: { channel: string; phase: string; pct: number }) => callback(progress);
     ipcRenderer.on(IPC.CHANNELS_INSTALL_PROGRESS, listener);
@@ -623,6 +632,36 @@ const memoryPanelApi = {
   getVaultConfig: () => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_GET_CONFIG),
   setAutoSync: (autoSync: boolean) => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_SET_AUTO_SYNC, autoSync),
   syncNow: () => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_SYNC_NOW),
+  // 删除全部记忆（画像/事件片段/向量库/关系日志/实体图谱/朋友圈/渠道聊天记录）
+  deleteAll: () => ipcRenderer.invoke(IPC.MEMORY_DELETE_ALL),
+  /** 受控重启：删除记忆后必须重启才能让进程内缓存失效。 */
+  restartApp: () => ipcRenderer.invoke(IPC.APP_RESTART),
+  // ── 记忆管理控制台（Phase 3 P3） ──
+  listMemoryManager: (view: string) => ipcRenderer.invoke(IPC.MEMORY_MANAGER_LIST, { view }),
+  queryMemoryManager: (view: string, key: string) => ipcRenderer.invoke(IPC.MEMORY_MANAGER_QUERY, { view, key }),
+  deleteMemoryManager: (payload: { ids?: string[]; view?: string; key?: string }) =>
+    ipcRenderer.invoke(IPC.MEMORY_MANAGER_DELETE, payload),
+  erasePreview: (personKey: string) => ipcRenderer.invoke(IPC.MEMORY_ERASE_PREVIEW, { personKey }),
+  /** 彻底擦除。⚠️ 不需要重启（缓存原地失效）。 */
+  erasePerson: (personKey: string, previewId: string) =>
+    ipcRenderer.invoke(IPC.MEMORY_ERASE_PERSON, { personKey, previewId }),
+  traceMemorySource: (memoryId: string) => ipcRenderer.invoke(IPC.MEMORY_TRACE_SOURCE, { memoryId }),
+  // 记忆区块（zones）
+  getZoneSnapshot: () => ipcRenderer.invoke(IPC.ZONES_LIST),
+  createZone: (name: string) => ipcRenderer.invoke(IPC.ZONES_CREATE, { name }),
+  renameZone: (zoneId: string, name: string) => ipcRenderer.invoke(IPC.ZONES_RENAME, { zoneId, name }),
+  deleteZone: (zoneId: string) => ipcRenderer.invoke(IPC.ZONES_DELETE, { zoneId }),
+  updateZoneConfig: (zoneId: string, patch: Record<string, unknown>) =>
+    ipcRenderer.invoke(IPC.ZONES_UPDATE_CONFIG, { zoneId, patch }),
+  addZoneMember: (zoneId: string, member: unknown) =>
+    ipcRenderer.invoke(IPC.ZONES_ADD_MEMBER, { zoneId, member }),
+  /** 手动按群号 / 群 openid 加入区块（新群还没产生会话时唯一能加白的入口）。 */
+  addZoneManualGroup: (zoneId: string, channel: string, chatId: string, senderName?: string) =>
+    ipcRenderer.invoke(IPC.ZONES_ADD_MANUAL_GROUP, { zoneId, channel, chatId, senderName }),
+  removeZoneMember: (zoneId: string, member: unknown) =>
+    ipcRenderer.invoke(IPC.ZONES_REMOVE_MEMBER, { zoneId, member }),
+  moveZoneMembers: (targetZoneId: string, members: unknown[]) =>
+    ipcRenderer.invoke(IPC.ZONES_MOVE_MEMBERS, { targetZoneId, members }),
 };
 
 contextBridge.exposeInMainWorld("user", userApi);
@@ -740,14 +779,21 @@ const chatStoreApi = {
     ipcRenderer.on(IPC.CHATS_WORKSPACE_CHANGED, listener);
     return () => ipcRenderer.removeListener(IPC.CHATS_WORKSPACE_CHANGED, listener);
   },
-  // 状态栏专用入口：要求 main 打开/复用 reactChatWindow 并加载指定 sessionId
-  openInReactChatWindow: (sessionId: string) =>
-    ipcRenderer.invoke(IPC.CHATS_OPEN_IN_REACT_WINDOW, sessionId),
+  // 状态栏专用入口：要求 main 打开/复用 reactChatWindow 并加载指定 sessionId；
+  // 可选 panel 让入口直达指定侧栏面板（如 API 配置所在的「模型」面板）
+  openInReactChatWindow: (sessionId: string, panel?: string) =>
+    ipcRenderer.invoke(IPC.CHATS_OPEN_IN_REACT_WINDOW, sessionId, panel),
   // main → reactChatWindow：通知 ChatPage 切换到指定 sessionId
   onReactSwitchSession: (callback: (sessionId: string) => void) => {
     const listener = (_e: Electron.IpcRendererEvent, sessionId: string) => callback(sessionId);
     ipcRenderer.on(IPC.CHATS_REACT_SWITCH_SESSION, listener);
     return () => ipcRenderer.removeListener(IPC.CHATS_REACT_SWITCH_SESSION, listener);
+  },
+  // main → reactChatWindow：要求打开指定侧栏面板
+  onChatOpenPanel: (callback: (panel: string) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, panel: string) => callback(panel);
+    ipcRenderer.on(IPC.CHAT_OPEN_PANEL, listener);
+    return () => ipcRenderer.removeListener(IPC.CHAT_OPEN_PANEL, listener);
   },
   // reactChatWindow → main：ChatPage 已挂好 IPC 监听，允许 flush pending sessionId
   notifyReactReady: () => ipcRenderer.send(IPC.CHATS_REACT_READY),
@@ -797,6 +843,13 @@ contextBridge.exposeInMainWorld("codeGit", codeGitApi);
 const tokenUsageApi = {
   get: (days: number) => ipcRenderer.invoke(IPC.TOKEN_USAGE_GET, days),
   clear: () => ipcRenderer.invoke(IPC.TOKEN_USAGE_CLEAR) as Promise<void>,
+  /** 单个对话（会话）的累计用量与缓存命中率（聊天窗口顶栏用量徽章） */
+  getSession: (sessionId: string) => ipcRenderer.invoke(IPC.CHAT_SESSION_USAGE_GET, sessionId),
+  onSessionUsage: (callback: (snapshot: unknown) => void) => {
+    const listener = (_e: unknown, snapshot: unknown) => callback(snapshot);
+    ipcRenderer.on(IPC.CHAT_SESSION_USAGE_CHANGED, listener);
+    return () => ipcRenderer.off(IPC.CHAT_SESSION_USAGE_CHANGED, listener);
+  },
 };
 contextBridge.exposeInMainWorld("tokenUsage", tokenUsageApi);
 

@@ -2,6 +2,7 @@ import { BrowserWindow } from "electron";
 import { IPC } from "../../shared/ipc-channels";
 import { createIpcScope, type IpcScope } from "../application/ipc-scope";
 import { clearUsage, getUsageReport } from "../token-usage-store";
+import { getConversationUsage, subscribeConversationUsage } from "../conversation-usage-store";
 import {
   sidebarWindow,
   tasksWindow,
@@ -22,6 +23,9 @@ export interface WindowSystemIpcDependencies {
  * 注意：TOKEN_USAGE_GET 本质属于用量统计领域，当前仅因改动最小而临时
  * 挂靠在此；后续拆分统计模块时应二次归位。
  */
+/** 对话用量订阅是进程级的：重复调用注册函数时只挂一次 */
+let sessionUsageSubscribed = false;
+
 export function registerWindowSystemIpc(deps: WindowSystemIpcDependencies): void {
   const ipc = deps.ipc ?? createIpcScope();
   ipc.handle(IPC.WINDOW_SET_INTERACTIVE, (_event, interactive: boolean) => {
@@ -115,6 +119,25 @@ export function registerWindowSystemIpc(deps: WindowSystemIpcDependencies): void
   ipc.handle(IPC.TOKEN_USAGE_CLEAR, () => {
     clearUsage();
   });
+
+  // 对话用量徽章：按会话查询
+  ipc.handle(IPC.CHAT_SESSION_USAGE_GET, (_event, sessionId: unknown) => {
+    return getConversationUsage(typeof sessionId === "string" ? sessionId : "");
+  });
+  // 变化推送：订阅只挂一次（进程级），窗口销毁时跳过
+  if (!sessionUsageSubscribed) {
+    sessionUsageSubscribed = true;
+    subscribeConversationUsage((snapshot) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (win.isDestroyed()) continue;
+        try {
+          win.webContents.send(IPC.CHAT_SESSION_USAGE_CHANGED, snapshot);
+        } catch (error) {
+          console.warn("[WindowSystemIpc] 推送对话用量失败:", error);
+        }
+      }
+    });
+  }
 
   ipc.on(IPC.LIVE2D_SPEECH_PREPARE, () => {
     deps.windowManager?.sendToPetWindow(IPC.LIVE2D_SPEECH_PREPARE);

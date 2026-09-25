@@ -5,6 +5,7 @@ import { findPossibleConflictCandidate } from "./memory-conflict"
 import { scoreMemoryConflict, type ConflictEvidenceLevel } from "./memory-conflict-score"
 import { wasRecentlyInjectedMemory } from "./recent-injected-memory"
 import { addL2MemoryVector, searchMemoryEntries } from "../rag/index"
+import { rootScope, type MemoryScopeId } from "../zones/scope"
 
 type L1Field = "recentGoals" | "recentPreferences" | "currentProject"
 
@@ -45,6 +46,16 @@ function canWriteCoreProfile(candidate: MemoryCandidate): boolean {
   return candidate.certainty === "explicit" && candidate.attribution === "user_explicit"
 }
 
+/**
+ * 候选是否属于 owner（root）域。
+ *
+ * 默认放行：`scope` 缺失时视为历史/测试路径（调度层已保证生产路径一定带 scope），
+ * 保持与 Phase 2 之前一致的行为，避免"忘记传 scope 就再也写不进画像"。
+ */
+function isOwnerScope(scope: string | undefined): boolean {
+  return scope === undefined || scope === rootScope()
+}
+
 export class MemoryManager {
   private async appendToPermanentNote(content: string): Promise<void> {
     const l0 = await memoryStore.getL0()
@@ -61,6 +72,12 @@ export class MemoryManager {
       }
 
       if (candidate.layer === "L0") {
+        // L0/L1 是 owner 级画像。群聊/独立域里的候选绝不能升级成 owner 的画像，
+        // 否则群里陌生人一句话就能改写"你是谁"。
+        if (!isOwnerScope(candidate.scope)) {
+          console.log("[PMRS/Manager] 非 root 域的 L0 候选被丢弃（不污染 owner 画像）")
+          continue
+        }
         if (!canWriteCoreProfile(candidate)) {
           console.log("[PMRS/Manager] L0 候选不是用户明确事实，跳过自动写核心画像")
           continue
@@ -92,6 +109,10 @@ export class MemoryManager {
         await memoryStore.upsertL0Field(candidate.field as L0WritableField, candidate.content)
         console.log(`[PMRS/Manager] L0 更新字段: ${candidate.field} = "${candidate.content.slice(0, 20)}"`)
       } else if (candidate.layer === "L1") {
+        if (!isOwnerScope(candidate.scope)) {
+          console.log("[PMRS/Manager] 非 root 域的 L1 候选被丢弃（不污染 owner 画像）")
+          continue
+        }
         const field = resolveL1Field(candidate.field, candidate.content)
         await memoryStore.replaceL1Field(field, candidate.content)
         console.log(`[PMRS/Manager] L1 更新字段: ${field}`)
@@ -114,6 +135,14 @@ export class MemoryManager {
     if (candidate.slug) l2Input.slug = candidate.slug
     // L2 原文对话片段（展示用），缺失时不注入
     if (candidate.sourceQuote) l2Input.sourceQuote = candidate.sourceQuote
+    // 记忆域：由调度层注入，决定这条记忆以后能被哪个会话读到
+    if (candidate.scope) l2Input.scope = candidate.scope
+    // P2 归属：由调度层（person-attribution）注入，决定"谁说的 / 关于谁"。
+    // 空数组不落字段 —— 让「老数据 / 桌面路径」与「解析后无归属」在磁盘上同形，
+    // 读取侧只需判 `undefined` 与 `[]` 其中一种（这里统一成 undefined）。
+    if (candidate.speakerIds?.length) l2Input.speakerIds = candidate.speakerIds
+    if (candidate.subjectIds?.length) l2Input.subjectIds = candidate.subjectIds
+    if (candidate.sourceMessageIds?.length) l2Input.sourceMessageIds = candidate.sourceMessageIds
 
     const l2 = await memoryStore.addL2Memory(l2Input)
 
@@ -122,7 +151,7 @@ export class MemoryManager {
       ragId = await addL2MemoryVector(candidate.content, l2.id, {
         triggerText: candidate.triggerText,
         confidence: candidate.confidence,
-      })
+      }, candidate.scope)
       await memoryStore.markL2SyncStatus(l2.id, "synced", ragId)
     } catch (err) {
       await memoryStore.markL2SyncStatus(l2.id, "sync_failed", undefined, err)
@@ -134,20 +163,29 @@ export class MemoryManager {
 
     // ── 冲突检测：检查新记忆是否与现有记忆矛盾 ──
     try {
-      await this.detectAndMarkConflicts(candidate.content, l2.id, ragId, candidate.triggerText)
+      await this.detectAndMarkConflicts(candidate.content, l2.id, ragId, candidate.triggerText, candidate.scope)
     } catch (err) {
       console.warn("[PMRS/Manager] 冲突检测失败:", err)
     }
   }
 
-  /** 检测新记忆是否与现有 active 记忆矛盾，如有则标记 */
-  private async detectAndMarkConflicts(content: string, newL2Id: string, newRagId: string, triggerText: string): Promise<void> {
-    // 搜索语义相似的现有 L2 条目
-    const allL2 = await memoryStore.getAllL2()
+  /** 检测新记忆是否与现有 active 记忆矛盾，如有则标记。冲突检测同样限制在同域内。 */
+  private async detectAndMarkConflicts(
+    content: string,
+    newL2Id: string,
+    newRagId: string,
+    triggerText: string,
+    scope?: MemoryScopeId,
+  ): Promise<void> {
+    // 搜索语义相似的现有 L2 条目（同域）
+    const allL2 = scope ? await memoryStore.getL2ForScope(scope) : await memoryStore.getAllL2()
     const activeL2 = allL2.filter((m) => (m.status === "active" || m.status === "aging") && m.ragId && m.ragId !== newRagId)
 
     // 用 RAG entry 做向量相似度匹配，优先读取 metadata.l2Id 精确定位 L2。
-    const similarEntries = await searchMemoryEntries(content, "user_memory", 5, { recordRecall: false })
+    const similarEntries = await searchMemoryEntries(content, "user_memory", 5, {
+      recordRecall: false,
+      ...(scope ? { scopeId: scope } : {}),
+    })
     if (similarEntries.length === 0) return
 
     const entriesByL2Id = new Map<string, (typeof similarEntries)[number]>()

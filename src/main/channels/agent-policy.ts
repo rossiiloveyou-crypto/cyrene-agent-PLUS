@@ -1,6 +1,5 @@
 import type { AgentExecutionMode, CyreneRunOptions } from "../orchestrator/cyrene-agent";
 import type { ChannelToolSandbox } from "./settings-store";
-import type { ChannelChatType, ChannelId } from "./types";
 
 export interface ChannelAgentPolicy {
   executionMode: AgentExecutionMode;
@@ -9,19 +8,14 @@ export interface ChannelAgentPolicy {
   permissionMode: NonNullable<CyreneRunOptions["permissionMode"]>;
 }
 
-export function resolveChannelAgentPolicy(
-  toolSandbox: ChannelToolSandbox,
-  context?: { channel?: ChannelId; chatType?: ChannelChatType },
-): ChannelAgentPolicy {
-  // QQ 群聊（NapCat 与官方机器人同样处理）：共享群上下文，强制纯 Chat 模式、禁工具
-  if ((context?.channel === "qq" || context?.channel === "qqbot") && context.chatType === "group") {
-    return {
-      executionMode: "chat",
-      exposeTools: false,
-      includeInteractiveTools: false,
-      permissionMode: "normal",
-    };
-  }
+/**
+ * 外部渠道（微信/飞书/QQ/QQ 机器人）的 Agent 策略。
+ *
+ * 群聊与私聊一律只看全局「工具权限」开关，不再按渠道/群聊强制降级为纯 Chat。
+ * 「谁可以真正调用工具」由渠道工具白名单（tool-access）在执行层逐次拦截，
+ * 规则见 docs/user-guide/qqbot-official.md 与设置页「工具调用控制台」。
+ */
+export function resolveChannelAgentPolicy(toolSandbox: ChannelToolSandbox): ChannelAgentPolicy {
   if (toolSandbox === "off") {
     return {
       executionMode: "chat",
@@ -39,8 +33,9 @@ export function resolveChannelAgentPolicy(
 }
 
 /**
- * 在 buildOptions 之后再次收紧策略，避免 Chat 工具开关已把工具目录写入
- * capabilities/toolSystemContent 时，QQ 群聊仍看到或意外启用这些工具。
+ * 在 buildOptions 之后再次收紧策略：全局工具权限为 off 时，
+ * 把 capabilities/toolSystemContent 里已写入的工具目录一并清空，
+ * 避免模型看到不可用的工具。
  */
 export function enforceChannelAgentPolicy(
   options: CyreneRunOptions,

@@ -28,6 +28,7 @@ import type { LlmClient } from "../services/llm/llm-client";
 import type { CitaService } from "../cita";
 import type { SocialContextService } from "../services/social-context/social-context-service";
 import type { ChannelsSubsystem } from "../channels/bootstrap";
+import { StartupAbortedError } from "./startup-abort";
 import type { SchedulerSubsystem } from "../scheduler/bootstrap";
 import type { GeneralSettings } from "../settings/general-settings";
 import type { WindowManager } from "../windows/window-manager";
@@ -71,6 +72,11 @@ export interface CoreDependencies {
   activation: WindowActivationBroker;
   shutdown: ShutdownCoordinator;
   migrateStagedExternalContent(): void;
+  /**
+   * 记忆 schema 闸门：必须在 initRag() / 任何 memoryStore.load() 之前调用。
+   * 返回 "aborted" 表示用户选择退出应用，启动流程应立即中止。
+   */
+  runMemorySchemaGate(): "ok" | "migrated" | "aborted";
   initSkills(): void | Promise<void>;
   /** 低成本服务与配置 getter；只构造，不建立网络连接。 */
   createLowCostServices(): CoreServices;
@@ -116,6 +122,12 @@ export async function startCore(deps: CoreDependencies): Promise<CoreResult> {
 
   // 升级迁移：必须在任何 prompts/skills 读取之前
   deps.migrateStagedExternalContent();
+
+  // 记忆 schema 闸门：必须早于 initRag / memoryStore.load / channels 启动。
+  // 用户选择"退出应用"时抛哨兵错误，由 application.ts 静默退出（不弹错误框）。
+  if (deps.runMemorySchemaGate() === "aborted") {
+    throw new StartupAbortedError("memory schema upgrade aborted by user");
+  }
 
   // Skill 系统：失败只降级，不阻塞聊天
   try {

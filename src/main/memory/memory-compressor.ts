@@ -14,6 +14,7 @@ import { L0_FIELD_DESCRIPTIONS } from "./memory-types";
 import type { L2Memory } from "./memory-types";
 import { resolveL1Field } from "./memory-manager";
 import { commitMemoryCompression } from "./memory-compression-transaction";
+import { unionOf } from "./person-attribution";
 import { invokeMemoryLlm, invokeMemoryStructuredOutput, getDefaultMaxOutputTokens } from "./memory-llm-client";
 import { parseMemoryReflectionResult, validateMemoryReflectionBusiness } from "./memory-schemas";
 import type { MemoryReflectionItem } from "./memory-schemas";
@@ -40,31 +41,43 @@ async function compressMemories(): Promise<number> {
   // 从 RAG 库获取 user_memory 条目，建立 ragId → embedding 映射
   const ragEntries = getEntriesBySource("user_memory");
 
+  // 按记忆域分桶：跨域聚类会把群聊记忆和桌面记忆揉成一条总结
+  // （既串味，又让总结的归属变得没有意义）。压缩只在同域内发生。
+  const buckets = new Map<string | undefined, L2Memory[]>();
+  for (const memory of activeL2) {
+    const bucket = buckets.get(memory.scope) ?? [];
+    bucket.push(memory);
+    buckets.set(memory.scope, bucket);
+  }
+
   // 分组
   const groups: GroupedEntry[][] = [];
-  const used = new Set<string>();
+  for (const bucket of buckets.values()) {
+    if (bucket.length < MIN_GROUP_SIZE) continue;
+    const used = new Set<string>();
 
-  for (const l2 of activeL2) {
-    if (used.has(l2.id)) continue;
-    const ragEntry = ragEntries.find((e) => e.id === l2.ragId);
-    if (!ragEntry) continue;
+    for (const l2 of bucket) {
+      if (used.has(l2.id)) continue;
+      const ragEntry = ragEntries.find((e) => e.id === l2.ragId);
+      if (!ragEntry) continue;
 
-    const group: GroupedEntry[] = [{ l2, embedding: ragEntry.embedding }];
-    used.add(l2.id);
+      const group: GroupedEntry[] = [{ l2, embedding: ragEntry.embedding }];
+      used.add(l2.id);
 
-    for (const other of activeL2) {
-      if (used.has(other.id)) continue;
-      const otherRag = ragEntries.find((e) => e.id === other.ragId);
-      if (!otherRag) continue;
+      for (const other of bucket) {
+        if (used.has(other.id)) continue;
+        const otherRag = ragEntries.find((e) => e.id === other.ragId);
+        if (!otherRag) continue;
 
-      const sim = cosineSimilarity(ragEntry.embedding, otherRag.embedding);
-      if (sim >= SIMILARITY_THRESHOLD) {
-        group.push({ l2: other, embedding: otherRag.embedding });
-        used.add(other.id);
+        const sim = cosineSimilarity(ragEntry.embedding, otherRag.embedding);
+        if (sim >= SIMILARITY_THRESHOLD) {
+          group.push({ l2: other, embedding: otherRag.embedding });
+          used.add(other.id);
+        }
       }
-    }
 
-    if (group.length >= MIN_GROUP_SIZE) groups.push(group);
+      if (group.length >= MIN_GROUP_SIZE) groups.push(group);
+    }
   }
 
   if (groups.length === 0) {
@@ -106,6 +119,12 @@ async function compressMemories(): Promise<number> {
         content: cleanSummary,
         triggerText: group[0].l2.triggerText,
         sourceConversationId: group[0].l2.sourceConversationId,
+        // 总结继承被压缩条目的域：否则它既不属于任何域（召回不到），也可能把别域内容带过来
+        ...(group[0].l2.scope ? { scope: group[0].l2.scope } : {}),
+        // P2 归属：取被压缩条目的并集。一条总结可能压了小明的和小红的三条碎片，
+        // 并集保留完整信息；「总结里含被删者怎么办」是 P3 的删除策略（总概览 §4.4）。
+        speakerIds: unionOf(group.map((g) => g.l2.speakerIds)),
+        subjectIds: unionOf(group.map((g) => g.l2.subjectIds)),
         sources: group.map((entry) => ({
           id: entry.l2.id,
           ragId: entry.l2.ragId,

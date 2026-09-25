@@ -41,6 +41,8 @@ export const IPC = {
   WINDOW_GET_CURSOR_POSITION: "window:get-cursor-position",
   PET_VISIBILITY_CHANGED: "pet:visibility-changed",
   APP_QUIT: "app:quit",
+  /** 受控重启（记忆删除后需要重启才能让进程内缓存失效）。 */
+  APP_RESTART: "app:restart",
 
   // GitHub 应用更新
   APP_UPDATE_GET_STATE: "app-update:get-state",
@@ -142,6 +144,9 @@ export const IPC = {
   UI_WINDOW_CORNER_RADIUS_CHANGED: "ui-window-corner-radius:changed",
   UI_FONT_GET: "ui-font:get",
   UI_FONT_CHANGED: "ui-font:changed",
+  // 对话用量徽章：按会话查询 + 变化推送（main → renderer）
+  CHAT_SESSION_USAGE_GET: "chat:session-usage:get",
+  CHAT_SESSION_USAGE_CHANGED: "chat:session-usage:changed",
   CHAT_TYPOGRAPHY_CHANGED: "chat-typography:changed",
   SETTINGS_PICK_UI_FONT: "settings:pick-ui-font",
   SETTINGS_IMPORT_UI_FONT: "settings:import-ui-font",
@@ -186,6 +191,8 @@ export const IPC = {
   CHATS_OPEN_IN_REACT_WINDOW: "chats:open-in-react-window",
   // main → reactChatWindow：要求切到指定 sessionId（窗口已存在时用）
   CHATS_REACT_SWITCH_SESSION: "chats:react-switch-session",
+  // main → reactChatWindow：要求打开指定侧栏面板（如 api 配置迁移后的「模型」面板）
+  CHAT_OPEN_PANEL: "chat:open-panel",
   // reactChatWindow → main：ChatPage 已挂好 IPC 监听，允许 flush pending sessionId
   CHATS_REACT_READY: "chats:react-ready",
   // 聊天窗口 → main：声明当前活跃 sessionId（用于设置面板"删除当前会话"时差异化提示）
@@ -276,6 +283,36 @@ export const IPC = {
   OBSIDIAN_VAULT_GET_CONFIG: "obsidian-vault:get-config",
   OBSIDIAN_VAULT_SET_AUTO_SYNC: "obsidian-vault:set-auto-sync",
   OBSIDIAN_VAULT_SYNC_NOW: "obsidian-vault:sync-now",
+  /** 删除全部记忆（L0/L1/L2 + 向量库 + 关系日志 + 实体图谱 + 渠道 transcript/归档）。 */
+  MEMORY_DELETE_ALL: "memory-panel:delete-all",
+  // ── 记忆管理控制台（Phase 3 P3）：按人 / 按域 / 按会话浏览、删除、溯源、彻底擦除 ──
+  /** 列表：`{ view }` → `{ items }`。 */
+  MEMORY_MANAGER_LIST: "memory-panel:manager-list",
+  /** 详情：`{ view, key }` → `{ memories, meta }`。 */
+  MEMORY_MANAGER_QUERY: "memory-panel:manager-query",
+  /** 删除：`{ ids }` 或 `{ view, key }` → 级联删除结果摘要。 */
+  MEMORY_MANAGER_DELETE: "memory-panel:manager-delete",
+  /** 擦除预演（只读）：`{ personKey }` → `PersonErasePlan`。 */
+  MEMORY_ERASE_PREVIEW: "memory-panel:erase-preview",
+  /**
+   * 彻底擦除：`{ personKey, previewId }` → `PersonEraseReport`。
+   * ⚠️ **不进 `restartRequired` 流程** —— 擦除全程走内存缓存失效，不需要重启。
+   */
+  MEMORY_ERASE_PERSON: "memory-panel:erase-person",
+  /** 溯源：`{ memoryId }` → `{ entries, missing }`。 */
+  MEMORY_TRACE_SOURCE: "memory-panel:trace-source",
+
+  // 记忆区块（zones）：记忆域管理 + 外部会话成员
+  ZONES_LIST: "zones:list",
+  ZONES_CREATE: "zones:create",
+  ZONES_RENAME: "zones:rename",
+  ZONES_DELETE: "zones:delete",
+  ZONES_UPDATE_CONFIG: "zones:update-config",
+  ZONES_ADD_MEMBER: "zones:add-member",
+  /** 手动按群号 / 群 openid 加入区块（群还没跟昔涟说过话时唯一能加白的入口）。 */
+  ZONES_ADD_MANUAL_GROUP: "zones:add-manual-group",
+  ZONES_REMOVE_MEMBER: "zones:remove-member",
+  ZONES_MOVE_MEMBERS: "zones:move-members",
 
   // MCP server management
   MCP_ADD_SERVER: "mcp:add-server",
@@ -420,10 +457,16 @@ export const IPC = {
   // 消息日志
   CHANNELS_LOG_GET: "channels:log:get",
   CHANNELS_LOG_CLEAR: "channels:log:clear",
-  // 渠道上下文绑定：设置页选择外部聊天继续使用某个桌面会话
-  CHANNELS_CONTEXT_BINDINGS_GET: "channels:context-bindings:get",
-  CHANNELS_CONTEXT_BIND: "channels:context-bindings:bind",
-  CHANNELS_CONTEXT_UNBIND: "channels:context-bindings:unbind",
+  // 渠道控制台：工具白名单 + 调用/拦截/失败审计（完整日志落独立文件）
+  CHANNELS_AUDIT_GET: "channels:audit:get",
+  CHANNELS_AUDIT_CLEAR: "channels:audit:clear",
+  CHANNELS_AUDIT_APPENDED: "channels:audit:appended", // main → renderer
+  CHANNELS_AUDIT_OPEN_LOG: "channels:audit:open-log",
+  CHANNELS_AUDIT_REVEAL_LOG: "channels:audit:reveal-log",
+  CHANNELS_TOOL_ACCESS_GET: "channels:tool-access:get",
+  CHANNELS_TOOL_ACCESS_SAVE: "channels:tool-access:save",
+  // 拦截关键词 / 触发关键词：从 txt 文件导入（每行一个）
+  CHANNELS_KEYWORDS_IMPORT_TXT: "channels:keywords:import-txt",
 
   // Music
   MUSIC_GET_STATUS: "music:get-status",

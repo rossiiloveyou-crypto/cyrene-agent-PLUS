@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { repairMigrations } from "./memory-store-migrations"
+import { CURRENT_MEMORY_SCHEMA_VERSION } from "./memory-store-defaults"
 
 describe("repairMigrations", () => {
   it("repairs a legacy store missing keywords, syncStatus, evidenceIds and dmae states", () => {
@@ -26,7 +27,7 @@ describe("repairMigrations", () => {
     }
 
     const repaired = repairMigrations(legacy)
-    expect(repaired.schemaVersion).toBe(2)
+    expect(repaired.schemaVersion).toBe(CURRENT_MEMORY_SCHEMA_VERSION)
     expect(repaired.l2[0].syncStatus).toBe("synced")
     expect(repaired.l2[0].evidenceIds).toEqual([])
     expect(repaired.l2[0].keywords.length).toBeGreaterThan(0)
@@ -56,7 +57,7 @@ describe("repairMigrations", () => {
     }
 
     const repaired = repairMigrations(legacy)
-    expect(repaired.schemaVersion).toBe(2)
+    expect(repaired.schemaVersion).toBe(CURRENT_MEMORY_SCHEMA_VERSION)
     expect(repaired.l2[0].syncStatus).toBe("pending_sync")
     expect(repaired.l2DmaeStates).toHaveLength(1)
   })

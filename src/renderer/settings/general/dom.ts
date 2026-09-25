@@ -22,6 +22,6 @@ export const momentsReactionsRow = document.getElementById("moments-reactions-ro
 export const momentsCharacterRow = document.getElementById("moments-character-row") as HTMLElement;
 export const citaEnabledInput = document.getElementById("cita-enabled") as HTMLInputElement;
 export const citaEngineSelect = document.getElementById("cita-engine-select") as HTMLElement;
-export const clearChatHistoryBtn = document.getElementById("clear-chat-history-btn") as HTMLButtonElement;
+// 「清空聊天记录」按钮已随通用设置的聊天记录管理行一起移除（记忆面板提供「删除全部记忆」）
 export const customStyleSamplingBtn = document.getElementById("custom-style-sampling-btn") as HTMLButtonElement | null;
 export const customStylePromptBtn = document.getElementById("custom-style-prompt-btn") as HTMLButtonElement | null;

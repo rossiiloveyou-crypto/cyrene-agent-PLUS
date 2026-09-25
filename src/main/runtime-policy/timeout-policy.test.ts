@@ -6,7 +6,10 @@ describe("resolveTimeoutPolicy", () => {
   // Test 1: 每个 stage 返回原有默认值
   it("returns original default values for all stages", () => {
     const cases: Array<[RuntimeTimeoutStage, number]> = [
-      ["memory-llm", 30_000],
+      // memory-llm：30s → 120s。judge 的 prompt 很长（4.2k 字符）且非流式，
+      // 慢端点单次要 40-50s；30s 会让每 6 轮一次的判定必然超时（对话全部不落记忆），
+      // 而且结构化输出的 repair 需要第二次调用，预算必须容得下两次慢调用。
+      ["memory-llm", 120_000],
       ["tool-execution", 300_000],
       ["tts-minimax", 30_000],
       ["tts-gptsovits", 180_000],
@@ -55,7 +58,7 @@ describe("resolveTimeoutPolicy", () => {
 
     const after = resolveTimeoutPolicy({ stage: "memory-llm" });
     expect(after.totalMs).toBe(beforeTotal);
-    expect(after.totalMs).toBe(30_000);
+    expect(after.totalMs).toBe(120_000);
   });
 
   // Test 4: 未知 stage 在编译期不可传入 (type-level only, runtime check)

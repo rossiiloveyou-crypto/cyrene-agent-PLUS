@@ -759,7 +759,46 @@ describe("build-options", () => {
       assistantText: "好呀",
       cyreneFeeling: "温柔",
       channel: "wechat",
+      // 无会话 id → owner（root）域
+      scope: "zone:root",
+      // P3：桌面/无归属路径为 undefined（关系日志的 personKey 归属与 TurnAttribution 同源）
+      personKey: undefined,
     })
+  })
+
+  it("P3：关系日志拿到的 personKey 与 TurnAttribution 完全一致", async () => {
+    const recordRelationshipTurn = vi.fn(async () => {})
+    const scheduleMemoryWrite = vi.fn()
+    const deps: OnRunFinishedDeps = {
+      loadModelSettings: () => ({ provider: "test", baseUrl: "", model: "", apiKey: "", runtimeSync: "off" }),
+      scheduleMemoryWrite,
+      inferRuntimeState: () => ({ status: "陪伴中" }),
+      runtimeState: { status: "陪伴中", feeling: "温柔", expression: 0, updatedAt: 0 },
+      feelingToExpression: { "温柔": 0 },
+      setRuntimeState: () => {},
+      stickerEmbeddingIndex: null,
+      getEmbeddingProvider: () => null,
+      matchSticker: async () => null,
+      loadStickerSettings: () => ({}),
+      broadcastRuntimeStateChanged: () => {},
+      observeRuntimeState: async () => {},
+      recordRelationshipTurn,
+    }
+
+    const attribution = { personKey: "qq:10001", speakerName: "小明", chatType: "group" }
+    await onAgentRunFinished(
+      { reply: "好呀", toolResults: [] },
+      "今天有点累",
+      deps,
+      "qq",
+      undefined,
+      attribution,
+    )
+
+    // 关系日志与记忆调度必须拿到同一个归属人 —— 两处都来自同一个 TurnAttribution
+    const relationshipInput = recordRelationshipTurn.mock.calls[0][0]
+    expect(relationshipInput.personKey).toBe(attribution.personKey)
+    expect(scheduleMemoryWrite.mock.calls[0][3].personKey).toBe(relationshipInput.personKey)
   })
 
   it("uses the latest sticker embedding index when agent run finishes", async () => {
@@ -837,7 +876,13 @@ describe("build-options", () => {
 
     await onAgentRunFinished({ reply: "总结好了", toolResults: [] }, latestUserText, deps)
 
-    expect(scheduleMemoryWrite).toHaveBeenCalledWith("帮我总结这个 md", "总结好了", undefined)
+    // 桌面路径：归属对象存在但三个字段全 undefined，scheduler 侧整体退化为 P1 行为
+    expect(scheduleMemoryWrite).toHaveBeenCalledWith("帮我总结这个 md", "总结好了", undefined, {
+      personKey: undefined,
+      speakerName: undefined,
+      messageId: undefined,
+      chatType: undefined,
+    })
     expect(matchSticker).toHaveBeenCalledWith(
       "总结好了\n帮我总结这个 md",
       expect.anything(),

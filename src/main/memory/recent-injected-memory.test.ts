@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
   clearRecentMemoryInjections,
+  forgetMemoryInjections,
   getRecentlyInjectedMemoryIds,
   recordRecentMemoryInjection,
   recordRecentMemorySearchEntries,
@@ -44,5 +45,37 @@ describe("recent injected memory tracking", () => {
     ], 1000)
 
     expect(getRecentlyInjectedMemoryIds(1000)).toEqual(["l2_run"])
+  })
+
+  // —— P3 擦除某人：把已删记忆从"近期注入"缓存里忘掉 ——
+  describe("forgetMemoryInjections", () => {
+    it("按 l2Id 删除指定条目，其余原样保留", () => {
+      recordRecentMemoryInjection(["l2_a", "l2_b", "l2_c"], 1000)
+
+      const removed = forgetMemoryInjections(["l2_b"])
+
+      expect(removed).toBe(1)
+      expect(getRecentlyInjectedMemoryIds(1000)).toEqual(["l2_a", "l2_c"])
+      expect(wasRecentlyInjectedMemory("l2_b", 1000)).toBe(false)
+      expect(wasRecentlyInjectedMemory("l2_a", 1000)).toBe(true)
+    })
+
+    it("未知 id 被忽略，不报错也不影响计数", () => {
+      recordRecentMemoryInjection(["l2_a"], 1000)
+
+      expect(forgetMemoryInjections(["l2_missing", "l2_nope"])).toBe(0)
+      expect(forgetMemoryInjections([])).toBe(0)
+      expect(getRecentlyInjectedMemoryIds(1000)).toEqual(["l2_a"])
+    })
+
+    it("忘掉之后重新注入同 id 会重新记上（缓存没有残留状态）", () => {
+      recordRecentMemoryInjection(["l2_a", "l2_b"], 1000)
+
+      expect(forgetMemoryInjections(["l2_a", "l2_b"])).toBe(2)
+      expect(getRecentlyInjectedMemoryIds(1000)).toEqual([])
+
+      recordRecentMemoryInjection(["l2_a"], 2000)
+      expect(getRecentlyInjectedMemoryIds(2000)).toEqual(["l2_a"])
+    })
   })
 })

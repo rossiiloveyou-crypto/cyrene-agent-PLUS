@@ -6,7 +6,7 @@ import { channelsState } from "./state";
 import {
   channelsWechatEnabledEl, channelsFeishuEnabledEl, channelsQqEnabledEl,
   channelsRateUserEl, channelsRateChannelEl,
-  channelsTtsEl, channelsStickerEl, channelsMirrorEl,
+  channelsTtsEl, channelsStickerEl,
   channelsToolSandboxOffEl, channelsToolSandboxAllEl,
   channelsFeishuAppIdEl, channelsFeishuAppSecretEl, channelsFeishuAppSecretRevealBtn,
   channelsFeishuSaveBtn, channelsFeishuFeedbackEl,
@@ -14,15 +14,14 @@ import {
   channelsWechatLoginBtn, channelsWechatRestartBtn, channelsWechatFeedbackEl,
   channelsLogListEl, channelsLogRefreshBtn, channelsLogClearBtn,
   channelsQqListenModeEl, channelsQqCustomHostEl, channelsQqPortEl, channelsQqUrlEl, channelsQqUrlCopyBtn,
-  channelsQqTokenEl, channelsQqTokenGenerateBtn, channelsQqTokenCopyBtn, channelsQqPrivateAllowlistEl,
-  channelsQqGroupAllowlistEl, channelsQqSaveBtn, channelsQqTestBtn, channelsQqFeedbackEl,
+  channelsQqTokenEl, channelsQqTokenGenerateBtn, channelsQqTokenCopyBtn,
+  channelsQqZoneMigrationBtn, channelsQqSaveBtn, channelsQqTestBtn, channelsQqFeedbackEl,
   channelsQqBotEnabledEl, channelsQqBotStatusEl, channelsQqBotAppIdEl, channelsQqBotAppSecretEl,
-  channelsQqBotAllowAnyPrivateEl, channelsQqBotUserAllowlistEl, channelsQqBotGroupAllowlistEl,
+  channelsQqBotAllowAnyPrivateEl, channelsQqBotUserAllowlistEl, channelsQqBotZoneMigrationBtn,
   channelsQqBotSaveBtn, channelsQqBotTestBtn, channelsQqBotFeedbackEl,
-  channelsContextSourceEl, channelsContextTargetEl, channelsContextBindBtn,
-  channelsContextBindingsListEl, channelsContextFeedbackEl,
 } from "./dom";
 import { proactiveDeliverySelect } from "../general/dom";
+import { switchToSection } from "../shared/section-nav";
 import { normalizeProactiveDeliveryTarget } from "../../../shared/preferences";
 import { isProactiveDeliveryTargetSelectable } from "../../../shared/proactive-delivery";
 
@@ -77,8 +76,19 @@ function setQqFeedback(kind: "info" | "ok" | "err", msg: string): void {
   channelsQqFeedbackEl.classList.add(kind === "ok" ? "channels-feedback--ok" : kind === "err" ? "channels-feedback--err" : "channels-feedback--info");
 }
 
-function parseIdList(value: string): string[] {
-  return Array.from(new Set(value.split(/[\s,，]+/u).map((item) => item.trim()).filter((item) => /^\d+$/u.test(item))));
+/**
+ * 群白名单输入区已迁到「记忆区块」：加入区块 = 加入该渠道的群白名单。
+ * 这里只负责跳转，不再读写 allowedGroupIds / allowedGroupOpenids ——
+ * 保存配置时不带这两个字段，主进程 saveConfig 走对象合并，旧值不会被清空。
+ */
+function bindZoneMigrationButtons(): void {
+  for (const button of [channelsQqZoneMigrationBtn, channelsQqBotZoneMigrationBtn]) {
+    button?.addEventListener("click", () => {
+      if (switchToSection("zones")) return;
+      // 入口模块尚未注册（例如单测里只加载本面板）时退化为直接点导航项
+      document.querySelector<HTMLButtonElement>('.nav-item[data-section="zones"]')?.click();
+    });
+  }
 }
 
 async function copyInputValue(input: HTMLInputElement | null, label: string): Promise<void> {
@@ -163,102 +173,8 @@ export async function refreshChannelsLog(): Promise<void> {
   }
 }
 
-type ContextBindingSnapshot = Awaited<ReturnType<NonNullable<Window["settings"]>["channelsContextBindingsGet"]>>;
-
-function setContextFeedback(kind: "info" | "ok" | "err", message: string): void {
-  if (!channelsContextFeedbackEl) return;
-  channelsContextFeedbackEl.textContent = message;
-  channelsContextFeedbackEl.className = "channels-feedback";
-  channelsContextFeedbackEl.classList.add(kind === "ok" ? "channels-feedback--ok" : kind === "err" ? "channels-feedback--err" : "channels-feedback--info");
-}
-
-function appendOption(select: HTMLSelectElement, value: string, label: string): void {
-  const option = document.createElement("option");
-  option.value = value;
-  option.textContent = label;
-  select.append(option);
-}
-
-function renderContextBindingOptions(snapshot: ContextBindingSnapshot): void {
-  if (channelsContextSourceEl) {
-    channelsContextSourceEl.replaceChildren();
-    if (snapshot.externalChats.length === 0) {
-      appendOption(channelsContextSourceEl, "", "暂无最近聊天");
-    } else {
-      for (const chat of snapshot.externalChats) {
-        const kind = chat.chatType === "group" ? "群聊" : "私聊";
-        const name = chat.senderName || chat.chatId;
-        appendOption(channelsContextSourceEl, chat.sessionId, `${chat.channel} · ${kind} · ${name} (${chat.chatId})`);
-      }
-    }
-  }
-  if (channelsContextTargetEl) {
-    channelsContextTargetEl.replaceChildren();
-    if (snapshot.conversations.length === 0) {
-      appendOption(channelsContextTargetEl, "", "暂无可用对话");
-    } else {
-      for (const conversation of snapshot.conversations) {
-        appendOption(channelsContextTargetEl, conversation.id, `${conversation.title || "新对话"} · ${conversation.mode}`);
-      }
-    }
-  }
-}
-
-function renderContextBindings(snapshot: ContextBindingSnapshot): void {
-  if (!channelsContextBindingsListEl) return;
-  channelsContextBindingsListEl.replaceChildren();
-  if (snapshot.bindings.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty-hint";
-    empty.textContent = "暂无绑定。";
-    channelsContextBindingsListEl.append(empty);
-    return;
-  }
-  const chats = new Map(snapshot.externalChats.map((chat) => [chat.sessionId, chat]));
-  const conversations = new Map(snapshot.conversations.map((conversation) => [conversation.id, conversation]));
-  for (const binding of snapshot.bindings) {
-    const chat = chats.get(binding.sessionId);
-    const conversation = conversations.get(binding.conversationId);
-    const row = document.createElement("div");
-    row.className = "channels-context-binding";
-    const text = document.createElement("span");
-    text.textContent = `${chat?.channel ?? "外部聊天"} · ${chat?.senderName || chat?.chatId || binding.sessionId} → ${conversation?.title || binding.conversationId}`;
-    row.append(text);
-    const unbind = document.createElement("button");
-    unbind.type = "button";
-    unbind.className = "btn-secondary";
-    unbind.textContent = "解除";
-    unbind.addEventListener("click", async () => {
-      setContextFeedback("info", "解除中...");
-      try {
-        const result = await window.settings!.channelsContextUnbind(binding.sessionId);
-        if (!result.ok) throw new Error(result.error ?? "解除失败");
-        setContextFeedback("ok", "已解除上下文绑定");
-        await refreshContextBindings();
-      } catch (err) {
-        setContextFeedback("err", err instanceof Error ? err.message : String(err));
-      }
-    });
-    row.append(unbind);
-    channelsContextBindingsListEl.append(row);
-  }
-}
-
-export async function refreshContextBindings(): Promise<void> {
-  try {
-    const snapshot = await window.settings!.channelsContextBindingsGet();
-    renderContextBindingOptions(snapshot);
-    renderContextBindings(snapshot);
-  } catch (err) {
-    setContextFeedback("err", err instanceof Error ? err.message : String(err));
-  }
-}
-
 export async function loadChannelsPanel(): Promise<void> {
-  if (channelsState.initialized) {
-    await refreshContextBindings();
-    return;
-  }
+  if (channelsState.initialized) return;
   channelsState.initialized = true;
   try {
     const cfg = await window.settings.channelsGetConfig();
@@ -269,7 +185,6 @@ export async function loadChannelsPanel(): Promise<void> {
     if (channelsRateChannelEl) channelsRateChannelEl.value = String(cfg.rateLimitPerChannel ?? 100);
     if (channelsTtsEl) channelsTtsEl.checked = cfg.ttsEnabled !== false;
     if (channelsStickerEl) channelsStickerEl.checked = cfg.stickerEnabled !== false;
-    if (channelsMirrorEl) channelsMirrorEl.checked = cfg.mirrorToDesktop !== false;
     if (channelsToolSandboxOffEl) channelsToolSandboxOffEl.checked = cfg.toolSandbox === "off";
     if (channelsToolSandboxAllEl) channelsToolSandboxAllEl.checked = cfg.toolSandbox === "all";
 
@@ -284,8 +199,9 @@ export async function loadChannelsPanel(): Promise<void> {
     if (channelsQqListenModeEl) channelsQqListenModeEl.value = cfg.qq?.listenMode ?? "auto";
     if (channelsQqCustomHostEl) channelsQqCustomHostEl.value = cfg.qq?.customHost ?? "";
     if (channelsQqPortEl) channelsQqPortEl.value = String(cfg.qq?.port ?? 6200);
-    if (channelsQqPrivateAllowlistEl) channelsQqPrivateAllowlistEl.value = (cfg.qq?.allowedPrivateUserIds ?? []).join("\n");
-    if (channelsQqGroupAllowlistEl) channelsQqGroupAllowlistEl.value = (cfg.qq?.allowedGroupIds ?? []).join("\n");
+    // 群号白名单已迁到「记忆区块」面板（加入区块 = 加入群白名单）；
+    // 旧配置里的 allowedGroupIds 主进程仍会读，这里不回显也不改写。
+    // 私聊名单 / 群员名单 / 群员发言限制已迁到聊天窗口「控制台 → 白名单与权限」。
     if (channelsQqTokenEl) channelsQqTokenEl.placeholder = cfg.qq?.hasAccessToken
       ? "已保存（输入新值会覆盖）"
       : "留空仅允许本机 127.0.0.1 监听；WSL/跨网卡请先生成";
@@ -303,7 +219,7 @@ export async function loadChannelsPanel(): Promise<void> {
     }
     if (channelsQqBotAllowAnyPrivateEl) channelsQqBotAllowAnyPrivateEl.checked = !!cfg.qqbot?.allowAnyPrivate;
     if (channelsQqBotUserAllowlistEl) channelsQqBotUserAllowlistEl.value = (cfg.qqbot?.allowedUserOpenids ?? []).join("\n");
-    if (channelsQqBotGroupAllowlistEl) channelsQqBotGroupAllowlistEl.value = (cfg.qqbot?.allowedGroupOpenids ?? []).join("\n");
+    // 群 openid 白名单同样迁到「记忆区块」：旧配置 allowedGroupOpenids 主进程仍会读，这里不改写。
 
     // 拉一次渠道状态
     const status = (await window.settings.channelsGetStatus()) as Record<string, { phase: string; message?: string; detail?: Record<string, unknown> }>;
@@ -316,7 +232,6 @@ export async function loadChannelsPanel(): Promise<void> {
     renderQqBotDetail(status.qqbot);
     // 拉一次消息日志
     void refreshChannelsLog();
-    void refreshContextBindings();
   } catch (err) {
     console.warn("[Channels] loadChannelsPanel 失败:", err);
   }
@@ -334,7 +249,6 @@ export async function loadChannelsPanel(): Promise<void> {
         rateLimitPerChannel: Number(channelsRateChannelEl?.value) || 100,
         ttsEnabled: channelsTtsEl?.checked ?? true,
         stickerEnabled: channelsStickerEl?.checked ?? true,
-        mirrorToDesktop: channelsMirrorEl?.checked ?? true,
         toolSandbox: channelsToolSandboxOffEl?.checked
           ? "off"
           : "all",
@@ -350,30 +264,11 @@ export async function loadChannelsPanel(): Promise<void> {
     channelsRateChannelEl,
     channelsTtsEl,
     channelsStickerEl,
-    channelsMirrorEl,
     channelsToolSandboxOffEl,
     channelsToolSandboxAllEl,
   ]) {
     el?.addEventListener("change", scheduleSave);
   }
-
-  channelsContextBindBtn?.addEventListener("click", async () => {
-    const sessionId = channelsContextSourceEl?.value ?? "";
-    const conversationId = channelsContextTargetEl?.value ?? "";
-    if (!sessionId || !conversationId) {
-      setContextFeedback("err", "请先选择外部聊天和桌面对话");
-      return;
-    }
-    setContextFeedback("info", "绑定中...");
-    try {
-      const result = await window.settings!.channelsContextBind({ sessionId, conversationId });
-      if (!result.ok) throw new Error(result.error ?? "绑定失败");
-      setContextFeedback("ok", "上下文绑定已保存");
-      await refreshContextBindings();
-    } catch (err) {
-      setContextFeedback("err", err instanceof Error ? err.message : String(err));
-    }
-  });
 
   // 监听安装进度（渠道运行时安装进行时才会收到）
   window.settings.onChannelsInstallProgress((progress) => {
@@ -557,8 +452,7 @@ export async function loadChannelsPanel(): Promise<void> {
       listenMode,
       customHost: channelsQqCustomHostEl?.value.trim() || undefined,
       port: Number(channelsQqPortEl?.value) || 6200,
-      allowedPrivateUserIds: parseIdList(channelsQqPrivateAllowlistEl?.value ?? ""),
-      allowedGroupIds: parseIdList(channelsQqGroupAllowlistEl?.value ?? ""),
+      // 不再写 allowedGroupIds：群白名单由「记忆区块」成员关系决定（旧值原样保留）
     };
     if (channelsQqTokenEl?.value) qq.accessToken = channelsQqTokenEl.value;
     try {
@@ -603,7 +497,7 @@ export async function loadChannelsPanel(): Promise<void> {
       appId,
       allowAnyPrivate: channelsQqBotAllowAnyPrivateEl?.checked ?? false,
       allowedUserOpenids: parseOpenidList(channelsQqBotUserAllowlistEl?.value ?? ""),
-      allowedGroupOpenids: parseOpenidList(channelsQqBotGroupAllowlistEl?.value ?? ""),
+      // 不再写 allowedGroupOpenids：群白名单由「记忆区块」成员关系决定（旧值原样保留）
     };
     // secret 不回显：留空表示沿用已存值
     if (channelsQqBotAppSecretEl?.value) qqbot.appSecret = channelsQqBotAppSecretEl.value;
@@ -637,6 +531,9 @@ export async function loadChannelsPanel(): Promise<void> {
       setQqBotFeedback("err", error instanceof Error ? error.message : String(error));
     }
   });
+
+  // ===== 群白名单迁移引导（群号 / 群 openid 都改到「记忆区块」里维护） =====
+  bindZoneMigrationButtons();
 
   // ===== 消息日志事件绑定 =====
   channelsLogRefreshBtn?.addEventListener("click", () => void refreshChannelsLog());

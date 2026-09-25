@@ -70,6 +70,8 @@ describe("MemoryManager L2 sync", () => {
       candidate.content,
       allL2[0].id,
       expect.objectContaining({ confidence: candidate.confidence }),
+      // 第 4 参是记忆域：候选没带 scope 时显式传 undefined（调度层才会注入真实域）
+      undefined,
     )
   })
 
@@ -322,5 +324,97 @@ describe("MemoryManager L2 sync", () => {
     await memoryManager.writeMemory([candidate])
 
     expect(await memoryStore.getConflictLogs()).toHaveLength(0)
+  })
+
+  // ── P2 归属落库 ──
+
+  it("writeL2 把 speakerIds / subjectIds / sourceMessageIds 落到 L2 条目上", async () => {
+    ragMock.addL2MemoryVector.mockResolvedValue("rag_p2")
+    const { memoryManager } = await import("./memory-manager")
+    const { memoryStore } = await import("./memory-store")
+    const candidate: MemoryCandidate = {
+      layer: "L2",
+      content: "小明最近在学 Rust",
+      confidence: 0.9,
+      triggerText: "我最近在学 Rust",
+      scope: "solo:channel:qq:ab12cd34",
+      sourceConversationId: "channel:qq:ab12cd34",
+      speakerIds: ["qq:10001"],
+      subjectIds: ["qq:10001"],
+      sourceMessageIds: ["msg_1758681234567_a3f9k2"],
+    }
+
+    await memoryManager.writeMemory([candidate])
+
+    const [l2] = await memoryStore.getAllL2()
+    expect(l2.speakerIds).toEqual(["qq:10001"])
+    expect(l2.subjectIds).toEqual(["qq:10001"])
+    expect(l2.sourceMessageIds).toEqual(["msg_1758681234567_a3f9k2"])
+    expect(l2.sourceConversationId).toBe("channel:qq:ab12cd34")
+  })
+
+  it("⚠️ createEvidence 的 messageIds 现在有值（此前恒空，因为没人填 sourceMessageIds）", async () => {
+    ragMock.addL2MemoryVector.mockResolvedValue("rag_p2b")
+    const { memoryManager } = await import("./memory-manager")
+    const { memoryStore } = await import("./memory-store")
+    const candidate: MemoryCandidate = {
+      layer: "L2",
+      content: "小明最近在学 Rust",
+      confidence: 0.9,
+      triggerText: "我最近在学 Rust",
+      sourceConversationId: "channel:qq:ab12cd34",
+      speakerIds: ["qq:10001"],
+      subjectIds: ["qq:10001"],
+      sourceMessageIds: ["msg_a", "msg_b"],
+    }
+
+    await memoryManager.writeMemory([candidate])
+
+    const [l2] = await memoryStore.getAllL2()
+    const evidence = await memoryStore.getEvidenceByMemoryId(l2.id)
+    expect(evidence).toHaveLength(1)
+    expect(evidence[0].messageIds).toEqual(["msg_a", "msg_b"])
+    expect(evidence[0].conversationId).toBe("channel:qq:ab12cd34")
+  })
+
+  it("空数组不落字段（老数据 / 桌面路径与「解析后无归属」在磁盘上同形）", async () => {
+    ragMock.addL2MemoryVector.mockResolvedValue("rag_p2c")
+    const { memoryManager } = await import("./memory-manager")
+    const { memoryStore } = await import("./memory-store")
+    const candidate: MemoryCandidate = {
+      layer: "L2",
+      content: "用户在重构记忆系统",
+      confidence: 0.9,
+      triggerText: "重构记忆系统",
+      speakerIds: [],
+      subjectIds: [],
+      sourceMessageIds: [],
+    }
+
+    await memoryManager.writeMemory([candidate])
+
+    const [l2] = await memoryStore.getAllL2()
+    expect("speakerIds" in l2).toBe(false)
+    expect("subjectIds" in l2).toBe(false)
+    expect("sourceMessageIds" in l2).toBe(false)
+  })
+
+  it("归属字段缺失时行为与 P1 完全一致（桌面路径零变化）", async () => {
+    ragMock.addL2MemoryVector.mockResolvedValue("rag_p2d")
+    const { memoryManager } = await import("./memory-manager")
+    const { memoryStore } = await import("./memory-store")
+    const candidate: MemoryCandidate = {
+      layer: "L2",
+      content: "用户喜欢香菇",
+      confidence: 0.9,
+      triggerText: "我喜欢香菇",
+    }
+
+    await memoryManager.writeMemory([candidate])
+
+    const [l2] = await memoryStore.getAllL2()
+    expect("speakerIds" in l2).toBe(false)
+    expect("subjectIds" in l2).toBe(false)
+    expect("sourceMessageIds" in l2).toBe(false)
   })
 })

@@ -48,7 +48,17 @@ const STAGE_DEFAULTS: Record<RuntimeStage, TokenBudgetPolicy> = {
     defaultMaxOutputTokens: 1600,
   },
   "memory-judge": {
-    defaultMaxOutputTokens: 800,
+    // 800 → 32768（不设实际上的上限）。
+    //
+    // 为什么拉到这么大：judge 的每条候选都要写全 summary / slug / sourceQuote(软上限 500 字)
+    // / content / contextSummary / evidenceQuotes / reason 等字段，实测一条候选 ≈1000 字符
+    // ≈700 token；800 会在"一批里有 2 个以上话题"时把 JSON 从中间切断 → 校验失败 →
+    // repair 再切一次 → REPAIR_EXHAUSTED，**这一批对话的记忆全部丢失**。
+    // 而"一批几个话题"完全取决于群友说了什么，不是我们能假设的量：与其猜一个够用的数字，
+    // 不如设成模型/端点允许的上限，让截断这件事从根上不可能发生。
+    // max_tokens 只是上限，不会让模型多说话，也不会按上限计费（按实际输出计）。
+    // 实测 SiliconFlow / Qwen3-14B 接受 32768（含 4.2k 字符的 judge prompt）。
+    defaultMaxOutputTokens: 32768,
   },
   "memory-compressor": {
     defaultMaxOutputTokens: 500,

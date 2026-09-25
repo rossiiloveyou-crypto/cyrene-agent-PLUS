@@ -56,7 +56,6 @@ import {
 import { useComposerAttachments } from "../hooks/useComposerAttachments";
 import { useSessionMessages } from "../hooks/useSessionMessages";
 import { useSchedulerEvents } from "../hooks/useSchedulerEvents";
-import { useChannelMirrorEvents } from "../hooks/useChannelMirrorEvents";
 import { AgentRunController, type AgentRunInput } from "./run/AgentRunController";
 import {
   appendPendingQueueEntry,
@@ -178,12 +177,6 @@ export function ChatPage() {
     persistMessage: (sessionId, message) => {
       void chatStore()?.append(sessionId, message);
     },
-  });
-
-  // 渠道消息镜像：微信/飞书等外部渠道收发消息以临时系统消息展示在当前会话（dispatcher 推送）
-  useChannelMirrorEvents({
-    getActiveSessionId: () => activeSessionIdsRef.current[activeModeRef.current],
-    appendMessages,
   });
 
   useEffect(() => {
@@ -414,6 +407,19 @@ export function ChatPage() {
       unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // main → ChatPage：外部入口要求直达某个侧栏面板（如状态栏「切换模型」现在指向聊天窗口的
+  // 模型面板——API 配置已从设置窗口迁移到这里）。只接受白名单内的面板 id。
+  useEffect(() => {
+    const store = chatStore();
+    if (!store?.onChatOpenPanel) return;
+    const allowedPanels: ChatPagePanel[] = ["tool", "skill", "model", "plugin", "moments", "console"];
+    const unsubscribe = store.onChatOpenPanel((panel) => {
+      if (!allowedPanels.includes(panel as ChatPagePanel)) return;
+      setActivePanel(panel as ChatPagePanel);
+    });
+    return unsubscribe;
   }, []);
 
   // 外部语音文本提交：主进程经 IPC 要求把文本提交到租约冻结的会话。

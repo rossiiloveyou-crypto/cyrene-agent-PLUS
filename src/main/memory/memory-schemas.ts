@@ -96,6 +96,52 @@ export function isValidSourceQuote(value: unknown): value is string {
   return trimmed.length > 0 && trimmed.length <= SOURCE_QUOTE_MAX_LENGTH;
 }
 
+// ── L2 归属校验（P2）──
+
+/** `subjectNames` 单项最大长度；超出视为幻觉/复述整句，丢弃该项。 */
+export const SUBJECT_NAME_MAX_LENGTH = 32;
+/** `subjectNames` 最多项数；一条记忆不该"关于"一屋子人。 */
+export const SUBJECT_NAMES_MAX_ITEMS = 5;
+/** `sourceTurnIndexes` 最多项数；judge 的窗口上限是 8 轮，10 已留余量。 */
+export const SOURCE_TURN_INDEXES_MAX_ITEMS = 10;
+
+/**
+ * 解析 LLM 输出的 `subjectNames`：只保留非空、≤32 字的字符串项，最多 5 项。
+ *
+ * 超限项**丢弃**而不是抛错 —— 归属是增益信息，不该让整条候选写不进去。
+ */
+export function parseSubjectNames(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const names: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (!name || name.length > SUBJECT_NAME_MAX_LENGTH) continue;
+    if (names.includes(name)) continue;
+    names.push(name);
+    if (names.length >= SUBJECT_NAMES_MAX_ITEMS) break;
+  }
+  return names.length > 0 ? names : undefined;
+}
+
+/**
+ * 解析 LLM 输出的 `sourceTurnIndexes`：只保留 1-based 正整数，最多 10 项。
+ *
+ * 越界项（> 本批轮数）在这里不判 —— 校验层拿不到轮数，
+ * 由 `resolveTurnIndexes()`（person-attribution.ts）在归属解析时忽略。
+ */
+export function parseSourceTurnIndexes(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const indexes: number[] = [];
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isInteger(item) || item < 1) continue;
+    if (indexes.includes(item)) continue;
+    indexes.push(item);
+    if (indexes.length >= SOURCE_TURN_INDEXES_MAX_ITEMS) break;
+  }
+  return indexes.length > 0 ? indexes : undefined;
+}
+
 // ── 用于 provider_json_schema 的 JSON Schema ──
 // A 档模型（GPT/Claude/Kimi/Doubao）会收到这些 schema，严格约束输出结构。
 
@@ -124,6 +170,8 @@ export const MEMORY_JUDGE_JSON_SCHEMA: Record<string, unknown> = {
           shouldWrite: { type: "boolean" },
           reason: { type: "string" },
           forbiddenOverclaims: { type: "array", items: { type: "string" } },
+          subjectNames: { type: "array", items: { type: "string" } },
+          sourceTurnIndexes: { type: "array", items: { type: "number" } },
         },
         required: ["layer", "content", "confidence", "triggerText"],
         additionalProperties: false,
@@ -238,6 +286,14 @@ function parseMemoryCandidate(value: unknown): MemoryCandidate {
   if (typeof obj.shouldWrite === "boolean") result.shouldWrite = obj.shouldWrite;
   if (typeof obj.reason === "string") result.reason = obj.reason;
   if (Array.isArray(obj.forbiddenOverclaims)) result.forbiddenOverclaims = stringArray(obj.forbiddenOverclaims, "forbiddenOverclaims");
+  // P2 归属：仅 L2 候选有意义（L0/L1 是 owner 级画像，没有"关于谁"的粒度）。
+  // 两项都是增益信息，非法值逐项丢弃、绝不抛错 —— 归属丢了不该连带候选写不进去。
+  if (layer === "L2") {
+    const subjectNames = parseSubjectNames(obj.subjectNames);
+    if (subjectNames) result.subjectNames = subjectNames;
+    const sourceTurnIndexes = parseSourceTurnIndexes(obj.sourceTurnIndexes);
+    if (sourceTurnIndexes) result.sourceTurnIndexes = sourceTurnIndexes;
+  }
   return result;
 }
 

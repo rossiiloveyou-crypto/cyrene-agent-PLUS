@@ -47,8 +47,14 @@ export interface ResolveTimeoutPolicyOptions {
 
 const STAGE_DEFAULTS: Record<RuntimeTimeoutStage, TimeoutPolicy> = {
   "memory-llm": {
-    // memory-judge.ts, memory-compressor.ts：30s
-    totalMs: 30_000,
+    // memory-judge / memory-compressor / memory-reflect / memory-resolver 共用。
+    //
+    // 为什么是 120s 而不是 30s：这个阶段的调用是**非流式**的、prompt 又长
+    // （judge 的 system prompt 已有 4.2k 字符 + JSON schema 说明），慢端点单次就要
+    // 40-50s；30s 会让 judge 每一次都必然超时，而 judge 每 6 轮才跑一次，
+    // 失败一次等于这 6 轮的对话全部不落记忆（实测：DeepSeek 系端点 49s 超时）。
+    // 结构化输出的 repair 还要再来一次，所以预算必须容得下"两次慢调用"。
+    totalMs: 120_000,
   },
   "tool-execution": {
     // built-in-tools.ts SHELL_TIMEOUT_MS：5min

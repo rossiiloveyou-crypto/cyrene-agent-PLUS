@@ -35,6 +35,8 @@ export interface ChatStoreApi {
   setActiveSession: (sessionId: string | null, mode?: ConversationMode) => Promise<unknown>;
   onChanged: (callback: () => void) => () => void;
   onReactSwitchSession: (callback: (sessionId: string) => void) => () => void;
+  /** main → ChatPage：要求打开指定侧栏面板（如侧栏「切换模型」直达模型/API 配置） */
+  onChatOpenPanel?: (callback: (panel: string) => void) => () => void;
   notifyReactReady: () => void;
   // 本页面的渲染目标标识；语音提交桥据此识别过期请求
   getRendererTargetId: () => string;

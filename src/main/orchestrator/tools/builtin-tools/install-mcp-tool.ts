@@ -89,7 +89,15 @@ export const installMcpServerTool: ToolDefinition = {
       id: { type: "string", description: "唯一标识，留空则自动生成" },
       name: { type: "string", description: "展示名，比如 'mail-mcp'" },
       command: { type: "string", description: "可执行命令，例如 'node' / 'pythonw' / 'npx'" },
-      args: { type: "array", description: "命令行参数数组，例如 ['C:/.../bridging_mail_mcp.py']" },
+      // items 不是可选项：Google 系（Gemini）对 function declaration 做严格
+      // JSON Schema 校验，声明 type:"array" 却不给 items 会整包 400
+      // （INVALID_ARGUMENT ... properties[args].items: missing field.），
+      // 而工具清单是整包下发的 —— 一处缺失会让该模型的所有请求全灭。
+      args: {
+        type: "array",
+        items: { type: "string" },
+        description: "命令行参数数组，例如 ['C:/.../bridging_mail_mcp.py']",
+      },
       env: { type: "object", description: "环境变量键值对" },
       cwd: { type: "string", description: "工作目录绝对路径，可选" },
     },

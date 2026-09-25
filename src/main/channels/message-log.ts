@@ -98,6 +98,96 @@ export function clearLog(): void {
   }
 }
 
+/**
+ * 内部：`log.jsonl` 的原始行（已去掉空行）。**读失败会抛**，由调用方决定怎么记失败。
+ * 保留原始行，是为了让逐行过滤重写能把别人的行按原字节写回（不让坏行被吃掉）。
+ */
+function readLogRawLines(): string[] {
+  return fs.readFileSync(filePath(), "utf8").split("\n").filter((line) => line.length > 0);
+}
+
+/** 内部：只读场景的容错包装（文件不存在 / 读不了 → `[]`）。 */
+function tryReadLogRawLines(): string[] {
+  try {
+    return readLogRawLines();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 只读：这个人还有多少运行日志行（P3 预演用）。
+ *
+ * 口径与 `erasePersonLog().lines` 完全一致（同一份原始行 + 同一个 `senderId` 判据），
+ * 这样预演报告的计数与执行后报告的删除数天然对得上。坏行不计入。
+ * **不写任何东西**；文件不存在就是 0，绝不抛错。
+ */
+export function countPersonLog(senderId: string): number {
+  let lines = 0;
+  for (const line of tryReadLogRawLines()) {
+    try {
+      const parsed = JSON.parse(line) as LogEntry;
+      if (parsed && parsed.senderId === senderId) lines += 1;
+    } catch {
+      /* 坏行不计入 */
+    }
+  }
+  return lines;
+}
+
+/**
+ * 擦除**某一个人**的运行日志（P3 擦除某人）：磁盘 JSONL 逐行过滤重写 + 内存数组清理。
+ *
+ * ① `channels/log.jsonl` 里 `senderId` 命中的行删掉，其余行按原顺序原样重写整个文件
+ *    （保留 1000 行滚动语义：过滤只会让文件更短，再按 MAX_FILE_LINES 兜一次上限；
+ *    坏行原样保留 —— 一行坏 JSON 不能让别人的日志消失）；
+ * ② 内存 `inMemory` 数组里的同 senderId 条目清掉。
+ *
+ * 全同步实现：本模块 IO 本身即同步，**中间不能有 await**（Node 单线程 + 无让出点才保证
+ * 不会与 appendLog 的追加交错，§0.4 约束 4）。`failed` 收集写失败的路径。
+ */
+export function erasePersonLog(senderId: string): { lines: number; failed: string[] } {
+  const failed: string[] = [];
+
+  // ② 内存：先清，这样即使磁盘失败 UI 也不会继续显示他的消息
+  for (let i = inMemory.length - 1; i >= 0; i--) {
+    if (inMemory[i].senderId === senderId) inMemory.splice(i, 1);
+  }
+
+  // ① 磁盘：读 → 过滤 → 写，全程同步
+  const target = filePath();
+  let lines = 0;
+  try {
+    if (fs.existsSync(target)) {
+      const kept: string[] = [];
+      for (const line of readLogRawLines()) {
+        let parsed: LogEntry | null = null;
+        try {
+          parsed = JSON.parse(line) as LogEntry;
+        } catch {
+          kept.push(line); // 坏行保留
+          continue;
+        }
+        if (parsed && parsed.senderId === senderId) {
+          lines += 1;
+          continue;
+        }
+        kept.push(line);
+      }
+      if (lines > 0) {
+        const capped = kept.length > MAX_FILE_LINES ? kept.slice(kept.length - MAX_FILE_LINES) : kept;
+        ensureDir();
+        fs.writeFileSync(target, capped.length > 0 ? `${capped.join("\n")}\n` : "", "utf8");
+      }
+    }
+  } catch (err) {
+    failed.push(target);
+    console.warn(LOG, "擦除日志失败:", err instanceof Error ? err.message : err);
+  }
+
+  return { lines, failed };
+}
+
 /** 启动时从磁盘 reload 到内存（避免重启后内存里没有历史）。 */
 export function reloadLogFromDisk(): void {
   try {
