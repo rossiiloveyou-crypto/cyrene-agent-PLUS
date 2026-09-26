@@ -6,7 +6,6 @@ export const musicReturnBtn = document.getElementById("music-return-btn");
 export const musicSearchForm = document.getElementById("music-search-form");
 export const musicSearchHint = document.getElementById("music-search-hint");
 export const musicQrStatus = document.getElementById("music-qr-status");
-export const musicProfileAvatar = document.getElementById("music-profile-avatar") as HTMLImageElement | null;
 export const musicLoginBtn = document.getElementById("music-login-btn") as HTMLButtonElement | null;
 export const musicCancelBtn = document.createElement("button");
 export const musicDisconnectBtn = document.createElement("button");

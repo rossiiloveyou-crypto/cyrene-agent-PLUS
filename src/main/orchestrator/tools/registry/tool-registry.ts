@@ -2,6 +2,8 @@
 // Worldbook 不在此注册，它走独立常驻检索路径
 
 import { searchMemory } from "../../../rag/index";
+import { resolveScopeId } from "../../../zones/scope";
+import type { MemoryCandidate } from "../../../memory/memory-types";
 import type { ToolRiskLevel } from "../../../permission";
 import type { ToolContext } from "./tool-context";
 import type { ConversationMode } from "../../../../shared/chat-types";
@@ -248,8 +250,10 @@ toolRegistry.register({
     },
     required: ['query'],
   },
-  execute: async (args) => {
-    const results = await searchMemory(String(args.query), 'user_memory', Number(args.topK) || 5);
+  execute: async (args, ctx) => {
+    // 只召回当前会话所属记忆域：群聊里问"我喜欢什么"不该捞出桌面的私聊记忆。
+    const scopeId = resolveScopeId(ctx?.conversationId);
+    const results = await searchMemory(String(args.query), 'user_memory', Number(args.topK) || 5, { scopeId });
     return results.map(formatMemoryResult).filter(Boolean).join('\n');
   },
 });
@@ -328,18 +332,7 @@ export function buildWriteCandidate(args: {
   slug?: string;
   sourceQuote?: string;
   triggerText: string;
-}): {
-  layer: "L0" | "L1" | "L2";
-  content: string;
-  field?: string;
-  slug?: string;
-  sourceQuote?: string;
-  confidence: number;
-  certainty: "explicit";
-  attribution: "user_explicit";
-  shouldWrite: true;
-  triggerText: string;
-} | null {
+}): MemoryCandidate | null {
   const layer = args.layer.toUpperCase();
   if (layer !== "L0" && layer !== "L1" && layer !== "L2") return null;
   if (!args.content.trim()) return null;
@@ -380,15 +373,19 @@ toolRegistry.register({
       id: { type: 'string', description: 'L2 条目 id（来自概览列表），传入则读该条全文' },
     },
   },
-  execute: async (args) => {
-    // 懒加载避开注册期副作用（与 fs-tools 的 loadVisionConfigLazy 同模式）
-    const { memoryStore } = require("../../../memory/memory-store") as
-      typeof import("../../../memory/memory-store");
+  execute: async (args, ctx) => {
+    // 懒加载避开注册期副作用（与 fs-tools 的 loadVisionConfigLazy 同模式）。
+    // ⚠️ 用动态 import 而不是 require()：require 在 ESM 打包产物与 vitest 下都不可拦截，
+    //    这条路径会因此完全无法单测（P2 实测撞到）。
+    const { memoryStore } = await import("../../../memory/memory-store");
+
+    // 通读同样限域：本会话只应看到本域的记忆目录。
+    const scopeId = resolveScopeId(ctx?.conversationId);
+    const scopedL2 = await memoryStore.getL2ForScope(scopeId);
 
     const id = String(args.id || "").trim();
     if (id) {
-      const all = await memoryStore.getAllL2();
-      const hit = all.find((m) => m.id === id);
+      const hit = scopedL2.find((m) => m.id === id);
       if (!hit) return `[错误] 找不到 L2 条目: ${id}（先无参调用拿概览列表）`;
       const lines = [
         `id: ${hit.id}`,
@@ -403,12 +400,11 @@ toolRegistry.register({
       return lines.join('\n');
     }
 
-    const [l0, l1, l2All] = await Promise.all([
+    const [l0, l1] = await Promise.all([
       memoryStore.getL0(),
       memoryStore.getL1(),
-      memoryStore.getAllL2(),
     ]);
-    const items: L2OverviewItem[] = l2All.map((m) => ({
+    const items: L2OverviewItem[] = scopedL2.map((m) => ({
       id: m.id,
       title: m.slug || (m.content.length > 40 ? m.content.slice(0, 40) + "…" : m.content),
       createdAt: m.createdAt,
@@ -457,11 +453,17 @@ toolRegistry.register({
     });
     if (!candidate) return "[错误] 参数无效：layer 必须是 L0/L1/L2，content 不能为空";
 
-    // 懒加载走 memoryManager.writeMemory 既有校验链（L0 锁定/字段白名单/L1 分流/L2 写入+RAG 同步）
-    const { memoryManager } = require("../../../memory/memory-manager") as
-      typeof import("../../../memory/memory-manager");
-    const { memoryStore } = require("../../../memory/memory-store") as
-      typeof import("../../../memory/memory-store");
+    // 归属由调度层决定，不由 LLM 决定：把当前会话的记忆域钉在候选上。
+    // 非 root 域的 L0/L1 候选会被 MemoryManager 丢弃（不污染 owner 画像）。
+    candidate.scope = resolveScopeId(ctx?.conversationId);
+    // P2：补上来源会话。此前不注入，导致 memory-manager 的 `?? ""` 落成空串 ——
+    // 工具写入的记忆连"是哪个会话说的"都追不回来（P3 溯源与按会话删除都用它）。
+    candidate.sourceConversationId = ctx?.conversationId;
+
+    // 懒加载走 memoryManager.writeMemory 既有校验链（L0 锁定/字段白名单/L1 分流/L2 写入+RAG 同步）。
+    // 同 read_memory：动态 import 而非 require()，否则本工具无法单测。
+    const { memoryManager } = await import("../../../memory/memory-manager");
+    const { memoryStore } = await import("../../../memory/memory-store");
 
     if (candidate.layer === "L0") {
       const l0 = await memoryStore.getL0();

@@ -12,6 +12,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { app } from "electron";
+import { recordMessageBlocked } from "../../audit-events";
 import type { ChannelAdapter } from "../base";
 import type {
   ChannelAttachment,
@@ -26,6 +27,7 @@ import { loadChannelsSettings, type QqBotChannelConfig } from "../../settings-st
 import { QqBotApiClient, QqBotApiError } from "./qqbot-api-client";
 import { QqBotWsClient, type QqBotEventType } from "./qqbot-ws-client";
 import { splitQqText } from "../qq/napcat-adapter";
+import { isGroupInAnyZone } from "../../../zones/scope";
 
 const CAPABILITY: ChannelCapability = {
   text: true,
@@ -54,6 +56,16 @@ interface InboundReplyContext {
   seqUsed: number;
 }
 
+/**
+ * 生产环境的群策略接线：**加入任一区块 = 加入群白名单**。
+ *
+ * 抽成函数是为了让"加进区块 → 群里 @ 机器人真的会被响应"这条链路可被测试直接验证
+ * （之前这段是内联对象字面量，测试碰不到，白名单断链也不会报警）。
+ */
+export function qqBotGroupPolicyOptions(): { isGroupAllowed: (chatId: string) => boolean } {
+  return { isGroupAllowed: (chatId) => isGroupInAnyZone("qqbot", chatId) };
+}
+
 /** 事件体 → 是否在白名单内（导出便于测试） */
 export function isQqBotEventAllowed(
   data: {
@@ -62,11 +74,14 @@ export function isQqBotEventAllowed(
     chatId: string;
   },
   config: QqBotChannelConfig,
+  /** 区块成员判定：加入区块 = 加入白名单（与旧 allowedGroupOpenids 取并集）。 */
+  options: { isGroupAllowed?: (chatId: string) => boolean } = {},
 ): boolean {
   if (data.chatType === "private") {
     return config.allowAnyPrivate || config.allowedUserOpenids.includes(data.senderId);
   }
-  return config.allowedGroupOpenids.includes(data.chatId);
+  return config.allowedGroupOpenids.includes(data.chatId)
+    || (options.isGroupAllowed?.(data.chatId) ?? false);
 }
 
 /** 事件体 → IncomingMessage（导出便于测试；attachments 由 adapter 侧下载后补 filePath） */
@@ -292,15 +307,36 @@ export class QqBotAdapter implements ChannelAdapter {
     if (!incoming) return;
 
     const config = loadChannelsSettings().qqbot;
+    const chatType = incoming.chatType ?? "private";
+    // 只有"在叫昔涟"的推送才算请求：单聊天然是直呼，群聊只有 @ 机器人的事件才算
+    // （群主开启"群全量"后普通群消息也会推过来，那只是群友闲聊）。
+    const isRequest = chatType === "private" || type === "GROUP_AT_MESSAGE_CREATE";
     if (!isQqBotEventAllowed(
-      { chatType: incoming.chatType ?? "private", senderId: incoming.senderId, chatId: incoming.chatId },
+      { chatType, senderId: incoming.senderId, chatId: incoming.chatId },
       config,
+      qqBotGroupPolicyOptions(),
     )) {
       this.lastRejected = {
-        openid: incoming.chatType === "group" ? incoming.chatId : incoming.senderId,
-        chatType: incoming.chatType ?? "private",
+        openid: chatType === "group" ? incoming.chatId : incoming.senderId,
+        chatType,
         at: Date.now(),
       };
+      // 拦截留痕：叫了昔涟但群/用户不在白名单才写控制台；群全量里的无关群消息静默丢弃，避免刷屏。
+      if (isRequest) {
+        recordMessageBlocked({
+          channel: "qqbot",
+          chatType,
+          chatId: incoming.chatId,
+          senderId: incoming.senderId,
+          ...(incoming.senderName ? { senderName: incoming.senderName } : {}),
+          trigger: chatType === "group" ? "mention" : "private",
+        }, {
+          text: incoming.text,
+          reason: chatType === "group"
+            ? `群 ${incoming.chatId} 不在 QQ 机器人群白名单中`
+            : `用户 ${incoming.senderId} 不在 QQ 机器人私聊白名单中（可在渠道设置里开启“所有单聊放行”）`,
+        });
+      }
       // 刷新状态快照，让 UI 能看到被拒的 openid（加白名单引导）
       this.setStatus({ ...this.status, detail: this.statusDetail() });
       return;
@@ -323,6 +359,10 @@ export class QqBotAdapter implements ChannelAdapter {
         seqUsed: 0,
       });
     }
+
+    // 触发方式：单聊 private；群聊沿用 mention（官方只会把 @ 机器人 或
+    // 群主开启"群全量"后的群消息推过来，触发方式枚举里没有更贴切的取值）。
+    incoming.trigger = (incoming.chatType ?? "private") === "group" ? "mention" : "private";
 
     void this.deliverIncoming(incoming);
   }

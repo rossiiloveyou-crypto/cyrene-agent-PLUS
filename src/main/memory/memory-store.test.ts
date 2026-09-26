@@ -466,6 +466,92 @@ describe("memoryStore", () => {
     })
   })
 
+  it("消解结果继承两条原条目的归属并集（P2）", async () => {
+    const { memoryStore } = await import("./memory-store")
+    const oldMemory = await memoryStore.addL2Memory({
+      content: "用户喜欢跑步",
+      triggerText: "我喜欢跑步",
+      sourceConversationId: "test",
+      ragId: "rag_old",
+      isPinned: false,
+      speakerIds: ["qq:10001"],
+      subjectIds: ["qq:10001"],
+    })
+    const newMemory = await memoryStore.addL2Memory({
+      content: "用户不喜欢跑步",
+      triggerText: "我现在不喜欢跑步",
+      sourceConversationId: "test",
+      ragId: "rag_new",
+      isPinned: false,
+      // 新条目是小红转述的：说话人不同、主体相同
+      speakerIds: ["qq:10002"],
+      subjectIds: ["qq:10001"],
+    })
+    const log = await memoryStore.appendConflictLog({
+      status: "candidate",
+      sourceL2Id: newMemory.id,
+      targetL2Id: oldMemory.id,
+      reason: "test",
+      confidence: 0.8,
+      detector: "local",
+    })
+
+    const applied = await memoryStore.applyResolverResolution(log.id, {
+      resolutionType: "preference_evolution",
+      resolvedSummary: "用户过去喜欢跑步，但现在不喜欢跑步。",
+      reason: "用户表达了当前偏好变化。",
+      confidence: 0.88,
+      actions: { createResolvedMemory: true },
+    })
+
+    const resolvedMemory = (await memoryStore.getAllL2())
+      .find((memory) => memory.id === applied?.resolutionMemoryId)
+
+    // 并集：两个说话人都保留（顺序按 applyResolverResolution 的 [新, 旧] 拼接）
+    expect(resolvedMemory?.speakerIds).toEqual(["qq:10002", "qq:10001"])
+    expect(resolvedMemory?.subjectIds).toEqual(["qq:10001"])
+  })
+
+  it("两条原条目都无归属时，消解结果不写归属字段（老数据不产生空数组）", async () => {
+    const { memoryStore } = await import("./memory-store")
+    const oldMemory = await memoryStore.addL2Memory({
+      content: "用户喜欢跑步",
+      triggerText: "我喜欢跑步",
+      sourceConversationId: "test",
+      ragId: "rag_old3",
+      isPinned: false,
+    })
+    const newMemory = await memoryStore.addL2Memory({
+      content: "用户不喜欢跑步",
+      triggerText: "我现在不喜欢跑步",
+      sourceConversationId: "test",
+      ragId: "rag_new3",
+      isPinned: false,
+    })
+    const log = await memoryStore.appendConflictLog({
+      status: "candidate",
+      sourceL2Id: newMemory.id,
+      targetL2Id: oldMemory.id,
+      reason: "test",
+      confidence: 0.8,
+      detector: "local",
+    })
+
+    const applied = await memoryStore.applyResolverResolution(log.id, {
+      resolutionType: "preference_evolution",
+      resolvedSummary: "用户过去喜欢跑步，但现在不喜欢跑步。",
+      reason: "变化。",
+      confidence: 0.88,
+      actions: { createResolvedMemory: true },
+    })
+
+    const resolvedMemory = (await memoryStore.getAllL2())
+      .find((memory) => memory.id === applied?.resolutionMemoryId)
+
+    expect("speakerIds" in (resolvedMemory ?? {})).toBe(false)
+    expect("subjectIds" in (resolvedMemory ?? {})).toBe(false)
+  })
+
   it("marks direct conflicts as clarification needed without creating resolved memory", async () => {
     const { memoryStore } = await import("./memory-store")
     const oldMemory = await memoryStore.addL2Memory({
@@ -575,8 +661,8 @@ describe("memoryStore", () => {
     const persisted = JSON.parse(fs.readFileSync(memoryPath, "utf8"))
     const backups = fs.readdirSync(electronMock.userDataDir).filter((name) => name.startsWith("memory.backup."))
 
-    expect(store.schemaVersion).toBe(2)
-    expect(persisted.schemaVersion).toBe(2)
+    expect(store.schemaVersion).toBe(3)
+    expect(persisted.schemaVersion).toBe(3)
     expect(store.l0.preferredName).toBe("伙伴")
     expect(store.l1.roundCount).toBe(7)
     expect(store.l2[0].syncStatus).toBe("synced")
@@ -614,3 +700,231 @@ describe("memoryStore", () => {
     expect(trace).toEqual(["load", "save:伙伴", "notify"])
   })
 })
+
+/**
+ * `deleteL2Cascade` 的级联矩阵（P3 §4.2）。
+ *
+ * 背景（§1.1）：原来的 `deleteL2` 只清 `l2` + `evidence`，漏了 6 处 ——
+ * 向量、`l2DmaeStates`、`conflictLogs`、`conflictWith` / `supersededBy` / `mergedInto`
+ * 三个悬空指针、以及引用它的压缩总结。这组用例逐处锁住。
+ */
+describe("memoryStore.deleteL2Cascade（P3 级联删除）", () => {
+  beforeEach(() => {
+    electronMock.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-cascade-"))
+    vi.resetModules()
+    obsidianExporterMock.notifyMemoryChanged.mockReset()
+  })
+
+  /** 直接铺一份 memory.json（绕过写入 API，才能造出"孤儿状态行""悬空指针"这类脏数据）。 */
+  function seedStore(overrides: {
+    l2: Array<Record<string, unknown>>
+    evidence?: Array<Record<string, unknown>>
+    l2DmaeStates?: Array<Record<string, unknown>>
+    conflictLogs?: Array<Record<string, unknown>>
+    reflectionLogs?: Array<Record<string, unknown>>
+  }): string {
+    const memoryPath = path.join(electronMock.userDataDir, "memory.json")
+    fs.writeFileSync(
+      memoryPath,
+      JSON.stringify({
+        schemaVersion: 3,
+        l0: { nickname: "", preferredName: "", occupation: "", longTermInterests: "", language: "", permanentNote: "", isPinned: false, updatedAt: 0 },
+        l1: { recentGoals: "", recentPreferences: "", currentProject: "", generatedAt: 0, roundCount: 0 },
+        l2: overrides.l2,
+        evidence: overrides.evidence ?? [],
+        l2DmaeStates: overrides.l2DmaeStates ?? [],
+        conflictLogs: overrides.conflictLogs ?? [],
+        reflectionLogs: overrides.reflectionLogs ?? [],
+        version: 1,
+      }),
+      "utf8",
+    )
+    return memoryPath
+  }
+
+  function l2(id: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id,
+      content: `content-${id}`,
+      triggerText: `trigger-${id}`,
+      sourceConversationId: "channel:qq:bbbbbbbbbbbbbbbb",
+      createdAt: 1,
+      lastAccessedAt: 1,
+      accessCount: 0,
+      weight: 0,
+      isPinned: false,
+      status: "active",
+      ...extra,
+    }
+  }
+
+  function readStore(memoryPath: string): Record<string, any> {
+    return JSON.parse(fs.readFileSync(memoryPath, "utf8"))
+  }
+
+  it("1-3. 清 l2 + evidence + l2DmaeStates + conflictLogs（source / target 命中即整条删）", async () => {
+    const memoryPath = seedStore({
+      l2: [l2("a"), l2("b"), l2("keep")],
+      evidence: [
+        { id: "ev_a", memoryId: "a", quoteSnippet: "", createdAt: 1, sourceStatus: "active" },
+        { id: "ev_b", memoryId: "b", quoteSnippet: "", createdAt: 1, sourceStatus: "active" },
+        { id: "ev_keep", memoryId: "keep", quoteSnippet: "", createdAt: 1, sourceStatus: "active" },
+      ],
+      l2DmaeStates: [
+        { l2Id: "a", activation: 0, intrinsicValue: 0, userSilence: 0, modelSilence: 0, recentUserHits: [], state: "archived" },
+        { l2Id: "b", activation: 0, intrinsicValue: 0, userSilence: 0, modelSilence: 0, recentUserHits: [], state: "archived" },
+        { l2Id: "keep", activation: 0, intrinsicValue: 0, userSilence: 0, modelSilence: 0, recentUserHits: [], state: "archived" },
+      ],
+      conflictLogs: [
+        { id: "c1", createdAt: 1, status: "candidate", sourceL2Id: "a", targetL2Id: "keep", reason: "", confidence: 1, detector: "local" },
+        { id: "c2", createdAt: 1, status: "candidate", sourceL2Id: "keep", targetL2Id: "b", reason: "", confidence: 1, detector: "local" },
+        { id: "c3", createdAt: 1, status: "candidate", sourceL2Id: "keep", targetL2Id: "keep", reason: "", confidence: 1, detector: "local" },
+      ],
+    })
+    const { memoryStore } = await import("./memory-store")
+
+    const result = await memoryStore.deleteL2Cascade(["a", "b"])
+
+    expect(result.removed.map((m) => m.id).sort()).toEqual(["a", "b"])
+    expect(result.evidence).toBe(2)
+    expect(result.dmaeStates).toBe(2)
+    expect(result.conflictLogs).toBe(2)
+
+    const persisted = readStore(memoryPath)
+    expect(persisted.l2.map((m: any) => m.id)).toEqual(["keep"])
+    expect(persisted.evidence.map((e: any) => e.id)).toEqual(["ev_keep"])
+    expect(persisted.l2DmaeStates.map((s: any) => s.l2Id)).toEqual(["keep"])
+    expect(persisted.conflictLogs.map((c: any) => c.id)).toEqual(["c3"])
+  })
+
+  it("4. resolutionMemoryId 命中只清字段：日志本身保留（它是历史事实）", async () => {
+    const memoryPath = seedStore({
+      l2: [l2("a"), l2("keep")],
+      conflictLogs: [
+        {
+          id: "c1", createdAt: 1, status: "resolved", sourceL2Id: "keep", targetL2Id: "keep",
+          reason: "", confidence: 1, detector: "local", resolutionMemoryId: "a",
+        },
+      ],
+    })
+    const { memoryStore } = await import("./memory-store")
+    await memoryStore.deleteL2Cascade(["a"])
+
+    const persisted = readStore(memoryPath)
+    expect(persisted.conflictLogs).toHaveLength(1)
+    expect(persisted.conflictLogs[0].resolutionMemoryId).toBeUndefined()
+  })
+
+  it("5-6. 修悬空指针：conflictWith（ragId）/ supersededBy / mergedInto，且 status 不变", async () => {
+    const memoryPath = seedStore({
+      l2: [
+        l2("a", { ragId: "rag_a" }),
+        l2("b", { ragId: "rag_b" }),
+        l2("keep", {
+          conflictWith: ["rag_a", "rag_b", "rag_other"],
+          supersededBy: "a",
+          mergedInto: "b",
+          status: "superseded",
+        }),
+      ],
+    })
+    const { memoryStore } = await import("./memory-store")
+
+    const result = await memoryStore.deleteL2Cascade(["a", "b"])
+
+    // conflictWith 悬空 2 个（rag_a / rag_b）+ supersededBy 1 + mergedInto 1 = 4
+    expect(result.danglingRefsFixed).toBe(4)
+    const persisted = readStore(memoryPath)
+    const survivor = persisted.l2[0]
+    expect(survivor.conflictWith).toEqual(["rag_other"])
+    expect(survivor.supersededBy).toBeUndefined()
+    expect(survivor.mergedInto).toBeUndefined()
+    // ⚠️ 只清指针、不回滚状态：把 superseded 退回 active 会让旧记忆重新参与召回
+    expect(survivor.status).toBe("superseded")
+  })
+
+  it("7. 引用被删 id 的压缩总结进入 summaries（本方法不删它，交给去压缩）", async () => {
+    seedStore({
+      l2: [
+        l2("a"),
+        l2("b"),
+        l2("sum_mixed", { isSummary: true, subEntryIds: ["a", "b", "keep"] }),
+        l2("sum_all", { isSummary: true, subEntryIds: ["a"] }),
+        l2("sum_none", { isSummary: true, subEntryIds: ["keep"] }),
+      ],
+    })
+    const { memoryStore } = await import("./memory-store")
+
+    const result = await memoryStore.deleteL2Cascade(["a"])
+
+    expect(result.summaries.map((m) => m.id).sort()).toEqual(["sum_all", "sum_mixed"])
+  })
+
+  it("8. 反思日志指纹清理：整条正文原样出现在 details 里才删，短正文（<8）不参与", async () => {
+    const memoryPath = seedStore({
+      l2: [l2("long", { content: "用户说他最近在学 Rust 语言" }), l2("short", { content: "好的" }), l2("keep")],
+      reflectionLogs: [
+        { id: "r1", createdAt: 1, type: "compression", summary: "s", details: "原条目：用户说他最近在学 Rust 语言 | 总结：..." },
+        { id: "r2", createdAt: 1, type: "compression", summary: "s", details: "原条目：好的" },
+        { id: "r3", createdAt: 1, type: "compression", summary: "s", details: "与任何人都无关的反思" },
+      ],
+    })
+    const { memoryStore } = await import("./memory-store")
+
+    const result = await memoryStore.deleteL2Cascade(["long", "short"])
+
+    expect(result.reflectionLogs).toBe(1)
+    const persisted = readStore(memoryPath)
+    expect(persisted.reflectionLogs.map((log: any) => log.id)).toEqual(["r2", "r3"])
+  })
+
+  it("9. 一次 save()：不逐条落盘", async () => {
+    seedStore({ l2: [l2("a"), l2("b"), l2("c")] })
+    const { memoryStore } = await import("./memory-store")
+    const saveSpy = vi.spyOn(memoryStore, "save")
+
+    await memoryStore.deleteL2Cascade(["a", "b"])
+
+    expect(saveSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("10. 空入参 / 全部 id 都不存在：不改任何字段、不落盘", async () => {
+    const memoryPath = seedStore({ l2: [l2("keep")] })
+    const { memoryStore } = await import("./memory-store")
+    const before = fs.readFileSync(memoryPath, "utf8")
+    const saveSpy = vi.spyOn(memoryStore, "save")
+
+    const empty = await memoryStore.deleteL2Cascade([])
+    const missing = await memoryStore.deleteL2Cascade(["nope"])
+
+    expect(empty.removed).toEqual([])
+    expect(missing.removed).toEqual([])
+    expect(saveSpy).not.toHaveBeenCalled()
+    expect(fs.readFileSync(memoryPath, "utf8")).toBe(before)
+  })
+
+  it("previewL2Cascade 与 deleteL2Cascade 报告同一组数字（预演 ≠ 假数据）", async () => {
+    const memoryPath = seedStore({
+      l2: [l2("a", { ragId: "rag_a" }), l2("keep", { conflictWith: ["rag_a"] })],
+      evidence: [{ id: "ev_a", memoryId: "a", quoteSnippet: "", createdAt: 1, sourceStatus: "active" }],
+      l2DmaeStates: [{ l2Id: "a", activation: 0, intrinsicValue: 0, userSilence: 0, modelSilence: 0, recentUserHits: [], state: "archived" }],
+    })
+    const { memoryStore } = await import("./memory-store")
+
+    const preview = await memoryStore.previewL2Cascade(["a"])
+    const before = fs.readFileSync(memoryPath, "utf8")
+    // 预演**绝不写盘**
+    expect(fs.readFileSync(memoryPath, "utf8")).toBe(before)
+
+    const applied = await memoryStore.deleteL2Cascade(["a"])
+
+    expect(preview.removed.map((m) => m.id)).toEqual(applied.removed.map((m) => m.id))
+    expect(preview.evidence).toBe(applied.evidence)
+    expect(preview.dmaeStates).toBe(applied.dmaeStates)
+    expect(preview.conflictLogs).toBe(applied.conflictLogs)
+    expect(preview.danglingRefsFixed).toBe(applied.danglingRefsFixed)
+    expect(preview.reflectionLogs).toBe(applied.reflectionLogs)
+    expect(preview.removedRagIds).toEqual(["rag_a"])
+  })
+})
+

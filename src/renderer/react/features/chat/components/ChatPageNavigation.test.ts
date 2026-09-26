@@ -20,6 +20,9 @@ vi.mock("../../../components/ui/ModelModeButton", () => ({
 vi.mock("../../../components/ui/PluginModeButton", () => ({
   PluginModeButton: ({ active }: { active: boolean }) => createElement("span", null, `plugin-button:${active}`),
 }));
+vi.mock("../../../components/ui/ToolConsoleButton", () => ({
+  ToolConsoleButton: ({ active }: { active: boolean }) => createElement("span", null, `console-button:${active}`),
+}));
 vi.mock("../../../components/ui/WindowControls", () => ({
   WindowControls: () => createElement("span", null, "window-controls"),
 }));
@@ -89,5 +92,31 @@ describe("ChatPageNavigation", () => {
 
     expect(html.indexOf("model-button")).toBeLessThan(html.indexOf("plugin-button:true"));
     expect(html).not.toContain("mode-switch");
+  });
+
+  it("renders the tool console entry next to the plugin entry and marks it active", () => {
+    const html = renderToStaticMarkup(createElement(ChatPageNavigation, {
+      collapsed: false,
+      activePanel: "console",
+      mode: "chat",
+      sessions: [],
+      activeSessionId: undefined,
+      onToggleCollapsed: () => undefined,
+      onModeChange: () => undefined,
+      onNewTask: () => undefined,
+      onTogglePanel: () => undefined,
+      onSelectSession: () => undefined,
+      onOpenProject: () => undefined,
+      onRenameSession: () => undefined,
+      onDeleteSession: () => undefined,
+      onTogglePinSession: () => undefined,
+      onMinimize: () => undefined,
+      onMaximize: () => undefined,
+      onCloseWindow: () => undefined,
+      onOpenSettings: () => undefined,
+    }));
+
+    expect(html).toContain("console-button:true");
+    expect(html.indexOf("plugin-button:false")).toBeLessThan(html.indexOf("console-button:true"));
   });
 });

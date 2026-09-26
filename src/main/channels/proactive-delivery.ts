@@ -69,7 +69,15 @@ interface ProactiveChannelDeliveryInput {
   manager: Pick<ChannelManager, "getAdapter">;
   delivery?: ChannelDeliveryService;
   recipientRegistry?: ProactiveChannelRecipientRegistry;
-  appendHistory?: typeof appendChannelHistory;
+  /**
+   * 注入点（测试用）。返回值在本链路里被忽略，所以显式允许返回 void——
+   * P1 之后真实 appendHistory 的返回类型变成了 `PersistedHistoryEntry | null`，
+   * 直接写 `typeof appendChannelHistory` 会让只改状态的 void 桩函数赋值失败
+   * （TS 不允许 `() => void` 赋给 `() => PersistedHistoryEntry | null`）。
+   */
+  appendHistory?: (
+    ...args: Parameters<typeof appendChannelHistory>
+  ) => ReturnType<typeof appendChannelHistory> | void;
   appendLog?: (entry: Omit<LogEntry, "at">) => void;
   canContinue?: () => boolean;
 }
@@ -108,7 +116,7 @@ export async function sendProactiveChannelMessage(
   if (deliveredTexts.length === 0) return { kind: "cancelled", reason: "send_failed" };
 
   const deliveredText = deliveredTexts.join("");
-  (input.appendHistory ?? appendChannelHistory)(recipient.sessionId, "assistant", deliveredText);
+  (input.appendHistory ?? appendChannelHistory)(recipient.sessionId, "assistant", deliveredText, { isBot: true });
   (input.appendLog ?? appendChannelLog)({
     dir: "outgoing",
     channel: input.channel,

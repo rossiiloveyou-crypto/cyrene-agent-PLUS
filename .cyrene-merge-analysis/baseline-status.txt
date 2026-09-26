@@ -1,0 +1,219 @@
+ D README.en.md
+ M README.md
+ M dist/renderer/toast/index.html
+ M docs/user-guide/napcat-onebot.md
+ M docs/user-guide/qqbot-official.md
+ M package-lock.json
+ M package.json
+ M src/main/agui-bridge.ts
+ M src/main/application/application.ts
+ M src/main/application/core-bootstrap.test.ts
+ M src/main/application/core-bootstrap.ts
+ M src/main/application/default-dependencies.ts
+ M src/main/channels/adapters/qq/napcat-adapter.integration.test.ts
+ M src/main/channels/adapters/qq/napcat-adapter.test.ts
+ M src/main/channels/adapters/qq/napcat-adapter.ts
+ M src/main/channels/adapters/qq/onebot-normalizer.ts
+ M src/main/channels/adapters/qqbot/qqbot-adapter.test.ts
+ M src/main/channels/adapters/qqbot/qqbot-adapter.ts
+ M src/main/channels/agent-policy.test.ts
+ M src/main/channels/agent-policy.ts
+ M src/main/channels/bootstrap.test.ts
+ M src/main/channels/bootstrap.ts
+ M src/main/channels/channel-context.test.ts
+ M src/main/channels/channel-context.ts
+ D src/main/channels/conversation-binding-api.test.ts
+ D src/main/channels/conversation-binding-api.ts
+ M src/main/channels/conversation-binding-store.test.ts
+ M src/main/channels/conversation-binding-store.ts
+ M src/main/channels/dispatcher.test.ts
+ M src/main/channels/dispatcher.ts
+ M src/main/channels/history-log.test.ts
+ M src/main/channels/history-log.ts
+ M src/main/channels/init.ts
+ M src/main/channels/message-log.ts
+ M src/main/channels/proactive-delivery.test.ts
+ M src/main/channels/proactive-delivery.ts
+ M src/main/channels/settings-store.test.ts
+ M src/main/channels/settings-store.ts
+ M src/main/channels/types.ts
+ M src/main/chat-api-utils.ts
+ M src/main/chats/chat-ui-ipc.ts
+ M src/main/memory/entity-graph.ts
+ M src/main/memory/l2-dmae-manager.ts
+ M src/main/memory/memory-compression-transaction.test.ts
+ M src/main/memory/memory-compression-transaction.ts
+ M src/main/memory/memory-compressor.ts
+ M src/main/memory/memory-judge.test.ts
+ M src/main/memory/memory-judge.ts
+ M src/main/memory/memory-manager.test.ts
+ M src/main/memory/memory-manager.ts
+ M src/main/memory/memory-rag-reconciliation.test.ts
+ M src/main/memory/memory-scheduler.test.ts
+ M src/main/memory/memory-scheduler.ts
+ M src/main/memory/memory-schemas.test.ts
+ M src/main/memory/memory-schemas.ts
+ M src/main/memory/memory-store-defaults.ts
+ M src/main/memory/memory-store-migrations.test.ts
+ M src/main/memory/memory-store.test.ts
+ M src/main/memory/memory-store.ts
+ M src/main/memory/memory-types.ts
+ M src/main/memory/memory-user-ipc.ts
+ M src/main/memory/obsidian-importer.test.ts
+ M src/main/memory/obsidian-importer.ts
+ M src/main/memory/recent-injected-memory.test.ts
+ M src/main/memory/recent-injected-memory.ts
+ M src/main/moments/moments-store.test.ts
+ M src/main/orchestrator/agent-runtime.test.ts
+ M src/main/orchestrator/agent-runtime.ts
+ M src/main/orchestrator/build-memory-injection.test.ts
+ M src/main/orchestrator/build-options.test.ts
+ M src/main/orchestrator/build-options.ts
+ M src/main/orchestrator/context-builder.ts
+ M src/main/orchestrator/harness/adapter/prompt-builder.test.ts
+ M src/main/orchestrator/harness/adapter/prompt-builder.ts
+ M src/main/orchestrator/index.ts
+ M src/main/orchestrator/tools/__snapshots__/built-in-tools.snapshot.test.ts.snap
+ M src/main/orchestrator/tools/builtin-tools/install-mcp-tool.ts
+ M src/main/orchestrator/tools/history-tools.ts
+ M src/main/orchestrator/tools/registry/tool-registry-memory.test.ts
+ M src/main/orchestrator/tools/registry/tool-registry.ts
+ M src/main/rag/index.ts
+ M src/main/rag/reranker.ts
+ M src/main/relationship/relationship-log.test.ts
+ M src/main/relationship/relationship-log.ts
+ M src/main/runtime-policy/timeout-policy.test.ts
+ M src/main/runtime-policy/timeout-policy.ts
+ M src/main/runtime-policy/token-budget.test.ts
+ M src/main/runtime-policy/token-budget.ts
+ M src/main/settings/general-settings-lifecycle.ts
+ M src/main/settings/general-settings.ts
+ M src/main/settings/settings-facade.test.ts
+ M src/main/settings/settings-facade.ts
+ M src/main/token-usage-store.ts
+ M src/main/windows/window-system-ipc.ts
+ M src/preload/index.ts
+ M src/renderer/react/features/chat/components/ChatPageNavigation.test.ts
+ M src/renderer/react/features/chat/components/ChatPageNavigation.tsx
+ M src/renderer/react/features/chat/components/ChatPagePanelHost.tsx
+ M src/renderer/react/features/chat/components/ModelModePanel.css
+ M src/renderer/react/features/chat/components/ModelModePanel.tsx
+ D src/renderer/react/features/chat/hooks/useChannelMirrorEvents.test.ts
+ D src/renderer/react/features/chat/hooks/useChannelMirrorEvents.ts
+ M src/renderer/react/features/chat/pages/ChatPage.tsx
+ M src/renderer/react/features/chat/pages/chat-page-bridge.ts
+ M src/renderer/react/hooks/useChatAppearance.test.ts
+ M src/renderer/react/hooks/useChatAppearance.ts
+ M src/renderer/react/i18n/en.json
+ M src/renderer/react/i18n/zh-CN.json
+ M src/renderer/react/styles/react-root.css
+ M src/renderer/settings/api/dom.ts
+ D src/renderer/settings/api/presets.ts
+ D src/renderer/settings/api/state.ts
+ M src/renderer/settings/appearance/dom.ts
+ M src/renderer/settings/channels/dom.ts
+ M src/renderer/settings/channels/panel.ts
+ D src/renderer/settings/custom-endpoint-markup.test.ts
+ M src/renderer/settings/general/dom.ts
+ M src/renderer/settings/i18n/en.json
+ M src/renderer/settings/i18n/zh-CN.json
+ M src/renderer/settings/index.html
+ M src/renderer/settings/mcp/panel.test.ts
+ M src/renderer/settings/memory/dom.ts
+ M src/renderer/settings/memory/panel.ts
+ M src/renderer/settings/music/dom.ts
+ M src/renderer/settings/preferences/dom.ts
+ M src/renderer/settings/preferences/panel.ts
+ M src/renderer/settings/settings.css
+ M src/renderer/settings/settings.ts
+ M src/renderer/settings/shared/modal.ts
+ M src/renderer/settings/shared/save-status.ts
+ M src/renderer/settings/shared/shell.ts
+ M src/renderer/settings/shared/types.ts
+ M src/renderer/settings/timeout/dom.ts
+ M src/renderer/settings/timeout/panel.ts
+ D src/renderer/settings/tokens/cache-statistics.test.ts
+ D src/renderer/settings/tokens/cache-statistics.ts
+ D src/renderer/settings/tokens/panel.ts
+ D src/renderer/settings/tokens/state.ts
+ D src/renderer/settings/vision/dom.ts
+ M src/renderer/sidebar/sidebar.ts
+ M src/shared/chat-appearance.test.ts
+ M src/shared/chat-appearance.ts
+ M src/shared/ipc-channels.ts
+ M vite.config.ts
+?? .cyrene-merge-analysis/
+?? README.upstream.md
+?? docs/construction/
+?? docs/group-corpus.md
+?? docs/internal-issue/2026-09-25-channel-runtime-context-misread-as-user-paste.md
+?? docs/internal-issue/2026-09-25-reranker-cross-encoder-call-fix.md
+?? docs/merge-plan/
+?? docs/recon-person-identity-archaeology.md
+?? docs/user-guide/channel-console.md
+?? src/main/application/startup-abort.ts
+?? src/main/channels/audit-events.test.ts
+?? src/main/channels/audit-events.ts
+?? src/main/channels/audit-log.test.ts
+?? src/main/channels/audit-log.ts
+?? src/main/channels/keyword-policy.test.ts
+?? src/main/channels/keyword-policy.ts
+?? src/main/channels/message-log.test.ts
+?? src/main/channels/tool-access.test.ts
+?? src/main/channels/tool-access.ts
+?? src/main/channels/tool-guard.test.ts
+?? src/main/channels/tool-guard.ts
+?? src/main/channels/transcript-erasure.test.ts
+?? src/main/channels/transcript-erasure.ts
+?? src/main/chat-api-utils.test.ts
+?? src/main/conversation-usage-store.test.ts
+?? src/main/conversation-usage-store.ts
+?? src/main/corpus/
+?? src/main/memory/entity-graph.test.ts
+?? src/main/memory/memory-console.test.ts
+?? src/main/memory/memory-console.ts
+?? src/main/memory/memory-deletion.test.ts
+?? src/main/memory/memory-deletion.ts
+?? src/main/memory/memory-erasure-corpus-guard.test.ts
+?? src/main/memory/memory-schema-gate.test.ts
+?? src/main/memory/memory-schema-gate.ts
+?? src/main/memory/memory-scope-isolation.test.ts
+?? src/main/memory/memory-user-ipc.test.ts
+?? src/main/memory/person-attribution.test.ts
+?? src/main/memory/person-attribution.ts
+?? src/main/memory/person-erase-plan.test.ts
+?? src/main/memory/person-erase-plan.ts
+?? src/main/memory/person-erasure.integration.test.ts
+?? src/main/memory/person-erasure.ts
+?? src/main/memory/run-erasure.test.ts
+?? src/main/memory/run-erasure.ts
+?? src/main/orchestrator/group-context-injection.test.ts
+?? src/main/orchestrator/tools/tool-schema-structure.test.ts
+?? src/main/rag/reranker.test.ts
+?? src/main/rag/scope-filter.test.ts
+?? src/main/zones/
+?? src/renderer/react/components/ui/ToolConsoleButton.tsx
+?? src/renderer/react/features/chat/components/ToolConsolePanel.css
+?? src/renderer/react/features/chat/components/ToolConsolePanel.tsx
+?? src/renderer/react/features/chat/components/UsageBadge.css
+?? src/renderer/react/features/chat/components/UsageBadge.tsx
+?? src/renderer/react/features/chat/components/api-config/
+?? src/renderer/react/features/chat/components/panel-layout.test.ts
+?? src/renderer/settings/channels/panel.test.ts
+?? src/renderer/settings/dom-refs-consistency.test.ts
+?? src/renderer/settings/keywords-markup.test.ts
+?? src/renderer/settings/memory-manager-markup.test.ts
+?? src/renderer/settings/memory/delete-all.test.ts
+?? src/renderer/settings/memory/delete-all.ts
+?? src/renderer/settings/memory/erasure-flow.test.ts
+?? src/renderer/settings/memory/erasure-flow.ts
+?? src/renderer/settings/memory/manager.test.ts
+?? src/renderer/settings/memory/manager.ts
+?? src/renderer/settings/memory/panel.test.ts
+?? src/renderer/settings/panel-migration-markup.test.ts
+?? src/renderer/settings/shared/modal-icon.test.ts
+?? src/renderer/settings/shared/section-nav.ts
+?? src/renderer/settings/zones-markup.test.ts
+?? src/renderer/settings/zones/
+?? src/shared/zone-group.test.ts
+?? src/shared/zone-group.ts

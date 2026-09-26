@@ -1,0 +1,79 @@
+﻿[
+    {
+        "功能":  "记忆管理控制台",
+        "标识":  "memory-console",
+        "文件数":  4,
+        "状态":  "存在 OK",
+        "示例":  "memory-console.test.ts"
+    },
+    {
+        "功能":  "按人擦除/身份归属",
+        "标识":  "person-erasure",
+        "文件数":  8,
+        "状态":  "存在 OK",
+        "示例":  "group-corpus-isolation.test.ts"
+    },
+    {
+        "功能":  "区块 zones",
+        "标识":  "ZONES_",
+        "文件数":  5,
+        "状态":  "存在 OK",
+        "示例":  "zone-whitelist-wiring.test.ts"
+    },
+    {
+        "功能":  "渠道审计",
+        "标识":  "audit-log",
+        "文件数":  11,
+        "状态":  "存在 OK",
+        "示例":  "audit-events.test.ts"
+    },
+    {
+        "功能":  "工具白名单",
+        "标识":  "tool-access",
+        "文件数":  13,
+        "状态":  "存在 OK",
+        "示例":  "napcat-adapter.test.ts"
+    },
+    {
+        "功能":  "关键词策略",
+        "标识":  "keyword-policy",
+        "文件数":  6,
+        "状态":  "存在 OK",
+        "示例":  "napcat-adapter.ts"
+    },
+    {
+        "功能":  "群语料",
+        "标识":  "group-corpus",
+        "文件数":  10,
+        "状态":  "存在 OK",
+        "示例":  "napcat-adapter.integration.test.ts"
+    },
+    {
+        "功能":  "群聊旁听上下文",
+        "标识":  "buildGroupContextBlock",
+        "文件数":  4,
+        "状态":  "存在 OK",
+        "示例":  "history-log.test.ts"
+    },
+    {
+        "功能":  "用量徽章",
+        "标识":  "USAGE_BADGE",
+        "文件数":  2,
+        "状态":  "存在 OK",
+        "示例":  "settings.ts"
+    },
+    {
+        "功能":  "群上下文上限",
+        "标识":  "groupContextLimit",
+        "文件数":  11,
+        "状态":  "存在 OK",
+        "示例":  "build-options.ts"
+    },
+    {
+        "功能":  "弹窗确认门",
+        "标识":  "confirmValue",
+        "文件数":  4,
+        "状态":  "存在 OK",
+        "示例":  "delete-all.test.ts"
+    }
+]

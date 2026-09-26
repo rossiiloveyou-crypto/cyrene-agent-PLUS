@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "../../../i18n";
 import fallbackIconUrl from "../../../assets/status-moods/陪伴中.png?url";
 import modelIconUrl from "../../../assets/model.png?url";
+import ApiConfigSection, { MODEL_PROFILES_CHANGED_EVENT } from "./api-config/ApiConfigSection";
 import "./ModelModePanel.css";
 
 interface ModelProfile {
@@ -109,6 +110,15 @@ export function ModelModePanel() {
       .catch((err) => console.warn("[ModelModePanel] load failed:", err))
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
+  }, [reload]);
+
+  // 下方 API 配置区保存/删除档案后广播事件，这里刷新列表（纯追加，不改既有加载逻辑）。
+  useEffect(() => {
+    const onProfilesChanged = () => {
+      void reload().catch((err) => console.warn("[ModelModePanel] reload failed:", err));
+    };
+    window.addEventListener(MODEL_PROFILES_CHANGED_EVENT, onProfilesChanged);
+    return () => window.removeEventListener(MODEL_PROFILES_CHANGED_EVENT, onProfilesChanged);
   }, [reload]);
 
   const visibleProfiles = useMemo(() => {
@@ -219,6 +229,9 @@ export function ModelModePanel() {
           )}
         </div>
       )}
+
+      {/* API 配置区：原设置窗口「API 设置」面板在聊天窗口的唯一入口 */}
+      <ApiConfigSection />
     </div>
   );
 }

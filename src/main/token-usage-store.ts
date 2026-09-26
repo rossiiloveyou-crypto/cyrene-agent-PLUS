@@ -9,6 +9,12 @@
 import { app } from "electron";
 import * as fs from "fs";
 import * as path from "path";
+import {
+  currentConversationSessionId,
+  flushConversationUsage,
+  recordConversationRequest,
+  recordConversationUsage,
+} from "./conversation-usage-store";
 
 export interface TokenUsageDay {
   input: number;
@@ -175,6 +181,9 @@ export function recordUsage(input: number, output: number, requests = 1, cachedI
   const day = store.days[key] ?? { input: 0, output: 0, hit: 0, miss: 0, cacheCreation: 0, requests: 0 };
   applyUsageToDay(day, input, output, requests, cachedInput, model, cacheCreation);
   store.days[key] = day;
+  // 同一份记账同时落到「当前对话」维度（不在对话作用域内则跳过）
+  const sessionId = currentConversationSessionId();
+  if (sessionId) recordConversationUsage(sessionId, input, output, requests, cachedInput, cacheCreation);
   scheduleFlush();
 }
 
@@ -191,6 +200,8 @@ export function recordRequest(model?: string): void {
   byModel[modelName] = modelDay;
   day.models = byModel;
   store.days[key] = day;
+  const sessionId = currentConversationSessionId();
+  if (sessionId) recordConversationRequest(sessionId);
   scheduleFlush();
 }
 
@@ -288,4 +299,6 @@ export function getUsageReport(days: number): TokenUsageReport {
 export function flush(): void {
   clearTimers();
   flushNow();
+  // 对话维度用量与全局用量同一次退出流程落盘
+  flushConversationUsage();
 }

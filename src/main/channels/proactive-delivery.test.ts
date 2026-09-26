@@ -165,7 +165,7 @@ describe("proactive channel delivery", () => {
     });
 
     expect(partial).toEqual({ kind: "committed", deliveredParts: 1, totalParts: 2 });
-    expect(appendHistory).toHaveBeenCalledWith("session-wx-1", "assistant", "第一句。");
+    expect(appendHistory).toHaveBeenCalledWith("session-wx-1", "assistant", "第一句。", { isBot: true });
     expect(appendLog).toHaveBeenCalledWith(expect.objectContaining({ text: "第一句。" }));
   });
 

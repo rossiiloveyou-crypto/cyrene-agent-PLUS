@@ -174,8 +174,8 @@ settingsBtn.addEventListener("click", () => {
 });
 
 modelSwitchBtn.addEventListener("click", () => {
-  // "切换模型"直奔 API 配置标签，而不是默认的通用标签
-  window.sidebar?.openSettings("api");
+  // "切换模型"直达聊天窗口的「模型」面板：API 配置已从设置窗口迁到那里
+  void openChatWindow("model");
 });
 
 callBtn.addEventListener("click", () => {
@@ -184,12 +184,13 @@ callBtn.addEventListener("click", () => {
 
 // "打开聊天"：拿到最近一条会话 id，让 main 打开聊天窗口并加载它；
 // 没有任何会话时先建一个再打开，保证点按钮总能进到一个具体会话。
-openChatBtn.addEventListener("click", async () => {
+// panel 可选：让入口直达聊天窗口的某个侧栏面板。
+async function openChatWindow(panel?: string): Promise<void> {
   const chatStore = (window as unknown as {
     chatStore?: {
       list: () => Promise<Array<{ id: string }>>;
       create: (payload?: { identityId?: string | null }) => Promise<{ id: string } | null>;
-      openInReactChatWindow: (sessionId: string) => Promise<unknown>;
+      openInReactChatWindow: (sessionId: string, panel?: string) => Promise<unknown>;
     };
   }).chatStore;
   if (!chatStore) return;
@@ -200,10 +201,14 @@ openChatBtn.addEventListener("click", async () => {
       const created = await chatStore.create({ identityId: null });
       latestId = created?.id ?? "";
     }
-    if (latestId) await chatStore.openInReactChatWindow(latestId);
+    if (latestId) await chatStore.openInReactChatWindow(latestId, panel);
   } catch (err) {
     console.warn("[sidebar] 打开聊天失败:", err);
   }
+}
+
+openChatBtn.addEventListener("click", () => {
+  void openChatWindow();
 });
 
 void initModelConfig();

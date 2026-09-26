@@ -39,7 +39,12 @@ describe("moments store", () => {
 
     const feed = store.listFeed();
     expect(feed).toHaveLength(2);
-    expect(feed[0].post.id).toBe(second.applied ? second.value.id : "");
+    // 两条动态可能落在同一毫秒，此时先后顺序不确定：只校验集合与 createdAt 非升序，
+    // 不再断言 feed[0] 一定是第二条（原断言在满负载跑时偶发失败）。
+    expect(new Set(feed.map((item) => item.post.id))).toEqual(new Set([
+      first.applied ? first.value.id : "",
+      second.applied ? second.value.id : "",
+    ]));
     expect(feed[0].post.createdAt).toBeGreaterThanOrEqual(feed[1].post.createdAt);
   });
 

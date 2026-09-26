@@ -78,6 +78,12 @@ export interface IncomingMessage {
   mentions?: ChannelMention[];
   /** 最多展开一层的引用消息。 */
   reply?: ChannelReplyContext;
+  /**
+   * 本条消息进入处理链路的方式：
+   * mention（@ 了昔涟）/ trigger_keyword（群聊命中触发关键词，未 @）/ private（私聊）。
+   * 由适配器在通过全部白名单校验后填写，供审计与提示词标注使用。
+   */
+  trigger?: "mention" | "trigger_keyword" | "private";
   at: Date;
   /** 原始 payload，调试用，不序列化。 */
   _raw?: unknown;

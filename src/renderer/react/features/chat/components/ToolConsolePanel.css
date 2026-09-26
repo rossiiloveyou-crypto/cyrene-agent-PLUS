@@ -1,0 +1,627 @@
+/* ===== 渠道控制台：白名单与权限（总开关 + 账号权限） + 调用/拦截审计 ===== */
+.tool-console {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 22px 28px 32px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--cy-bg-workspace, #fff);
+}
+
+.tool-console--loading {
+  align-items: center;
+  justify-content: center;
+  color: var(--cy-text-muted, #8e8e93);
+  font-size: 13px;
+}
+
+.tool-console__header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tool-console__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.tool-console__subtitle {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.tool-console__back {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 8px;
+  background: var(--cy-bg-page, #f8f7f6);
+  color: var(--cy-text, #1d1d1f);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tool-console__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 12px;
+  background: var(--cy-bg-page, #f8f7f6);
+  flex-shrink: 0;
+}
+
+.tool-console__section--audit {
+  flex: 1 1 auto;
+  min-height: 240px;
+}
+
+.tool-console__section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.tool-console__hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.tool-console__modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.tool-console__mode {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--cy-border, #e6e6e6);
+  border-radius: 10px;
+  background: var(--cy-bg-workspace, #fff);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-console__mode strong {
+  font-size: 13px;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.tool-console__mode span {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.tool-console__mode.is-active {
+  border-color: var(--cy-accent, #7a6ff0);
+  box-shadow: inset 0 0 0 1px var(--cy-accent, #7a6ff0);
+}
+
+.tool-console__mode:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.tool-console__add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tool-console__input {
+  min-width: 0;
+  flex: 1 1 140px;
+  padding: 7px 10px;
+  border: 1px solid var(--cy-border, #e6e6e6);
+  border-radius: 8px;
+  background: var(--cy-bg-workspace, #fff);
+  color: var(--cy-text, #1d1d1f);
+  font-size: 12px;
+}
+
+.tool-console__input:focus {
+  outline: none;
+  border-color: var(--cy-accent, #7a6ff0);
+}
+
+.tool-console__primary,
+.tool-console__remove,
+.tool-console__clear {
+  padding: 7px 12px;
+  border: 1px solid var(--cy-border, #e6e6e6);
+  border-radius: 8px;
+  background: var(--cy-bg-workspace, #fff);
+  color: var(--cy-text, #1d1d1f);
+  font-size: 12px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.tool-console__primary {
+  background: var(--cy-accent, #7a6ff0);
+  border-color: var(--cy-accent, #7a6ff0);
+  color: #fff;
+}
+
+.tool-console__primary:disabled,
+.tool-console__remove:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.tool-console__notice {
+  margin: 0;
+  font-size: 11px;
+  color: #d4380d;
+}
+
+.tool-console__allowlist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tool-console__allowlist-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 8px;
+  background: var(--cy-bg-workspace, #fff);
+  font-size: 12px;
+}
+
+.tool-console__allowlist-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 已授权权限的标签组：顶到右边，跟在「权限 / 移除」按钮前面 */
+.tool-console__grants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.tool-console__grant {
+  padding: 1px 7px;
+  border: 1px solid rgba(122, 111, 240, 0.35);
+  border-radius: 999px;
+  color: var(--cy-accent, #7a6ff0);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.tool-console__grant.is-empty {
+  border-color: var(--cy-border, #e6e6e6);
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.tool-console__permission-toggle {
+  padding: 3px 9px;
+  border: 1px solid var(--cy-border, #e6e6e6);
+  border-radius: 8px;
+  background: var(--cy-bg-workspace, #fff);
+  color: var(--cy-text, #1d1d1f);
+  font-size: 11px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.tool-console__permission-toggle.is-active {
+  border-color: var(--cy-accent, #7a6ff0);
+  color: var(--cy-accent, #7a6ff0);
+}
+
+.tool-console__permission-toggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.tool-console__permission-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--cy-bg-page, #f8f7f6);
+}
+
+.tool-console__permission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.tool-console__permission-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--cy-border, #e6e6e6);
+  border-radius: 8px;
+  background: var(--cy-bg-workspace, #fff);
+  cursor: pointer;
+}
+
+.tool-console__permission-option > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tool-console__permission-option strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.tool-console__tag {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--cy-bg-page, #f0efee);
+  color: var(--cy-text-muted, #8e8e93);
+  font-size: 11px;
+}
+
+.tool-console__account {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.tool-console__label {
+  color: var(--cy-text-muted, #8e8e93);
+  font-size: 11px;
+}
+
+.tool-console__remove {
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.tool-console__empty {
+  padding: 12px 0;
+  color: var(--cy-text-muted, #8e8e93);
+  font-size: 12px;
+  text-align: center;
+}
+
+.tool-console__audit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tool-console__filters {
+  display: flex;
+  gap: 6px;
+}
+
+.tool-console__filters button {
+  padding: 4px 10px;
+  border: 1px solid var(--cy-border, #e6e6e6);
+  border-radius: 999px;
+  background: var(--cy-bg-workspace, #fff);
+  color: var(--cy-text-muted, #8e8e93);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tool-console__filters button.is-active {
+  border-color: var(--cy-accent, #7a6ff0);
+  color: var(--cy-accent, #7a6ff0);
+}
+
+.tool-console__filters .tool-console__expand {
+  border-color: var(--cy-accent, #7a6ff0);
+  color: var(--cy-accent, #7a6ff0);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tool-console__filters .tool-console__expand[aria-pressed="true"] {
+  background: var(--cy-accent, #7a6ff0);
+  border-color: var(--cy-accent, #7a6ff0);
+  color: #fff;
+}
+
+.tool-console__audit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.tool-console__audit-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 10px;
+  background: var(--cy-bg-workspace, #fff);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-console__audit-item:hover {
+  border-color: var(--cy-accent, #7a6ff0);
+}
+
+.tool-console__audit-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.tool-console__audit-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.tool-console__audit-title code,
+.tool-console__detail-grid code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.tool-console__audit-meta {
+  font-size: 11px;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.tool-console__audit-summary {
+  font-size: 11px;
+  color: var(--cy-text-muted, #8e8e93);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-console__chevron {
+  color: var(--cy-text-muted, #c7c7cc);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.tool-console__badge {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tool-console__badge.is-success {
+  background: rgba(82, 196, 26, 0.12);
+  color: #389e0d;
+}
+
+.tool-console__badge.is-failure {
+  background: rgba(250, 173, 20, 0.16);
+  color: #d48806;
+}
+
+.tool-console__badge.is-blocked {
+  background: rgba(255, 77, 79, 0.12);
+  color: #cf1322;
+}
+
+.tool-console__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tool-console__detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.tool-console__detail-grid div {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.tool-console__detail-grid dt {
+  flex: 0 0 84px;
+  color: var(--cy-text-muted, #8e8e93);
+}
+
+.tool-console__detail-grid dd {
+  margin: 0;
+  color: var(--cy-text, #1d1d1f);
+  word-break: break-all;
+}
+
+.tool-console__detail-blocked {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 77, 79, 0.08);
+  color: #cf1322;
+  font-size: 12px;
+}
+
+.tool-console__detail-section h2 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.tool-console__pre {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 8px;
+  background: var(--cy-bg-page, #f8f7f6);
+  color: var(--cy-text, #1d1d1f);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* ===== 渠道控制台：记录类型 / 详情抬头 / 完整日志入口 / 审计开关 ===== */
+.tool-console__kind {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--cy-bg-page, #f0efee);
+  color: var(--cy-text-muted, #8e8e93);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.tool-console__detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-console__detail-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cy-text, #1d1d1f);
+  word-break: break-all;
+}
+
+.tool-console__switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--cy-border, #f2f2f2);
+  border-radius: 8px;
+  background: var(--cy-bg-workspace, #fff);
+  cursor: pointer;
+}
+
+.tool-console__switch-row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tool-console__switch-row strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cy-text, #1d1d1f);
+}
+
+.tool-console__log-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tool-console__ghost {
+  padding: 7px 12px;
+  border: 1px solid var(--cy-border, #e6e6e6);
+  border-radius: 8px;
+  background: var(--cy-bg-workspace, #fff);
+  color: var(--cy-text, #1d1d1f);
+  font-size: 12px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.tool-console__log-path {
+  display: block;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--cy-bg-page, #f8f7f6);
+  color: var(--cy-text-muted, #8e8e93);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+/* ===== 审计日志放大视图：铺满窗口，一屏看更多拦截记录 ===== */
+.tool-console--audit-expanded {
+  position: fixed;
+  inset: 20px 24px;
+  z-index: 1200;
+  width: auto;
+  height: auto;
+  border: 1px solid var(--cy-border, #e6e6e6);
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 100vmax rgba(15, 15, 20, 0.32),
+    0 24px 64px rgba(0, 0, 0, 0.28);
+}
+
+/* 卡片四周的暗色留白只负责观感，这里补一层透明遮罩吞掉误点，避免点穿到后面的会话列表。 */
+.tool-console--audit-expanded::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: transparent;
+}
+
+/* 放大后只留日志区，把「白名单与权限」让出空间，避免列表被挤成几行。 */
+.tool-console--audit-expanded .tool-console__section:not(.tool-console__section--audit) {
+  display: none;
+}
+
+.tool-console--audit-expanded .tool-console__section--audit {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+

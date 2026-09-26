@@ -14,6 +14,7 @@ import { feedEntityNamesToJieba } from "../memory/entity-graph";
 import { isL2LocallyRecallable } from "../memory/memory-types";
 import type { DocumentImportControl } from "./file-ingest";
 import { findPromptPath } from "../external-content-paths";
+import type { MemoryScopeId } from "../zones/types";
 
 // ── Global RAG instances ──
 let store: JsonVectorStore | null = null;
@@ -164,10 +165,15 @@ export async function addL2MemoryVector(
   text: string,
   l2Id: string,
   metadata?: Record<string, unknown>,
+  scopeId?: MemoryScopeId,
 ): Promise<string> {
   if (!store || !provider) throw new Error("RAG not initialized");
   if (!l2Id.trim()) throw new Error("l2Id is required");
-  const entry = await store.addUnique(text, "user_memory", provider, { ...metadata, l2Id });
+  const entry = await store.addUnique(text, "user_memory", provider, {
+    ...metadata,
+    l2Id,
+    ...(scopeId ? { scope: scopeId } : {}),
+  });
   return entry.id;
 }
 
@@ -176,7 +182,7 @@ export async function searchMemory(
   query: string,
   source?: string,
   topK = 5,
-  options?: { recordRecall?: boolean }
+  options?: { recordRecall?: boolean; scopeId?: MemoryScopeId }
 ): Promise<string[]> {
   const results = await searchMemoryEntries(query, source, topK, options);
   return results.map((r) => r.text);
@@ -186,16 +192,21 @@ export async function searchMemoryEntries(
   query: string,
   source?: string,
   topK = 5,
-  options?: { recordRecall?: boolean }
+  options?: { recordRecall?: boolean; scopeId?: MemoryScopeId }
 ): Promise<Array<{ id: string; text: string; createdAt: number; score: number; metadata?: Record<string, unknown> }>> {
   if (!retriever) return [];
+  const scopeId = options?.scopeId;
   let allowedEntryIds: string[] | undefined;
   if (source === "user_memory") {
     try {
       const { memoryStore } = await import("../memory/memory-store");
       const memories = await memoryStore.getAllL2();
       const recallableById = new Map(
-        memories.filter(isL2LocallyRecallable).map((memory) => [memory.id, memory]),
+        memories
+          .filter(isL2LocallyRecallable)
+          // scope 过滤：未指定 domain 时保持旧行为（全库），指定后只召回本域记忆。
+          .filter((memory) => scopeId === undefined || memory.scope === scopeId)
+          .map((memory) => [memory.id, memory]),
       );
       allowedEntryIds = getEntriesBySource("user_memory")
         .filter((entry) => {
@@ -208,6 +219,11 @@ export async function searchMemoryEntries(
       console.warn("[RAG] failed to resolve recallable user memories:", err);
       return [];
     }
+  } else if (source === "chat_history" && scopeId !== undefined) {
+    // chat_history 的 domain 存在 entry.metadata.scope 上（写入时由 indexConversationTurn 注入）。
+    allowedEntryIds = getEntriesBySource("chat_history")
+      .filter((entry) => entry.metadata?.scope === scopeId)
+      .map((entry) => entry.id);
   }
   const results = await retriever.retrieve(query, source, topK, { allowedEntryIds });
   if (options?.recordRecall !== false) {
@@ -243,10 +259,17 @@ async function recordUserMemoryRecalls(results: Array<{ entry: MemoryEntry }>): 
 // 让召回工具能按时间排序、展示时间戳。
 export async function searchHistoryEntries(
   query: string,
-  topK = 5
+  topK = 5,
+  scopeId?: MemoryScopeId
 ): Promise<Array<{ text: string; createdAt: number; score: number; metadata?: Record<string, unknown> }>> {
   if (!retriever) return [];
-  const results = await retriever.retrieve(query, "chat_history", topK);
+  let allowedEntryIds: string[] | undefined;
+  if (scopeId !== undefined) {
+    allowedEntryIds = getEntriesBySource("chat_history")
+      .filter((entry) => entry.metadata?.scope === scopeId)
+      .map((entry) => entry.id);
+  }
+  const results = await retriever.retrieve(query, "chat_history", topK, { allowedEntryIds });
   return results.map((r) => ({
     text: r.entry.text,
     createdAt: r.entry.createdAt,
@@ -393,7 +416,8 @@ export async function searchImportedDocumentChunksForImportIds(
 // ── Build memory context (legacy, kept for compatibility) ──
 // 注意：单参签名无 modelText，故 model 奖励不触发（降级行为）。
 // 主流程已改用 orchestrator 的 buildAlwaysOnContext（会传上轮模型回复）。
-export async function buildMemoryContext(userInput: string): Promise<string> {
+// 当前全项目无调用方；保留仅为兼容，**新代码不要使用**。
+export async function buildMemoryContext(userInput: string, scopeId?: MemoryScopeId): Promise<string> {
   const parts: string[] = [];
 
   // 1. Worldbook（DMAE：打分 + 取 Active）
@@ -409,8 +433,8 @@ export async function buildMemoryContext(userInput: string): Promise<string> {
     parts.push("\u3010\u76f8\u5173\u6587\u4ef6\u7247\u6bb5\u3011\n" + docResults.map((m) => "- " + m).join("\n"));
   }
 
-  // 3. User memory
-  const memResults = await searchMemory(userInput, "user_memory", 3);
+  // 3. User memory（按域过滤：调用方必须显式给域，否则等于全库召回）
+  const memResults = await searchMemory(userInput, "user_memory", 3, { scopeId });
   if (memResults.length > 0) {
     parts.push("\u3010\u5173\u4e8e\u7528\u6237\u7684\u8bb0\u5fc6\u3011\n" + memResults.map((m) => "- " + m).join("\n"));
   }
@@ -449,6 +473,21 @@ export function getEntriesBySource(source: string): Array<{ id: string; text: st
 export function deleteUserMemoryVectors(ragIds: string[]): number {
   if (!store) throw new Error("RAG not initialized");
   return store.deleteEntriesByIds(ragIds, "user_memory");
+}
+
+/**
+ * 删除 `chat_history` 源的向量（§5.2 第 5 步抓到 **D2** 之后补）。
+ *
+ * 为什么要单独一个函数：`deleteEntriesByIds(ids, source)` 的第二个参数是**过滤条件**，
+ * 所以删 `chat_history` 不能复用 `deleteUserMemoryVectors`（它写死了 `user_memory`，
+ * 拿一串 chat_history 的 id 去调会一条都删不掉）。
+ *
+ * ⚠️ 语义边界：**别把这两个函数互相替代**。擦除某个人时两边都要显式调：
+ * 前者清"他的记忆的向量副本"，后者清"他说过的话 / 她复述他的话的历史副本"。
+ */
+export function deleteChatHistoryVectors(ragIds: string[]): number {
+  if (!store) throw new Error("RAG not initialized");
+  return store.deleteEntriesByIds(ragIds, "chat_history");
 }
 
 export function deleteImportedDoc(importId: string, fileName?: string): number {

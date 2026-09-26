@@ -177,4 +177,21 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   skillModeOverrides: SkillModeOverrides;
   /** Code 模式使用的用户自管语言服务命令覆盖。 */
   lspServerOverrides: LspServerOverride[];
+  /**
+   * 群聊近期上下文注入条数：昔涟在群里回复时，会一并读取本群最近 N 条消息。
+   * 取值 3~50，默认 10。由设置-记忆面板写入，经 ChannelTraceContext 注入 orchestrator。
+   */
+  groupContextLimit: number;
+}
+
+/** 群上下文条数默认值。 */
+export const DEFAULT_GROUP_CONTEXT_LIMIT = 10;
+export const MIN_GROUP_CONTEXT_LIMIT = 3;
+export const MAX_GROUP_CONTEXT_LIMIT = 50;
+
+/** 归一化群上下文条数：非数字/越界/NaN 一律回落到合法区间内的整数。 */
+export function normalizeGroupContextLimit(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_GROUP_CONTEXT_LIMIT;
+  return Math.min(MAX_GROUP_CONTEXT_LIMIT, Math.max(MIN_GROUP_CONTEXT_LIMIT, Math.round(n)));
 }

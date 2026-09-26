@@ -158,12 +158,19 @@ export class L2DmaeManager {
     await this.syncToStore()
   }
 
-  /** 返回可注入 prompt 的 L2：isPinned 常驻优先，其余按 activation 降序取 active */
-  async getActiveL2ForPrompt(l2List: L2Memory[], maxCount = 4): Promise<L2Memory[]> {
+  /**
+   * 返回可注入 prompt 的 L2：isPinned 常驻优先，其余按 activation 降序取 active。
+   *
+   * `scopeId` 是**防御性过滤**：调用方（orchestrator）已经用 getL2ForScope 取过一遍，
+   * 这里再拦一次，避免将来有人直接用 getAllL2() 调进来导致跨域注入。
+   * 不传则保持旧行为（全量），供管理面板与旧测试使用。
+   */
+  async getActiveL2ForPrompt(l2List: L2Memory[], maxCount = 4, scopeId?: string): Promise<L2Memory[]> {
     if (!this.loaded) await this.loadStates()
 
-    const pinned = l2List.filter((l2) => l2.isPinned)
-    const nonPinned = l2List.filter((l2) => !l2.isPinned && l2.status !== "archived")
+    const pool = scopeId === undefined ? l2List : l2List.filter((l2) => l2.scope === scopeId)
+    const pinned = pool.filter((l2) => l2.isPinned)
+    const nonPinned = pool.filter((l2) => !l2.isPinned && l2.status !== "archived")
 
     const entries = nonPinned.map((l2) => {
       const s = this.dmae.getState(l2.id) ?? defaultL2DmaeState(l2.id)

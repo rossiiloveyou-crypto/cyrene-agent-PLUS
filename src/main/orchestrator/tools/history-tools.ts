@@ -11,6 +11,7 @@ import { addMemory, searchHistoryEntries } from "../../rag";
 import { toolRegistry } from "./registry/tool-registry";
 import { currentUserTimezone } from "./built-in-tools";
 import { getDateLocale } from "../../locale-context";
+import { resolveScopeId } from "../../zones/scope";
 
 const LOG_PREFIX = "[History]";
 
@@ -18,6 +19,8 @@ const LOG_PREFIX = "[History]";
  * 把一轮对话存入向量库。在 agui-bridge 的 complete 回调里调用。
  * user 和 assistant 各存一条，方便按角色召回。
  * 失败不抛错（历史存储是副作用，不能影响主流程）。
+ *
+ * 每条都带 `scope`（记忆域）：检索时按域过滤，群聊历史不会串到桌面。
  */
 export async function indexConversationTurn(
   sessionId: string,
@@ -25,12 +28,13 @@ export async function indexConversationTurn(
   assistantText: string,
 ): Promise<void> {
   const ts = Date.now();
+  const scope = resolveScopeId(sessionId);
   try {
     if (userText) {
-      await addMemory(userText, "chat_history", { sessionId, role: "user", ts });
+      await addMemory(userText, "chat_history", { sessionId, role: "user", ts, scope });
     }
     if (assistantText) {
-      await addMemory(assistantText, "chat_history", { sessionId, role: "assistant", ts });
+      await addMemory(assistantText, "chat_history", { sessionId, role: "assistant", ts, scope });
     }
   } catch (e) {
     console.warn(LOG_PREFIX, "索引对话失败:", e);
@@ -65,16 +69,20 @@ export function registerRecallHistoryTool(): void {
       },
       required: ["query"],
     },
-    execute: async (args) => {
+    execute: async (args, ctx) => {
       const query = String(args.query || "").trim();
       if (!query) return "[错误] query 不能为空";
 
       const days = Number(args.days) || 30;
       const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
+      // 只召回当前会话所属记忆域的历史：群聊里问"我之前说过什么"，
+      // 不能把桌面私聊的原话捞出来。
+      const scopeId = resolveScopeId(ctx?.conversationId);
+
       let hits;
       try {
-        hits = await searchHistoryEntries(query, 5);
+        hits = await searchHistoryEntries(query, 5, scopeId);
       } catch (e) {
         return "[recall_history] 检索失败：" + (e instanceof Error ? e.message : String(e));
       }

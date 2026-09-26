@@ -21,13 +21,13 @@ describe("mobile channel agent policy", () => {
     });
   });
 
-  it("always disables tools for QQ group chats", () => {
-    const policy = resolveChannelAgentPolicy("all", { channel: "qq", chatType: "group" });
-    expect(policy).toEqual({
-      executionMode: "chat",
-      exposeTools: false,
+  it("keeps the same policy for group chats (QQ groups are no longer forced to pure Chat)", () => {
+    // 群聊与私聊同口径：拦截谁可以调用工具改由 tool-access 白名单在执行层决定。
+    expect(resolveChannelAgentPolicy("all")).toEqual({
+      executionMode: "work",
+      exposeTools: true,
       includeInteractiveTools: false,
-      permissionMode: "normal",
+      permissionMode: "allow_all",
     });
 
     const options = {
@@ -42,7 +42,7 @@ describe("mobile channel agent policy", () => {
         skillIds: new Set<string>(),
       },
     } as unknown as CyreneRunOptions;
-    enforceChannelAgentPolicy(options, policy);
+    enforceChannelAgentPolicy(options, resolveChannelAgentPolicy("off"));
     expect(options.tools).toEqual([]);
     expect(options.toolSystemContent).toBe("");
     expect(options.skillLayerContent).toBe("");

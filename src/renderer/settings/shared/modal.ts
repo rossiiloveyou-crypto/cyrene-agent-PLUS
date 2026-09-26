@@ -4,6 +4,33 @@
 
 import { modalState } from "./modal-state";
 
+/**
+ * 输入弹窗的默认图标（铅笔）。
+ *
+ * 它是一段 **HTML**，所以只能走 innerHTML —— 早期版本用 `textContent` 直接赋值，
+ * 结果「新建区块」这类不传 icon 的弹窗把 `<svg …>` 标记当文字渲染出来，
+ * 满屏乱码盖住弹窗（见 zones 面板的新建流程）。
+ */
+export const DEFAULT_INPUT_MODAL_ICON =
+  '<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px">'
+  + '<path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>'
+  + '<path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>'
+  + '</svg>';
+
+/**
+ * 统一设置弹窗图标。
+ *
+ * 调用方传进来的 icon 有两种形态：emoji / 纯文本（如 "⚠️"），以及项目内固定的
+ * SVG 片段（如 scheduler 面板的垃圾桶图标）。前者必须走 textContent（否则没有任何
+ * 转义保护），后者必须走 innerHTML（否则标记会当文字显示）。这里用「是否以 `<` 开头」
+ * 区分，两边都不会走错。
+ */
+export function applyModalIcon(iconEl: HTMLElement, icon: string | undefined, fallback: string): void {
+  const value = icon && icon.length > 0 ? icon : fallback;
+  if (value.trimStart().startsWith("<")) iconEl.innerHTML = value;
+  else iconEl.textContent = value;
+}
+
 export function _initModalOverlay(): void {
   if (modalState.cyOverlay) return;
   modalState.cyOverlay = document.createElement("div");
@@ -34,7 +61,7 @@ export function showModal(options: { title: string; message: string; icon?: stri
   var msgEl = modalState.cyOverlay.querySelector("#cy-modal-message") as HTMLElement;
   var cancelBtn = modalState.cyOverlay.querySelector("#cy-modal-cancel") as HTMLButtonElement;
   var confirmBtn = modalState.cyOverlay.querySelector("#cy-modal-confirm") as HTMLButtonElement;
-  iconEl.innerHTML = options.icon || "📌";
+  applyModalIcon(iconEl, options.icon, "📌");
   titleEl.textContent = options.title;
   msgEl.textContent = options.message;
   cancelBtn.textContent = options.cancelText || "取消";
@@ -87,7 +114,7 @@ export function showHtmlModal(options: { title: string; htmlBody: string; icon?:
   const titleEl = modalState.cyHtmlOverlay.querySelector("#cy-html-modal-title") as HTMLElement;
   const bodyEl = modalState.cyHtmlOverlay.querySelector("#cy-html-modal-body") as HTMLElement;
   const confirmBtn = modalState.cyHtmlOverlay.querySelector("#cy-html-modal-confirm") as HTMLButtonElement;
-  iconEl.innerHTML = options.icon || "📌";
+  applyModalIcon(iconEl, options.icon, "📌");
   titleEl.textContent = options.title;
   bodyEl.innerHTML = options.htmlBody;
   confirmBtn.textContent = options.confirmText || "知道了";
@@ -112,7 +139,7 @@ function _initInputOverlay(): void {
   modalState.cyInputOverlay.innerHTML = [
     '<div class="cy-modal" role="dialog" aria-modal="true" style="width:min(420px,90vw);">',
     '  <div class="cy-modal__head">',
-    '    <span class="cy-modal__icon" id="cy-input-icon"><svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>',
+    '    <span class="cy-modal__icon" id="cy-input-icon">' + DEFAULT_INPUT_MODAL_ICON + '</span>',
     '    <h3 class="cy-modal__title" id="cy-input-title">请输入</h3>',
     '  </div>',
     '  <hr class="cy-modal__divider">',
@@ -136,6 +163,11 @@ export function showInputModal(options: {
   icon?: string;
   confirmText?: string;
   cancelText?: string;
+  /**
+   * 确认门控：传入后，输入框内容必须**严格等于**该值，确认按钮才可点。
+   * 用于「删除全部记忆」这类不可撤销操作（防误触，不只靠"点两下"）。
+   */
+  confirmValue?: string;
 }): Promise<string | null> {
   _initInputOverlay();
   if (!modalState.cyInputOverlay) return Promise.resolve(null);
@@ -145,13 +177,19 @@ export function showInputModal(options: {
   const inputEl = modalState.cyInputOverlay.querySelector("#cy-input-field") as HTMLInputElement;
   const cancelBtn = modalState.cyInputOverlay.querySelector("#cy-input-cancel") as HTMLButtonElement;
   const confirmBtn = modalState.cyInputOverlay.querySelector("#cy-input-confirm") as HTMLButtonElement;
-  iconEl.textContent = options.icon || `<svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  applyModalIcon(iconEl, options.icon, DEFAULT_INPUT_MODAL_ICON);
   titleEl.textContent = options.title;
   msgEl.textContent = options.message;
   inputEl.value = options.defaultValue || "";
   inputEl.placeholder = options.placeholder || "";
   cancelBtn.textContent = options.cancelText || "取消";
   confirmBtn.textContent = options.confirmText || "确定";
+  // 确认门控（未传 confirmValue 时恒可点）
+  const syncConfirmState = (): void => {
+    confirmBtn.disabled = options.confirmValue !== undefined && inputEl.value !== options.confirmValue;
+  };
+  inputEl.addEventListener("input", syncConfirmState);
+  syncConfirmState();
   modalState.cyInputOverlay.classList.remove("is-hidden");
   setTimeout(() => inputEl.focus(), 30);
   return new Promise((resolve) => {
@@ -160,12 +198,15 @@ export function showInputModal(options: {
       cancelBtn.removeEventListener("click", onCancel);
       confirmBtn.removeEventListener("click", onConfirm);
       inputEl.removeEventListener("keydown", onKey);
+      inputEl.removeEventListener("input", syncConfirmState);
+      confirmBtn.disabled = false;
       resolve(result);
     };
     const onCancel = () => cleanup(null);
     const onConfirm = () => cleanup(inputEl.value);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter") { e.preventDefault(); onConfirm(); }
+      // 门控未满足时回车不生效，与按钮 disabled 保持一致
+      if (e.key === "Enter") { e.preventDefault(); if (!confirmBtn.disabled) onConfirm(); }
       else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
     };
     cancelBtn.addEventListener("click", onCancel);

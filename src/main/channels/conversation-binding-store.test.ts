@@ -42,7 +42,7 @@ describe("ChannelConversationBindingStore", () => {
     expect(new ChannelConversationBindingStore(filePath).list().externalChats[0].lastAt).toBe(300);
   });
 
-  it("flushes pending timestamps and keeps metadata and binding changes immediately durable", () => {
+  it("flushes pending timestamps and keeps metadata changes immediately durable", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_000);
     const store = new ChannelConversationBindingStore(filePath);
     const chat = { sessionId: "channel:qq:a", channel: "qq" as const,
@@ -55,11 +55,10 @@ describe("ChannelConversationBindingStore", () => {
     store.flush();
     expect(writes).not.toHaveBeenCalled();
     store.observe({ ...chat, lastAt: 300 });
-    store.bind(chat.sessionId, "desktop-1");
-    expect(new ChannelConversationBindingStore(filePath).resolve(chat.sessionId)).toBe("desktop-1");
+    // 纯时间戳变化会被合并（间隔内不落盘），需要 flush 才可见
+    store.flush();
     expect(new ChannelConversationBindingStore(filePath).list().externalChats[0].lastAt).toBe(300);
-    store.unbind(chat.sessionId);
-    expect(new ChannelConversationBindingStore(filePath).resolve(chat.sessionId)).toBeNull();
+    // 元数据变更（昵称）立即落盘，无需 flush
     store.observe({ ...chat, senderName: "new name", lastAt: 400 });
     expect(new ChannelConversationBindingStore(filePath).list().externalChats[0].senderName).toBe("new name");
   });
@@ -80,83 +79,39 @@ describe("ChannelConversationBindingStore", () => {
     expect(new ChannelConversationBindingStore(filePath).list().externalChats[0].lastAt).toBe(300);
   });
 
-  it("persists a binding and resolves it after restart", () => {
-    const store = new ChannelConversationBindingStore(filePath);
-    store.observe({
-      sessionId: "channel:wechat:aaa",
-      channel: "wechat",
-      chatId: "wx-user-a",
-      chatType: "private",
-      senderName: "Alice",
-      lastAt: 100,
-    });
-    store.bind("channel:wechat:aaa", "conversation-1", 200);
-
-    const restarted = new ChannelConversationBindingStore(filePath);
-    expect(restarted.resolve("channel:wechat:aaa")).toBe("conversation-1");
-    expect(restarted.list().bindings).toEqual([
-      expect.objectContaining({
-        sessionId: "channel:wechat:aaa",
-        conversationId: "conversation-1",
-      }),
-    ]);
-  });
-
-  it("replaces an existing binding without affecting another external chat", () => {
-    const store = new ChannelConversationBindingStore(filePath);
-    store.observe({
-      sessionId: "channel:qq:aaa",
-      channel: "qq",
-      chatId: "10001",
-      chatType: "private",
-      lastAt: 100,
-    });
-    store.observe({
-      sessionId: "channel:qq:bbb",
-      channel: "qq",
-      chatId: "10002",
-      chatType: "private",
-      lastAt: 101,
-    });
-    store.bind("channel:qq:aaa", "conversation-old", 200);
-    store.bind("channel:qq:bbb", "conversation-other", 201);
-
-    store.bind("channel:qq:aaa", "conversation-new", 202);
-
-    expect(store.resolve("channel:qq:aaa")).toBe("conversation-new");
-    expect(store.resolve("channel:qq:bbb")).toBe("conversation-other");
-  });
-
-  it("rejects bindings for an external chat that has not been observed", () => {
-    const store = new ChannelConversationBindingStore(filePath);
-
-    expect(() => store.bind("channel:qq:unknown", "conversation-1")).toThrow(
-      "Unknown external chat",
-    );
-  });
-
-  it("unbind removes only the selected external chat binding", () => {
-    const store = new ChannelConversationBindingStore(filePath);
-    for (const [sessionId, chatId] of [
-      ["channel:feishu:aaa", "oc_a"],
-      ["channel:feishu:bbb", "oc_b"],
-    ] as const) {
-      store.observe({ sessionId, channel: "feishu", chatId, chatType: "private", lastAt: 100 });
-      store.bind(sessionId, `conversation-${chatId}`);
-    }
-
-    expect(store.unbind("channel:feishu:aaa")).toBe(true);
-    expect(store.resolve("channel:feishu:aaa")).toBeNull();
-    expect(store.resolve("channel:feishu:bbb")).toBe("conversation-oc_b");
-  });
-
   it("treats malformed persisted data as empty", () => {
     fs.writeFileSync(filePath, "{not json", "utf8");
 
     const store = new ChannelConversationBindingStore(filePath);
 
-    expect(store.list()).toEqual({ externalChats: [], bindings: [] });
-    expect(store.resolve("channel:wechat:aaa")).toBeNull();
+    expect(store.list()).toEqual({ externalChats: [] });
+  });
+
+  it("ignores the legacy bindings key left over from the removed mirror feature", () => {
+    // 旧版本会把"渠道会话 ↔ 桌面对话"的镜像绑定写在同一个文件里。
+    // 该功能已删除：旧文件必须能正常加载（忽略多出来的 key），而不是被判成脏数据清空。
+    fs.writeFileSync(filePath, JSON.stringify({
+      version: 1,
+      externalChats: [
+        { sessionId: "channel:qq:legacy", channel: "qq", chatId: "10001", chatType: "private", lastAt: 100 },
+      ],
+      bindings: [{ sessionId: "channel:qq:legacy", conversationId: "conversation-1", updatedAt: 200 }],
+    }), "utf8");
+
+    const store = new ChannelConversationBindingStore(filePath);
+    expect(store.list().externalChats.map((chat) => chat.chatId)).toEqual(["10001"]);
+    // 下一次落盘会把遗留字段彻底清掉
+    store.observe({
+      sessionId: "channel:qq:legacy",
+      channel: "qq",
+      chatId: "10001",
+      chatType: "private",
+      lastAt: 300,
+    });
+    store.flush();
+    const onDisk = JSON.parse(fs.readFileSync(filePath, "utf8")) as Record<string, unknown>;
+    expect(onDisk).not.toHaveProperty("bindings");
+    expect(onDisk.version).toBe(1);
   });
 
   it("keeps only the most recently observed external chats", () => {
@@ -184,51 +139,96 @@ describe("ChannelConversationBindingStore", () => {
     });
 
     expect(store.list().externalChats.map((chat) => chat.chatId)).toEqual(["3", "2"]);
-    expect(store.resolve("channel:qq:first")).toBeNull();
   });
 
-  it("keeps a bound chat even when newer unbound chats exceed the collection limit", () => {
-    const store = new ChannelConversationBindingStore(filePath, 2);
-    store.observe({
-      sessionId: "channel:qq:bound",
-      channel: "qq",
-      chatId: "bound",
-      chatType: "private",
-      lastAt: 1,
-    });
-    store.bind("channel:qq:bound", "conversation-bound");
-    store.observe({
-      sessionId: "channel:qq:newer-1",
-      channel: "qq",
-      chatId: "newer-1",
-      chatType: "private",
-      lastAt: 2,
-    });
-    store.observe({
-      sessionId: "channel:qq:newer-2",
-      channel: "qq",
-      chatId: "newer-2",
-      chatType: "private",
-      lastAt: 3,
-    });
-
-    expect(store.resolve("channel:qq:bound")).toBe("conversation-bound");
-    expect(store.list().externalChats.map((chat) => chat.chatId)).toEqual(["newer-2", "bound"]);
-  });
-
-  it("does not evict bound chats after restarting when the bound count exceeds the display limit", () => {
-    const store = new ChannelConversationBindingStore(filePath, 2);
-    for (const [sessionId, chatId] of [
-      ["channel:qq:bound-a", "bound-a"],
-      ["channel:qq:bound-b", "bound-b"],
+  it("re-reads the display limit on restart and keeps the most recent chats", () => {
+    const store = new ChannelConversationBindingStore(filePath, 3);
+    for (const [sessionId, chatId, lastAt] of [
+      ["channel:qq:a", "a", 1],
+      ["channel:qq:b", "b", 2],
+      ["channel:qq:c", "c", 3],
     ] as const) {
-      store.observe({ sessionId, channel: "qq", chatId, chatType: "private", lastAt: 1 });
-      store.bind(sessionId, `conversation-${chatId}`);
+      store.observe({ sessionId, channel: "qq", chatId, chatType: "private", lastAt });
     }
 
+    // 换一个更小的上限重启：只保留最近活跃的那一条
     const restarted = new ChannelConversationBindingStore(filePath, 1);
-    expect(restarted.resolve("channel:qq:bound-a")).toBe("conversation-bound-a");
-    expect(restarted.resolve("channel:qq:bound-b")).toBe("conversation-bound-b");
-    expect(restarted.list().externalChats.map((chat) => chat.chatId).sort()).toEqual(["bound-a", "bound-b"]);
+    expect(restarted.list().externalChats.map((chat) => chat.chatId)).toEqual(["c"]);
+  });
+
+  // —— P3 擦除某人：只忘掉他的私聊会话，其余（尤其群）必须留下并落盘 ——
+  //
+  // externalChats 是「记忆区块成员选择器」的唯一数据源：群记录被删就等于区块选不出群，
+  // 所以 forget 的契约是"只删给定 sessionId，别的一个不动"。
+  describe("forget（P3）", () => {
+    const privateChat = {
+      sessionId: "channel:qq:private-1",
+      channel: "qq",
+      chatId: "10001",
+      chatType: "private" as const,
+      senderName: "小明",
+      lastAt: 100,
+    };
+    const groupChat = {
+      sessionId: "channel:qq:group-1",
+      channel: "qq",
+      chatId: "20001",
+      chatType: "group" as const,
+      senderName: "测试群",
+      lastAt: 200,
+    };
+    const otherPrivate = {
+      sessionId: "channel:qq:private-2",
+      channel: "qq",
+      chatId: "10002",
+      chatType: "private" as const,
+      senderName: "小红",
+      lastAt: 300,
+    };
+
+    it("只移除给定 sessionId，群与其他私聊保留并持久化", () => {
+      const store = new ChannelConversationBindingStore(filePath);
+      store.observe(privateChat);
+      store.observe(groupChat);
+      store.observe(otherPrivate);
+
+      const removed = store.forget([privateChat.sessionId]);
+
+      expect(removed).toBe(1);
+      expect(store.list().externalChats.map((chat) => chat.sessionId).sort())
+        .toEqual([groupChat.sessionId, otherPrivate.sessionId].sort());
+      // 落盘：新实例（等价于重启）读到的必须完全一致
+      const restarted = new ChannelConversationBindingStore(filePath);
+      expect(restarted.list().externalChats.map((chat) => chat.sessionId).sort())
+        .toEqual([groupChat.sessionId, otherPrivate.sessionId].sort());
+      expect(restarted.list().externalChats.map((chat) => chat.chatType).sort()).toEqual(["group", "private"]);
+    });
+
+    it("可一次忘掉多个会话；未知 id 返回值不受影响", () => {
+      const store = new ChannelConversationBindingStore(filePath);
+      store.observe(privateChat);
+      store.observe(groupChat);
+      store.observe(otherPrivate);
+
+      const removed = store.forget([privateChat.sessionId, otherPrivate.sessionId, "channel:qq:missing"]);
+
+      expect(removed).toBe(2);
+      expect(store.list().externalChats.map((chat) => chat.sessionId)).toEqual([groupChat.sessionId]);
+    });
+
+    it("无命中时不落盘（不产生无谓写入）", () => {
+      const store = new ChannelConversationBindingStore(filePath);
+      store.observe(privateChat);
+      store.observe(groupChat);
+      const writes = vi.spyOn(fs, "renameSync");
+
+      const removed = store.forget(["channel:qq:missing"]);
+      const removedEmpty = store.forget([]);
+
+      expect(removed).toBe(0);
+      expect(removedEmpty).toBe(0);
+      expect(writes).not.toHaveBeenCalled();
+      expect(store.list().externalChats).toHaveLength(2);
+    });
   });
 });

@@ -48,6 +48,26 @@ describe("general Harness tool concurrency settings", () => {
   });
 });
 
+describe("general group context limit (设置-记忆 · 群聊上下文条数)", () => {
+  it("defaults to ten when missing or unusable", () => {
+    expect(normalizeGeneralSettings({}).groupContextLimit).toBe(10);
+    expect(normalizeGeneralSettings({ groupContextLimit: "invalid" } as never).groupContextLimit).toBe(10);
+    expect(normalizeGeneralSettings({ groupContextLimit: Number.NaN } as never).groupContextLimit).toBe(10);
+  });
+
+  it("clamps to the supported 3~50 range and rounds to an integer", () => {
+    expect(normalizeGeneralSettings({ groupContextLimit: 1 } as never).groupContextLimit).toBe(3);
+    expect(normalizeGeneralSettings({ groupContextLimit: 999 } as never).groupContextLimit).toBe(50);
+    expect(normalizeGeneralSettings({ groupContextLimit: 12.6 } as never).groupContextLimit).toBe(13);
+    expect(normalizeGeneralSettings({ groupContextLimit: 3 } as never).groupContextLimit).toBe(3);
+    expect(normalizeGeneralSettings({ groupContextLimit: 50 } as never).groupContextLimit).toBe(50);
+  });
+
+  it("accepts numeric strings from the settings input", () => {
+    expect(normalizeGeneralSettings({ groupContextLimit: "7" } as never).groupContextLimit).toBe(7);
+  });
+});
+
 describe("general ASR settings", () => {
   it("keeps Mossland as a supported ASR provider", () => {
     const settings = normalizeGeneralSettings({ asrEngine: "mossland" } as never);

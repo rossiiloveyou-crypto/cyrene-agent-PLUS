@@ -119,6 +119,33 @@ describe("memory/RAG reconciliation", () => {
     expect(deps.markSynced).toHaveBeenCalledWith("l2_ok", "rag_rebuilt_ok");
     expect(report).toMatchObject({ rebuilt: 1, failed: 1, changed: true });
   });
+
+  /**
+   * P3 §4.4 新增：**删掉 L2 之后，它的向量会在下一次对账被回收，而不是被复活**。
+   *
+   * 这是"删除是否真的删干净了"的最后一道保险：
+   * - 「只删 L2 不删向量」→ 对账把孤儿向量回收掉（本用例）。⚠️ 但在回收之前它仍在向量库
+   *   里，所以 `deleteL2Cascade` 的调用方**必须两边都显式删**（先 store 后 vector）；
+   * - 「只删向量不删 L2」→ 对账会**重新 addVector 把它建回来**（复活），
+   *   所以只删向量是不够的。
+   */
+  it("擦除留下的孤儿向量在对账时被回收，且不会被重建复活", async () => {
+    // store 里已经没有 l2_mine 了（级联删除的效果），但向量库里还留着它的向量
+    const memories = [memory({ id: "l2_other", content: "别人的记忆", ragId: "rag_other" })];
+    const vectors = [
+      { id: "rag_other", text: "别人的记忆", metadata: { l2Id: "l2_other" } },
+      { id: "rag_mine", text: "他说的那句话", metadata: { l2Id: "l2_mine" } },
+    ];
+    const deps = createDeps(memories, vectors);
+
+    const report = await reconcileMemoryRag(deps);
+
+    expect(deps.deleteVectors).toHaveBeenCalledWith(["rag_mine"]);
+    expect(report).toMatchObject({ rebuilt: 0, relinked: 0, deleted: 1, failed: 0, changed: true });
+    // 已删的记忆不会被"重新建向量"复活
+    expect(deps.addVector).not.toHaveBeenCalled();
+    expect(deps.markSynced).not.toHaveBeenCalled();
+  });
 });
 
 const backupTempDirs: string[] = [];

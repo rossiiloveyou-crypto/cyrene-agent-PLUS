@@ -10,6 +10,7 @@
 import * as fs from "fs";
 import { app, IpcMainInvokeEvent, WebContents } from "electron";
 import { getHarnessRunStore } from "./orchestrator/harness/run-store";
+import { runWithConversationScope } from "./conversation-usage-store";
 import { IPC } from "../shared/ipc-channels";
 import { createIpcScope, type IpcScope } from "./application/ipc-scope";
 import { Subscription } from "rxjs";
@@ -102,6 +103,12 @@ export interface AguiRunInput {
   workspaceBindingSessionId?: string | null;
   /** 外部渠道入口。桌面聊天不传；微信/飞书用于注入渠道语气规则。 */
   channel?: RelationshipChannel;
+  /**
+   * 会话形态，仅主进程渠道入口传值。
+   * sessionId 是哈希后的渠道会话键，群聊/私聊在 ID 上不可辨识，
+   * 所以群聊专属上下文必须以本字段为准，不能靠解析 sessionId 猜测。
+   */
+  chatType?: "private" | "group";
   /** 仅主进程内部使用：插件无头 Agent 指定提示词 Provider 场景；缺省为 conversation。 */
   promptSource?: "conversation" | "plugin-agent";
   /** 仅主进程内部使用：传给插件提示词 Provider 的逻辑渠道，不参与内置渠道规则。 */
@@ -624,7 +631,9 @@ export function registerAgUiIpc(
     // TEXT_MESSAGE_CONTENT 经 <think> 过滤后再转发；
     // complete/error 时做副作用，并补发一个终态事件让渲染端知道这轮结束。
     perf.mark("agent_run_start");
-    const sub = agent.runWithEvents(options).subscribe({
+    // 对话用量归属：整段 run（含多轮工具调用、运行中压缩、子代理）都在该会话作用域内，
+    // 期间的 token 记账会自动累加到本对话的用量徽章上。
+    const sub = runWithConversationScope(sessionId, () => agent.runWithEvents(options).subscribe({
       next: (baseEvent) => {
         const eventType = (baseEvent as { type?: string })?.type;
 
@@ -861,7 +870,7 @@ export function registerAgUiIpc(
         endLifecycle();
         perf.dump();
       },
-    });
+    }));
     // 同步 Observable 在 subscribe() 返回前可能已 complete 并 delete(runId)。
     // 若此时再无条件 set，会把已结算的 run 重新加入 map，留下幽灵 active run。
     // 仅在未结算（async、仍在运行）时才登记，供 cancel 取消用。

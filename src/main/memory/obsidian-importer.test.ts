@@ -170,7 +170,13 @@ describe("importL2File / importL2Markdown (round-trip)", () => {
     const updated = all.find((m) => m.id === l2.id)!
     expect(updated.content).toBe("用户改成了每周游泳三次")
     // 回流后向量应按新正文重建、切换 ragId 并清理旧向量
-    expect(ragMock.addL2MemoryVector).toHaveBeenCalledWith("用户改成了每周游泳三次", l2.id, expect.any(Object))
+    // 第 4 参是记忆域：沿用原条目的域，否则回流后向量会掉出域过滤
+    expect(ragMock.addL2MemoryVector).toHaveBeenCalledWith(
+      "用户改成了每周游泳三次",
+      l2.id,
+      expect.any(Object),
+      l2.scope,
+    )
     expect(ragMock.deleteUserMemoryVectors).toHaveBeenCalledWith(["rag_1"])
     expect(updated.syncStatus).toBe("synced")
     expect(updated.ragId).toBe(`rag_new_${l2.id}`)

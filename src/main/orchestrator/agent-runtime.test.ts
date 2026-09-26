@@ -95,6 +95,64 @@ describe("AgentRuntime 插件宿主事件", () => {
     });
   });
 
+  it("P2 归属：透传给 onAgentRunFinished 的 finishedContext，但不进插件事件载荷", async () => {
+    const publishPluginHostEvent = vi.fn(async () => {});
+    const runtime = createAgentRuntime(createDeps(publishPluginHostEvent));
+
+    await runtime.onRunFinished(
+      { reply: "回复", toolResults: [] },
+      "我最近在学 Rust",
+      {
+        source: "channel",
+        mode: "chat",
+        conversationId: "channel:qq:ab12cd34",
+        channel: "qq",
+        runId: "run-p2",
+        personKey: "qq:10001",
+        speakerName: "小明",
+        userMessageId: "msg_1758681234567_a3f9k2",
+        chatType: "group",
+      },
+    );
+
+    // 第 6 个参数 = finishedContext（runId/source/mode 之外还要带归属）
+    const finishedContext = mocks.onAgentRunFinished.mock.calls[0][5] as Record<string, unknown>;
+    expect(finishedContext).toMatchObject({
+      runId: "run-p2",
+      source: "channel",
+      mode: "chat",
+      personKey: "qq:10001",
+      speakerName: "小明",
+      userMessageId: "msg_1758681234567_a3f9k2",
+      chatType: "group",
+    });
+
+    // 插件事件契约不变：归属是记忆链路内部信息，不外泄到插件载荷
+    expect(publishPluginHostEvent).toHaveBeenCalledWith("turn:completed", {
+      source: "channel",
+      mode: "chat",
+      conversationId: "channel:qq:ab12cd34",
+      channel: "qq",
+      runId: "run-p2",
+    });
+  });
+
+  it("P2 归属：桌面路径不传归属，finishedContext 里三个字段为 undefined", async () => {
+    const runtime = createAgentRuntime(createDeps(vi.fn(async () => {})));
+
+    await runtime.onRunFinished(
+      { reply: "回复", toolResults: [] },
+      "问题",
+      { source: "desktop", mode: "chat", conversationId: "conversation-1" },
+    );
+
+    const finishedContext = mocks.onAgentRunFinished.mock.calls[0][5] as Record<string, unknown>;
+    expect(finishedContext.personKey).toBeUndefined();
+    expect(finishedContext.speakerName).toBeUndefined();
+    expect(finishedContext.userMessageId).toBeUndefined();
+    expect(finishedContext.chatType).toBeUndefined();
+  });
+
   it.each(["timeout", "cancelled", "runtime_error"] as const)(
     "非成功终态 %s 不发布轮次完成事件",
     async (status) => {

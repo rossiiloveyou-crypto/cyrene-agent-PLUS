@@ -1,4 +1,7 @@
 import { createHash } from "crypto";
+// import type 是纯类型引用，编译后消失，不引入运行时循环依赖
+// （history-log 也不反向依赖 channel-context）。
+import type { PersistedHistoryEntry } from "./history-log";
 import type { PreparedOutgoing } from "./outgoing-composer";
 import type { ChannelId, IncomingMessage } from "./types";
 
@@ -8,68 +11,59 @@ const LOG = "[ChannelContext]";
 export interface ChatMessage {
   role: "user" | "assistant" | "system" | "tool";
   content?: string;
+  /** 群聊说话人昵称（仅渠道历史填充；私聊与绑定会话历史为空）。 */
+  speakerName?: string;
+  /** 群聊说话人平台 ID（QQ 号等）。 */
+  speakerId?: string;
+  /** 该条是否触发了昔涟回复。群聊旁听为 false；旧记录/私聊可能缺失。 */
+  triggered?: boolean;
 }
 
 /** 单条入站消息已经确定的上下文快照。 */
 export interface DispatchContext {
   sessionId: string;
-  boundConversationId: string | null;
-}
-
-/** 写入绑定桌面会话时携带的渠道元数据。 */
-export interface BoundConversationMessageMetadata {
-  channel: ChannelId;
-  chatType: "private" | "group";
-  senderName?: string;
-  modelContext?: string;
-  /** 本轮已确认发送的内置或用户表情包编号。 */
-  sticker?: string;
 }
 
 export interface ChannelContext {
-  /** 解析一次绑定并生成本条消息使用的上下文快照。 */
+  /** 解析一次上下文快照（渠道会话自带短期上下文，不再绑定桌面对话）。 */
   resolveDispatchContext(sessionId: string): DispatchContext;
   /** 迁移旧历史键并记录会话与原始发送者的关系。 */
   recordIncomingSession(msg: IncomingMessage, context: DispatchContext): void;
-  /** 读取快照指向的历史；绑定历史不可用时回退到渠道历史。 */
+  /** 读取快照指向的渠道历史。 */
   resolvePriorMessages(
     context: DispatchContext,
     limit: number,
   ): Promise<ChatMessage[] | undefined>;
-  /** 写入渠道用户历史，并按快照选择是否镜像到桌面会话。 */
+  /** 写入渠道用户历史，返回落盘对象（含 id）；未落盘时 null。 */
   appendIncomingContext(
     msg: IncomingMessage,
     context: DispatchContext,
-  ): Promise<void>;
-  /** 在发送确认后写入渠道助手历史和绑定桌面会话。 */
+  ): Promise<PersistedHistoryEntry | null>;
+  /** 在发送确认后写入渠道助手历史，返回落盘对象（含 id）；未落盘时 null。 */
   appendAssistantContext(
     msg: IncomingMessage,
     context: DispatchContext,
     prepared: PreparedOutgoing,
-  ): Promise<void>;
+  ): Promise<PersistedHistoryEntry | null>;
 }
 
 export interface CreateChannelContextOptions {
-  resolveBoundConversationId?: (sessionId: string) => string | null;
   loadRecentChannelHistory?: (
     sessionId: string,
     limit: number,
   ) => Promise<ChatMessage[]>;
-  loadBoundConversationHistory?: (
-    conversationId: string,
-    limit: number,
-  ) => Promise<ChatMessage[]>;
+  /**
+   * 渠道历史写入. 返回落盘的消息对象 (含 id); 未落盘时 null.
+   *
+   * 返回类型放宽到 `undefined` 是因为这是**注入点**（测试桩/未来实现可能什么都不返回），
+   * 实现侧的 `?? null` 正是为它准备的 —— 类型上写清楚，比让 `?? null` 无据可依更诚实。
+   */
   appendChannelHistory: (
     sessionId: string,
     role: "user" | "assistant",
     content: string,
-  ) => void | Promise<void>;
-  appendBoundConversationMessage?: (
-    conversationId: string,
-    role: "user" | "assistant",
-    content: string,
-    metadata: BoundConversationMessageMetadata,
-  ) => void | Promise<void>;
+    meta?: { speakerId?: string; speakerName?: string; isBot?: boolean; triggered?: boolean },
+  ) => PersistedHistoryEntry | null | undefined | Promise<PersistedHistoryEntry | null | undefined>;
   migrateHistory: (fromSessionId: string, toSessionId: string) => void;
 }
 
@@ -97,7 +91,34 @@ export function formatChannelUserText(msg: IncomingMessage): string {
   const reply = msg.reply?.text
     ? `\n引用 ${msg.reply.senderName || msg.reply.senderId || "未知用户"}：${msg.reply.text}`
     : "";
-  return `[群聊发送者：${sender}]${reply}\n${msg.text}`;
+  // 触发关键词命中的群消息没有 @ 昔涟，必须显式告诉模型"这条是在叫你"
+  const triggerNote = msg.trigger === "trigger_keyword"
+    ? "\n[本条消息命中触发关键词（未 @ 你），按约定需要你回复]"
+    : "";
+  return `[群聊发送者：${sender}]${triggerNote}${reply}\n${msg.text}`;
+}
+
+/**
+ * 群聊正文去掉「发送者前缀」那一行，保留其余内容（引用行 / 触发提示行）。
+ *
+ * 为什么需要它：结构化字段（speakerId 等）会跟正文里的 `[群聊发送者：…]` 前缀重复表达同一件事，
+ * 且 speakerId 存在会让 history-log 的 normalizeEntry 跳过剥前缀，再叠上滑动窗口映射的前缀
+ * 就会变成 `[小明]: [群聊发送者：小明 (10001)]\n…`。所以写入时就要把前缀砍掉。
+ *
+ * 只砍前缀、不砍引用：`引用 小红：…` 与 `[本条消息命中触发关键词…]` 是正文语义，必须保留。
+ *
+ * ⚠️ 不能用 `[^\]\n]+` 吃昵称：QQ 昵称可以含 `]`（如 `[b°t]BEIKIA`），
+ * 那样会在昵称内部的 `]` 上收尾，把 `BEIKIA (2914636187)]\n111` 这种残片留给模型。
+ * 这里把「分隔 `]`」锚定成"行尾或 `(数字)` 之前"：昵称内部的 `]` 不满足锚点会被跳过，
+ * 而惰性的 `[^\n]{0,300}?` 保证正常昵称（`[群聊发送者：小明 (10001)]`）仍在第一个 `]` 收尾，
+ * 不会贪婪吞掉正文。
+ *
+ * 注意本函数只服务**本轮新消息**（入参就是 formatChannelUserText 的输出，形如 `[群聊发送者：X (id)]\n正文`），
+ * 所以锚点不需要兼容 legacy 的 `(@昔涟)` / `(触发词)` 标记——那些只存在于磁盘旧记录里，
+ * 由 history-log 的 LEGACY_SPEAKER_PREFIX 负责。
+ */
+function stripSpeakerPrefix(text: string): string {
+  return text.replace(/^\[群聊发送者：[^\n]{0,300}?\](?=\n|$|\(\d{1,32}\))\n?/, "");
 }
 
 /** 按会话标识反查原始发送者，仅用于调试。 */
@@ -108,28 +129,29 @@ export function lookupOriginalSender(
   return entry ? { channel: entry.channel, senderId: entry.senderId } : null;
 }
 
+/**
+ * 忘掉某个发送者在调试索引里的全部会话（P3 擦除某人）。
+ *
+ * sessionIndex 是进程内缓存（sessionId → 原始发送者），唯一读取方是"仅用于调试"的
+ * lookupOriginalSender。擦除后他的 sessionId 已经没有任何意义，留着只会让调试视图
+ * 继续显示这个人。返回实际清理的条数（幂等，不存在就是 0）。
+ */
+export function forgetSessionIndex(senderId: string): number {
+  let removed = 0;
+  for (const [sessionId, entry] of sessionIndex) {
+    if (entry.senderId !== senderId) continue;
+    sessionIndex.delete(sessionId);
+    removed += 1;
+  }
+  return removed;
+}
+
 export function createChannelContext(
   options: CreateChannelContextOptions,
 ): ChannelContext {
   return {
     resolveDispatchContext(sessionId): DispatchContext {
-      let requestedBoundConversationId: string | null = null;
-      try {
-        requestedBoundConversationId = options.resolveBoundConversationId?.(sessionId) ?? null;
-      } catch (err) {
-        // 绑定存储故障不能阻断渠道消息，当前消息退回独立渠道上下文。
-        console.warn(LOG, "绑定查询失败，继续使用渠道上下文:", err);
-      }
-
-      const hasBoundContext = Boolean(
-        requestedBoundConversationId && options.loadBoundConversationHistory,
-      );
-      return {
-        sessionId,
-        boundConversationId: hasBoundContext
-          ? requestedBoundConversationId
-          : null,
-      };
+      return { sessionId };
     },
 
     recordIncomingSession(msg, context): void {
@@ -141,17 +163,6 @@ export function createChannelContext(
     },
 
     async resolvePriorMessages(context, limit): Promise<ChatMessage[] | undefined> {
-      if (context.boundConversationId && options.loadBoundConversationHistory) {
-        try {
-          return await options.loadBoundConversationHistory(
-            context.boundConversationId,
-            limit,
-          );
-        } catch (err) {
-          console.warn(LOG, "绑定历史读取失败，回退到渠道历史:", err);
-        }
-      }
-
       if (!options.loadRecentChannelHistory) return undefined;
       try {
         return await options.loadRecentChannelHistory(context.sessionId, limit);
@@ -161,63 +172,45 @@ export function createChannelContext(
       }
     },
 
-    async appendIncomingContext(msg, context): Promise<void> {
+    async appendIncomingContext(msg, context): Promise<PersistedHistoryEntry | null> {
       const modelText = formatChannelUserText(msg);
+      const isGroup = msg.chatType === "group";
       try {
-        await options.appendChannelHistory(context.sessionId, "user", modelText);
-      } catch (err) {
-        console.warn(LOG, "渠道用户历史写入失败:", err);
-      }
-
-      if (!context.boundConversationId || !options.appendBoundConversationMessage) {
-        return;
-      }
-      try {
-        await options.appendBoundConversationMessage(
-          context.boundConversationId,
+        // ⚠️ 群聊写 stripSpeakerPrefix(modelText)：砍掉发送者前缀、保留引用行。
+        //    写 msg.text 会丢引用；写 modelText 整段会双前缀。两者都不要。
+        // `?? null` 是必要的：appendChannelHistory 是注入的，测试/未来实现可能返回 undefined。
+        return (await options.appendChannelHistory(
+          context.sessionId,
           "user",
-          msg.text,
-          {
-            channel: msg.channel,
-            chatType: msg.chatType ?? "private",
-            senderName: msg.senderName,
-            modelContext: modelText === msg.text ? undefined : modelText,
-          },
-        );
+          isGroup ? stripSpeakerPrefix(modelText) : modelText,
+          isGroup
+            ? {
+                speakerId: msg.senderId,
+                ...(msg.senderName ? { speakerName: msg.senderName } : {}),
+                isBot: false,
+                // 能走到 appendIncomingContext 就是被叫起来了（dispatcher 只处理 respond）
+                triggered: true,
+              }
+            : undefined,
+        )) ?? null;
       } catch (err) {
-        console.warn(LOG, "绑定会话用户消息写入失败:", err);
+        // 历史写入失败不能中断对话主流程，所以这里吞掉异常并返回 null（不是抛错）。
+        console.warn(LOG, "渠道用户历史写入失败:", err);
+        return null;
       }
     },
 
-    async appendAssistantContext(msg, context, prepared): Promise<void> {
+    async appendAssistantContext(msg, context, prepared): Promise<PersistedHistoryEntry | null> {
       try {
-        await options.appendChannelHistory(
+        return (await options.appendChannelHistory(
           context.sessionId,
           "assistant",
           prepared.assistantText,
-        );
+          { isBot: true },
+        )) ?? null;
       } catch (err) {
         console.warn(LOG, "渠道助手历史写入失败:", err);
-      }
-
-      if (!context.boundConversationId || !options.appendBoundConversationMessage) {
-        return;
-      }
-      try {
-        await options.appendBoundConversationMessage(
-          context.boundConversationId,
-          "assistant",
-          prepared.assistantText,
-          {
-            channel: msg.channel,
-            chatType: msg.chatType ?? "private",
-            senderName: msg.senderName,
-            modelContext: undefined,
-            ...(prepared.stickerId ? { sticker: prepared.stickerId } : {}),
-          },
-        );
-      } catch (err) {
-        console.warn(LOG, "绑定会话助手消息写入失败:", err);
+        return null;
       }
     },
   };

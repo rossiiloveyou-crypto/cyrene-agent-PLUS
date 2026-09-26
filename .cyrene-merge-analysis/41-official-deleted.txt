@@ -1,0 +1,15 @@
+dist/renderer/toast/index.html
+src/renderer/react/features/chat/components/ModelModePanel.css
+src/renderer/react/features/chat/components/ModelModePanel.tsx
+src/renderer/react/hooks/useChatAppearance.test.ts
+src/renderer/react/hooks/useChatAppearance.ts
+src/renderer/settings/i18n/en.json
+src/renderer/settings/i18n/zh-CN.json
+src/renderer/settings/index.html
+src/renderer/settings/mcp/panel.test.ts
+src/renderer/settings/settings.css
+src/renderer/settings/settings.ts
+src/renderer/sidebar/sidebar.ts
+src/shared/chat-appearance.test.ts
+src/shared/chat-appearance.ts
+vite.config.ts

@@ -12,7 +12,8 @@ interface MemberCacheEntry {
 const memberNameCache = new Map<string, MemberCacheEntry>();
 const MEMBER_CACHE_TTL_MS = 5 * 60_000;
 
-function textFromSegments(segments: unknown): string {
+/** 提取纯文本段（text/markdown）拼接结果；导出供触发关键词判定复用。 */
+export function textFromSegments(segments: unknown): string {
   if (!Array.isArray(segments)) return "";
   return segments
     .map((segment) => {

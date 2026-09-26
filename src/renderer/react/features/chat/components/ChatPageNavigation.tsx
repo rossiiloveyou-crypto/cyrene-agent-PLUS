@@ -8,13 +8,15 @@ import { PluginModeButton } from "../../../components/ui/PluginModeButton";
 import { SettingsButton } from "../../../components/ui/SettingsButton";
 import { SidebarToggle } from "../../../components/ui/SidebarToggle";
 import { SkillModeButton } from "../../../components/ui/SkillModeButton";
+import { ToolConsoleButton } from "../../../components/ui/ToolConsoleButton";
 import { ToolModeButton } from "../../../components/ui/ToolModeButton";
 import { UserAvatar } from "../../../components/ui/UserAvatar";
 import { WindowControls } from "../../../components/ui/WindowControls";
 import { AppUpdateEntry } from "./AppUpdateEntry";
 import { ConversationSidebar } from "./ConversationSidebar";
+import { UsageBadge } from "./UsageBadge";
 
-export type ChatPagePanel = "tool" | "skill" | "model" | "plugin" | "moments";
+export type ChatPagePanel = "tool" | "skill" | "model" | "plugin" | "moments" | "console";
 
 export interface ChatPageNavigationProps {
   collapsed: boolean;
@@ -67,7 +69,9 @@ export function ChatPageNavigation({
       <div className="cy-page-top-center">
         {!hasOpenPanel && <ModeSwitch value={mode} onChange={onModeChange} />}
       </div>
-      <div className="cy-page-windows">
+      {/* 右上角：用量徽章与窗口控件同属一个 flex 组，永远并排不重叠 */}
+      <div className="cy-page-top-right">
+        <UsageBadge sessionId={activeSessionId} />
         <WindowControls onMinimize={onMinimize} onMaximize={onMaximize} onClose={onCloseWindow} />
       </div>
       <div className="cy-page-sidebar">
@@ -77,6 +81,7 @@ export function ChatPageNavigation({
           <SkillModeButton active={activePanel === "skill"} onClick={() => onTogglePanel("skill")} />
           <ModelModeButton active={activePanel === "model"} onClick={() => onTogglePanel("model")} />
           <PluginModeButton active={activePanel === "plugin"} onClick={() => onTogglePanel("plugin")} />
+          <ToolConsoleButton active={activePanel === "console"} onClick={() => onTogglePanel("console")} />
           <MomentsModeButton active={activePanel === "moments"} onClick={() => onTogglePanel("moments")} />
         </div>
         <div className="cy-page-conversations">

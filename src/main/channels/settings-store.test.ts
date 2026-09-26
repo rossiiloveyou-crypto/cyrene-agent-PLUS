@@ -60,24 +60,25 @@ describe("channels/settings-store", () => {
     expect(cfg.rateLimitPerUser).toBe(10);
   });
 
-  it("encrypts the QQ access token and normalizes numeric allowlists", () => {
+  it("encrypts the QQ access token and normalizes the group allowlist", () => {
     saveChannelsSettings({ qq: {
       enabled: true,
       listenMode: "wsl",
       port: 6200,
       accessToken: "qq-secret",
-      allowedPrivateUserIds: [" 10001 ", "bad", "10001"],
-      allowedGroupIds: ["20001"],
+      allowedGroupIds: [" 20001 ", "bad", "20001"],
       groupRequireMention: true,
       groupReplyStyle: "reply-and-mention",
-      groupToolPolicy: "off",
       groupMemoryPolicy: "shared-personal",
     } });
     const raw = fs.readFileSync(path.join(os.tmpdir(), "channels-settings.json"), "utf8");
     expect(raw).not.toContain("qq-secret");
+    // 旧的 QQ 私聊 / 群员名单字段不再落盘
+    expect(raw).not.toContain("allowedPrivateUserIds");
+    expect(raw).not.toContain("allowedGroupUserIds");
+    expect(raw).not.toContain("groupLimitMembers");
     const loaded = loadChannelsSettings();
     expect(loaded.qq.accessToken).toBe("qq-secret");
-    expect(loaded.qq.allowedPrivateUserIds).toEqual(["10001"]);
     expect(loaded.qq.allowedGroupIds).toEqual(["20001"]);
   });
 
@@ -130,5 +131,126 @@ describe("channels/settings-store", () => {
     );
 
     expect(loadChannelsSettings().toolSandbox).toBe("off");
+  });
+
+  it("persists the allowlist with per-account permissions and drops invalid or duplicated entries", () => {
+    saveChannelsSettings({
+      toolAccess: {
+        groupMemberGate: true,
+        toolGate: true,
+        entries: [
+          { channel: "qq", userId: " 10001 ", label: " 阿岚 ", addedAt: 1, permissions: { private: true, group: true, tool: false } },
+          { channel: "qq", userId: "10001", addedAt: 2 },
+          { channel: "nope", userId: "10002", addedAt: 3 },
+          { channel: "qqbot", userId: "   ", addedAt: 4 },
+        ] as never,
+      },
+    });
+
+    const loaded = loadChannelsSettings();
+    expect(loaded.toolAccess.groupMemberGate).toBe(true);
+    expect(loaded.toolAccess.toolGate).toBe(true);
+    expect(loaded.toolAccess.entries).toEqual([
+      {
+        channel: "qq",
+        userId: "10001",
+        label: "阿岚",
+        addedAt: 1,
+        permissions: { private: true, group: true, tool: false },
+      },
+    ]);
+  });
+
+  it("v1 配置升级：旧的 QQ 两层名单与工具白名单一次性清空，两个总开关默认全开", () => {
+    fs.writeFileSync(
+      path.join(os.tmpdir(), "channels-settings.json"),
+      JSON.stringify({
+        toolSandbox: "all",
+        qq: {
+          enabled: true,
+          allowedPrivateUserIds: ["10001"],
+          allowedGroupIds: ["20001"],
+          allowedGroupUserIds: ["10002"],
+          groupLimitMembers: false,
+        },
+        toolAccess: {
+          mode: "all",
+          entries: [{ channel: "qq", userId: "10001", addedAt: 1 }],
+        },
+      }),
+      "utf8",
+    );
+
+    const loaded = loadChannelsSettings();
+    expect(loaded.schemaVersion).toBe(2);
+    expect(loaded.toolAccess).toEqual({ groupMemberGate: true, toolGate: true, entries: [] });
+    expect(loaded.qq.allowedGroupIds).toEqual(["20001"]);
+    expect(loaded.qq).not.toHaveProperty("allowedPrivateUserIds");
+    expect(loaded.qq).not.toHaveProperty("allowedGroupUserIds");
+    expect(loaded.qq).not.toHaveProperty("groupLimitMembers");
+
+    // 迁移只发生一次：再次读盘不会继续清空新加的账号
+    saveChannelsSettings({
+      toolAccess: {
+        entries: [{ channel: "qq", userId: "30001", addedAt: 5, permissions: { private: false, group: true, tool: false } }],
+      },
+    });
+    const reloaded = loadChannelsSettings();
+    expect(reloaded.schemaVersion).toBe(2);
+    expect(reloaded.toolAccess.entries.map((entry) => entry.userId)).toEqual(["30001"]);
+  });
+
+  it("defaults the two master gates to on when the field is absent in a v2 file", () => {
+    fs.writeFileSync(
+      path.join(os.tmpdir(), "channels-settings.json"),
+      JSON.stringify({ schemaVersion: 2, toolSandbox: "all" }),
+      "utf8",
+    );
+
+    expect(loadChannelsSettings().toolAccess).toEqual({ groupMemberGate: true, toolGate: true, entries: [] });
+  });
+
+  it("merges a partial allowlist patch without dropping the other fields", () => {
+    saveChannelsSettings({
+      toolAccess: {
+        entries: [{ channel: "qq", userId: "10001", addedAt: 1, permissions: { private: false, group: true, tool: true } }],
+      },
+    });
+    saveChannelsSettings({ toolAccess: { toolGate: false } });
+
+    const loaded = loadChannelsSettings();
+    expect(loaded.toolAccess.toolGate).toBe(false);
+    expect(loaded.toolAccess.groupMemberGate).toBe(true);
+    expect(loaded.toolAccess.entries).toEqual([
+      { channel: "qq", userId: "10001", addedAt: 1, permissions: { private: false, group: true, tool: true } },
+    ]);
+  });
+
+  it("默认没有关键词，且默认不记录成功对话", () => {
+    const loaded = loadChannelsSettings();
+    expect(loaded.keywords).toEqual({ intercept: [], trigger: [] });
+    expect(loaded.audit).toEqual({ recordSuccessTurns: false });
+  });
+
+  it("归一化关键词并支持只改一半的部分补丁", () => {
+    saveChannelsSettings({
+      keywords: { intercept: [" 加微信 ", "加微信", ""], trigger: ["昔涟在吗"] } as never,
+    });
+    let loaded = loadChannelsSettings();
+    expect(loaded.keywords.intercept).toEqual(["加微信"]);
+    expect(loaded.keywords.trigger).toEqual(["昔涟在吗"]);
+
+    saveChannelsSettings({ keywords: { trigger: ["小涟"] } });
+    loaded = loadChannelsSettings();
+    expect(loaded.keywords.intercept).toEqual(["加微信"]);
+    expect(loaded.keywords.trigger).toEqual(["小涟"]);
+  });
+
+  it("审计开关可持久化", () => {
+    saveChannelsSettings({ audit: { recordSuccessTurns: true } });
+    expect(loadChannelsSettings().audit.recordSuccessTurns).toBe(true);
+
+    saveChannelsSettings({ audit: { recordSuccessTurns: false } });
+    expect(loadChannelsSettings().audit.recordSuccessTurns).toBe(false);
   });
 });

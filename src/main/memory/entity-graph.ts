@@ -21,6 +21,11 @@ export interface EntityNode {
   mentionCount: number;
   firstMentionedAt: number;
   lastMentionedAt: number;
+  /**
+   * 所属记忆域（Phase 2 引入）。取值见 zones/types.ts 的 MemoryScopeId。
+   * 群聊里抽取的实体不会出现在桌面会话的【人物关系】注入里。
+   */
+  scope?: string;
 }
 
 export interface EntityRelation {
@@ -89,7 +94,7 @@ class EntityGraph {
    * 不再在此处用正则从原文抽取 —— 旧正则贪婪匹配会产生「」就收尾」之类的垃圾实体。
    * 调用方：MemoryScheduler 在 judge 返回后调本方法。
    */
-  ingestEntities(extracted: ExtractedEntity[]): void {
+  ingestEntities(extracted: ExtractedEntity[], scope?: string): void {
     if (extracted.length === 0) return;
     const data = this.load();
     const now = Date.now();
@@ -98,8 +103,10 @@ class EntityGraph {
     for (const { name, type, aliases } of extracted) {
       const trimmedName = name?.trim();
       if (!trimmedName || trimmedName.length < 2) continue;
+      // 同域内按名字/别名去重：不同域的同名实体是两条记录（它们属于不同的人/语境）
       const existing = data.entities.find(
-        (e) => e.name === trimmedName || e.aliases.includes(trimmedName),
+        (e) => (e.scope ?? undefined) === (scope ?? undefined)
+          && (e.name === trimmedName || e.aliases.includes(trimmedName)),
       );
       if (existing) {
         existing.mentionCount++;
@@ -124,6 +131,7 @@ class EntityGraph {
           mentionCount: 1,
           firstMentionedAt: now,
           lastMentionedAt: now,
+          ...(scope ? { scope } : {}),
         });
         changed = true;
         // 新实体立即喂给 jieba，避免后续对话中该词被错误切分
@@ -145,18 +153,26 @@ class EntityGraph {
     registerJiebaCustomWord(name);
   }
 
-  /** 搜索与 query 相关的实体和关系，返回可读文本 */
-  search(query: string): string {
+  /** 搜索与 query 相关的实体和关系，返回可读文本。scope 提供时只返回该域的实体。 */
+  search(query: string, scope?: string): string {
     const data = this.load();
     if (data.entities.length === 0) return "";
 
+    const pool = scope === undefined
+      ? data.entities
+      : data.entities.filter((e) => (e.scope ?? undefined) === scope);
+    if (pool.length === 0) return "";
+
     // 简单关键词匹配：找名称包含 query 中任意词的实体
     const queryTokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const matchedEntities = data.entities.filter((e) =>
+    const matchedEntities = pool.filter((e) =>
       queryTokens.some((t) => e.name.includes(t) || e.aliases.some((a) => a.includes(t))),
     );
 
     if (matchedEntities.length === 0) return "";
+
+    // 关系只在同域实体之间成立（跨域同名实体的关系不能互相牵连）
+    const poolIds = new Set(pool.map((e) => e.id));
 
     const lines: string[] = [];
     for (const entity of matchedEntities) {
@@ -164,7 +180,7 @@ class EntityGraph {
       lines.push(`· ${entity.name}（${typeLabel(entity.type)}）${mentions}`);
 
       // 找该实体相关的所有关系
-      const outgoing = data.relations.filter((r) => r.sourceId === entity.id);
+      const outgoing = data.relations.filter((r) => r.sourceId === entity.id && poolIds.has(r.targetId));
       for (const rel of outgoing) {
         const target = data.entities.find((e) => e.id === rel.targetId);
         if (target) {
@@ -172,7 +188,7 @@ class EntityGraph {
         }
       }
 
-      const incoming = data.relations.filter((r) => r.targetId === entity.id);
+      const incoming = data.relations.filter((r) => r.targetId === entity.id && poolIds.has(r.sourceId));
       for (const rel of incoming) {
         const source = data.entities.find((e) => e.id === rel.sourceId);
         if (source) {
@@ -182,6 +198,43 @@ class EntityGraph {
     }
 
     return lines.length > 0 ? lines.join("\n") : "";
+  }
+
+  /**
+   * 按名字（含别名）精确移除实体节点，并清掉任一端指向被删节点的关系（P3 擦除某人用）。
+   *
+   * 为什么按名字而不是按 personKey：`EntityNode` 只有 `id` / `name` / `aliases` / `type` / `scope`，
+   * 与 QQ 号没有任何关联（去重/匹配只按「同域内 name 或 aliases 全等」，见 ingestEntities）。
+   * 所以擦除时只能拿 externalChats / transcript / 区块成员三处收集到的**昵称集合**来匹配 ——
+   * 三处都是同一批昵称快照，覆盖足够；同名误伤由预演报告里的人工确认兜底。
+   *
+   * 与 `reset()` 的区别：本方法只动命中的节点，`reset()` 清空整张图，语义互不影响。
+   * 命中为空时**不落盘**（避免每次擦除都无谓重写 entity-graph.json）。
+   */
+  removeEntities(criteria: {
+    names: readonly string[];
+    types?: readonly EntityNode["type"][];
+  }): { nodes: EntityNode[]; relations: number } {
+    const data = this.load();
+    const names = new Set(criteria.names);
+    const types = criteria.types ? new Set(criteria.types) : null;
+
+    const doomed = data.entities.filter((e) => (
+      (types ? types.has(e.type) : true)
+      && (names.has(e.name) || e.aliases.some((a) => names.has(a)))
+    ));
+    if (doomed.length === 0) return { nodes: [], relations: 0 };
+
+    const doomedIds = new Set(doomed.map((e) => e.id));
+    data.entities = data.entities.filter((e) => !doomedIds.has(e.id));
+
+    const relationsBefore = data.relations.length;
+    data.relations = data.relations.filter(
+      (r) => !doomedIds.has(r.sourceId) && !doomedIds.has(r.targetId),
+    );
+
+    this.save();
+    return { nodes: doomed, relations: relationsBefore - data.relations.length };
   }
 
   /** 清空图谱 */

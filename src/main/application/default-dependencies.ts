@@ -39,6 +39,8 @@ import {
   syncVolcanoSearchMcp,
 } from "../settings/general-settings-lifecycle";
 import { registerMemoryUserToolIpc } from "../memory/memory-user-ipc";
+import { runMemorySchemaGate } from "../memory/memory-schema-gate";
+import { registerZonesIpc } from "../zones/zones-ipc";
 import { configureDocumentIndexQueue } from "../rag/document-index-queue";
 import { runDocumentIndexJob } from "../rag/document-index-worker";
 import { createLlmClient } from "../services/llm/llm-client";
@@ -266,6 +268,10 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
       // Skill 系统：扫描双源 skills + 注册 meta-tool
       initSkills,
 
+      // 记忆 schema 闸门：必须在 initRag（会 load 向量库）之前。
+      // 检测到旧版记忆时弹原生对话框，用户确认后清空全部记忆文件。
+      runMemorySchemaGate: () => runMemorySchemaGate(),
+
       createLowCostServices: () => {
         const runtimeStateService = createRuntimeStateService();
         runtimeStateService.onChange(() => {
@@ -483,6 +489,9 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
           windowManager: shell.windowManager,
           embeddingIndexService: services.embedding,
         });
+
+        // 记忆区块（zones）：记忆域的增删改 + 外部会话成员管理
+        registerZonesIpc({ ipc });
 
         // ── TTS IPC ──
         registerTtsIpc({ ipc, ttsSessionService: services.ttsSession });

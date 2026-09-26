@@ -14,6 +14,7 @@ const ragMock = vi.hoisted(() => ({
 
 const memoryStoreMock = vi.hoisted(() => ({
   getAllL2: vi.fn(),
+  getL2ForScope: vi.fn(),
   getL0: vi.fn(),
   getL1: vi.fn(),
 }))
@@ -39,6 +40,8 @@ describe("buildMemoryInjection", () => {
     ragMock.searchMemory.mockResolvedValue([])
     memoryStoreMock.getAllL2.mockReset()
     memoryStoreMock.getAllL2.mockResolvedValue([])
+    memoryStoreMock.getL2ForScope.mockReset()
+    memoryStoreMock.getL2ForScope.mockResolvedValue([])
     l2DmaeManagerMock.getActiveL2ForPrompt.mockReset()
     l2DmaeManagerMock.getActiveL2ForPrompt.mockResolvedValue([])
     entityGraphMock.search.mockReset()
@@ -46,7 +49,7 @@ describe("buildMemoryInjection", () => {
   })
 
   it("records injected user memory l2 ids from DMAE active L2", async () => {
-    memoryStoreMock.getAllL2.mockResolvedValue([
+    memoryStoreMock.getL2ForScope.mockResolvedValue([
       { id: "l2_run", content: "用户喜欢跑步", triggerText: "我喜欢跑步" },
     ])
     l2DmaeManagerMock.getActiveL2ForPrompt.mockResolvedValue([
@@ -58,11 +61,13 @@ describe("buildMemoryInjection", () => {
 
     expect(context).toContain("用户喜欢跑步")
     expect(wasRecentlyInjectedMemory("l2_run")).toBe(true)
-    expect(l2DmaeManagerMock.getActiveL2ForPrompt).toHaveBeenCalledWith(expect.any(Array), 4)
+    // 只取本域 L2，并把域透传给 DMAE 管理器
+    expect(memoryStoreMock.getL2ForScope).toHaveBeenCalledWith("zone:root")
+    expect(l2DmaeManagerMock.getActiveL2ForPrompt).toHaveBeenCalledWith(expect.any(Array), 4, "zone:root")
   })
 
   it("appends sourceQuote as 原文 suffix when L2 has one, falls back to triggerText otherwise", async () => {
-    memoryStoreMock.getAllL2.mockResolvedValue([
+    memoryStoreMock.getL2ForScope.mockResolvedValue([
       { id: "l2_run", content: "用户喜欢跑步", triggerText: "我喜欢跑步", sourceQuote: "我每周都去跑步，雷打不动" },
       { id: "l2_react", content: "用户用 React 做前端", triggerText: "我用 React 做前端" },
     ])
@@ -81,7 +86,7 @@ describe("buildMemoryInjection", () => {
   })
 
   it("returns empty when no active L2", async () => {
-    memoryStoreMock.getAllL2.mockResolvedValue([
+    memoryStoreMock.getL2ForScope.mockResolvedValue([
       { id: "l2_run", content: "用户喜欢跑步", triggerText: "我喜欢跑步" },
     ])
     l2DmaeManagerMock.getActiveL2ForPrompt.mockResolvedValue([])

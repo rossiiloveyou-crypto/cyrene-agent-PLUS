@@ -22,6 +22,12 @@ const html = fs.readFileSync(
   fileURLToPath(new URL("../index.html", import.meta.url)),
   "utf8",
 );
+// API 设置面板（厂商预设卡、自定义端点云端/本地切换）已迁到聊天窗口的「模型」面板，
+// 这里读取 React 实现，验证这些交互仍然存在。
+const apiConfigSource = fs.readFileSync(
+  fileURLToPath(new URL("../../react/features/chat/components/api-config/ApiConfigSection.tsx", import.meta.url)),
+  "utf8",
+);
 
 describe("MCP Server 管理 UI - 事件绑定", () => {
   it("绑定了 pluginAddBtn 的 click 事件用于添加 MCP Server", () => {
@@ -32,16 +38,15 @@ describe("MCP Server 管理 UI - 事件绑定", () => {
     expect(mcpSource).toContain('customEndpointGuideBtn?.addEventListener("click"');
   });
 
-  it("presetCards 切换厂商事件绑定在 settings.ts 中", () => {
-    expect(settingsSource).toContain('presetCards?.addEventListener("click"');
+  it("厂商预设卡与自定义端点模式切换已随 API 面板迁到聊天窗口 React 组件", () => {
+    expect(apiConfigSource).toContain("api-config__preset-card");
+    expect(apiConfigSource).toContain("api-config__mode-btn");
   });
 
-  it("customEndpointControls 云端/本地模式切换事件绑定在 settings.ts 中", () => {
-    expect(settingsSource).toContain('customEndpointControls?.addEventListener("click"');
-  });
-
-  it("clearChatHistoryBtn 清空聊天事件绑定在 settings.ts 中", () => {
-    expect(settingsSource).toContain('clearChatHistoryBtn.addEventListener("click"');
+  it("旧的「清空记录」按钮已移除（记忆面板提供「删除全部记忆」）", () => {
+    expect(settingsSource).not.toContain("clearChatHistoryBtn");
+    expect(html).not.toContain('id="clear-chat-history-btn"');
+    expect(html).not.toContain("panel.general.chatHistory.");
   });
 });
 
@@ -149,11 +154,13 @@ describe("HTML 元素存在性", () => {
     expect(html).toContain('class="plugin-add-btn"');
   });
 
-  it("index.html 包含 custom-endpoint-guide-btn 按钮", () => {
+  it("index.html 包含 custom-endpoint-guide-btn 按钮（随迁移移到「高级设置」内）", () => {
     expect(html).toContain('id="custom-endpoint-guide-btn"');
+    expect(html).toContain('id="api-runtime-form"');
   });
 
-  it("index.html 包含 custom-endpoint-controls 容器", () => {
-    expect(html).toContain('id="custom-endpoint-controls"');
+  it("自定义端点容器由聊天窗口的 React 面板渲染，设置窗口不再包含它", () => {
+    expect(html).not.toContain('id="custom-endpoint-controls"');
+    expect(apiConfigSource).toContain("api-config__custom-endpoint");
   });
 });

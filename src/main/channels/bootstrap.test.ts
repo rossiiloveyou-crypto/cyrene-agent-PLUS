@@ -4,14 +4,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const channelMocks = vi.hoisted(() => ({
-  resolveBoundConversation: undefined as ((sessionId: string) => string | null) | undefined,
-  bindingResolve: vi.fn(),
+  observe: vi.fn(),
   flush: vi.fn(),
-  listSessions: vi.fn(),
-  getSession: vi.fn(),
-  appendMessage: vi.fn(),
-  loadBoundConversationHistory: undefined as ((conversationId: string, limit: number) => Promise<Array<{ role: "user" | "assistant"; content: string }>>) | undefined,
-  appendBoundConversationMessage: undefined as ((conversationId: string, role: "user" | "assistant", content: string, metadata: { channel: "wechat" | "feishu" | "qq" | "qqbot"; chatType: "private" | "group"; senderName?: string; modelContext?: string; sticker?: string }) => void) | undefined,
   buildAndRunAgent: undefined as ((...args: unknown[]) => Promise<unknown>) | undefined,
   dispatcherDeps: [] as Array<Record<string, any>>,
   agentError: undefined as Error | undefined,
@@ -51,8 +45,8 @@ vi.mock("./dispatcher", () => ({
       channelMocks.buildAndRunAgent = deps.buildAndRunAgent;
     }
 
-    handleIncoming = async (msg: Record<string, unknown>) => (
-      this.deps.buildAndRunAgent(msg, `channel:${String(msg.channel)}:test`, [])
+    handleIncoming = async (msg: Record<string, unknown>, userMessageId?: string) => (
+      this.deps.buildAndRunAgent(msg, `channel:${String(msg.channel)}:test`, [], userMessageId)
     );
 
     reloadSettings = vi.fn();
@@ -61,27 +55,18 @@ vi.mock("./dispatcher", () => ({
 
 vi.mock("./channel-context", () => ({
   formatChannelUserText: vi.fn(() => "渠道问题"),
-  createChannelContext: vi.fn((options: Record<string, any>) => {
-    channelMocks.resolveBoundConversation = options.resolveBoundConversationId;
-    channelMocks.loadBoundConversationHistory = options.loadBoundConversationHistory;
-    channelMocks.appendBoundConversationMessage = options.appendBoundConversationMessage;
-    return {
-      resolveDispatchContext: vi.fn(),
-      recordIncomingSession: vi.fn(),
-      resolvePriorMessages: vi.fn(),
-      appendIncomingContext: vi.fn(),
-      appendAssistantContext: vi.fn(),
-    };
-  }),
+  createChannelContext: vi.fn(() => ({
+    resolveDispatchContext: vi.fn(),
+    recordIncomingSession: vi.fn(),
+    resolvePriorMessages: vi.fn(),
+    appendIncomingContext: vi.fn(),
+    appendAssistantContext: vi.fn(),
+  })),
 }));
 
+// 绑定存储只剩「见过的外部会话」观察记录；它仍是记忆区块成员选择器的数据源。
 vi.mock("./conversation-binding-store", () => ({
-  getChannelConversationBindingStore: () => ({ resolve: channelMocks.bindingResolve, flush: channelMocks.flush }),
-}));
-vi.mock("../chats/chats-store", () => ({
-  listSessions: channelMocks.listSessions,
-  getSession: channelMocks.getSession,
-  appendMessage: channelMocks.appendMessage,
+  getChannelConversationBindingStore: () => ({ observe: channelMocks.observe, flush: channelMocks.flush }),
 }));
 
 // 避免拉起真实 tool registry（会级联 import RAG 等重依赖）
@@ -106,7 +91,10 @@ vi.mock("../orchestrator/cyrene-agent", () => ({
   },
 }));
 vi.mock("./settings-store", () => ({
-  loadChannelsSettings: () => ({ toolSandbox: "safe" }),
+  loadChannelsSettings: () => ({
+    toolSandbox: "safe",
+    audit: { recordSuccessTurns: false },
+  }),
 }));
 vi.mock("../settings/settings-facade", () => ({
   loadGeneralSettings: () => ({}),
@@ -131,6 +119,8 @@ vi.mock("./agent-policy", () => ({
 import { createChannelsSubsystem, type ChannelsSubsystemDeps } from "./bootstrap";
 // eslint-disable-next-line import/first
 import { initializeChannels, startChannels, shutdownChannels } from "./init";
+// eslint-disable-next-line import/first
+import type { IncomingMessage } from "./types";
 
 function makeChannelsDeps(): ChannelsSubsystemDeps {
   return {
@@ -145,6 +135,7 @@ function makePublishLifecycle() {
     publishTurnStarted: vi.fn(),
     publishTurnFinished: vi.fn(),
     publishSchedulerFinished: vi.fn(),
+    publishToolFinished: vi.fn(),
   };
 }
 
@@ -163,8 +154,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   channelMocks.agentError = undefined;
   channelMocks.agentResult = { reply: "渠道回复", toolResults: [] };
-  channelMocks.loadBoundConversationHistory = undefined;
-  channelMocks.appendBoundConversationMessage = undefined;
   channelMocks.dispatcherDeps.length = 0;
 });
 
@@ -172,39 +161,27 @@ describe("createChannelsSubsystem lifecycle", () => {
   it("为每个子系统保留独立的调度器依赖", async () => {
     const firstRuntime = makeAgentRuntime();
     const secondRuntime = makeAgentRuntime();
-    const firstSend = vi.fn();
-    const secondSend = vi.fn();
-    const firstWindow = vi.fn(() => ({
-      isDestroyed: () => false,
-      webContents: { send: firstSend },
-    } as never));
-    const secondWindow = vi.fn(() => ({
-      isDestroyed: () => false,
-      webContents: { send: secondSend },
-    } as never));
     const first = createChannelsSubsystem({
       ...makeChannelsDeps(),
       agentRuntime: firstRuntime,
-      getReactChatWindow: firstWindow,
     });
     const second = createChannelsSubsystem({
       ...makeChannelsDeps(),
       agentRuntime: secondRuntime,
-      getReactChatWindow: secondWindow,
     });
+
+    // 每个子系统持有自己的调度器依赖实例，不共享队列/上下文
+    expect(channelMocks.dispatcherDeps).toHaveLength(2);
+    expect(channelMocks.dispatcherDeps[0]).not.toBe(channelMocks.dispatcherDeps[1]);
 
     first.initialize();
     second.initialize();
-    const firstOptions = vi.mocked(initializeChannels).mock.calls[0]?.[0] as {
-      handleIncoming?: (msg: Record<string, unknown>) => Promise<unknown>;
-    } | undefined;
-    const secondOptions = vi.mocked(initializeChannels).mock.calls[1]?.[0] as {
-      handleIncoming?: (msg: Record<string, unknown>) => Promise<unknown>;
-    } | undefined;
+    const firstOptions = vi.mocked(initializeChannels).mock.calls[0]?.[0];
+    const secondOptions = vi.mocked(initializeChannels).mock.calls[1]?.[0];
 
     expect(firstOptions?.handleIncoming).toBeTypeOf("function");
     expect(secondOptions?.handleIncoming).toBeTypeOf("function");
-    const message = {
+    const message: IncomingMessage = {
       channel: "qq",
       chatType: "private",
       senderId: "user-1",
@@ -219,70 +196,54 @@ describe("createChannelsSubsystem lifecycle", () => {
     await secondOptions?.handleIncoming?.(message);
     expect(firstRuntime.buildOptions).toHaveBeenCalledOnce();
     expect(secondRuntime.buildOptions).toHaveBeenCalledOnce();
-
-    const event = {
-      type: "bot:incoming" as const,
-      channel: "qq",
-      senderId: "user-1",
-      chatId: "chat-1",
-      text: "你好",
-      at: 0,
-    };
-    channelMocks.dispatcherDeps[0]?.broadcastChat?.(event);
-    expect(firstSend).toHaveBeenCalledOnce();
-    expect(secondSend).not.toHaveBeenCalled();
-
-    channelMocks.dispatcherDeps[1]?.broadcastChat?.(event);
-    expect(firstSend).toHaveBeenCalledOnce();
-    expect(secondSend).toHaveBeenCalledOnce();
   });
 
-  it("loads model context for new mirrored messages and keeps old messages compatible", async () => {
-    channelMocks.getSession.mockReturnValue({
-      messages: [
-        { role: "user", content: "旧消息" },
-        { role: "user", content: "大家好", modelContext: "[QQ群发送者：伙伴]\n大家好" },
-        { role: "model", content: "你好" },
-      ],
-    });
+  it("observeExternalChat 把见过的外部会话写进绑定存储", () => {
     createChannelsSubsystem(makeChannelsDeps());
+    const observeExternalChat = channelMocks.dispatcherDeps[0]?.observeExternalChat as
+      | ((sessionId: string, msg: IncomingMessage) => void)
+      | undefined;
+    expect(observeExternalChat).toBeTypeOf("function");
 
-    await expect(channelMocks.loadBoundConversationHistory?.("desktop-1", 10)).resolves.toEqual([
-      { role: "user", content: "旧消息" },
-      { role: "user", content: "[QQ群发送者：伙伴]\n大家好" },
-      { role: "assistant", content: "你好" },
-    ]);
-  });
-
-  it("persists clean bubble text together with channel and model-context metadata", () => {
-    channelMocks.appendMessage.mockReturnValue({ id: "desktop-1" });
-    createChannelsSubsystem(makeChannelsDeps());
-
-    channelMocks.appendBoundConversationMessage?.("desktop-1", "user", "大家好", {
+    const at = new Date("2026-09-02T00:00:00Z");
+    const groupMessage: IncomingMessage = {
       channel: "qq",
       chatType: "group",
+      senderId: "user-1",
       senderName: "伙伴",
-      modelContext: "[QQ群发送者：伙伴]\n大家好",
-      sticker: "OK",
+      chatId: "chat-1",
+      text: "大家好",
+      at,
+    };
+    observeExternalChat?.("channel:qq:chat-1", groupMessage);
+
+    expect(channelMocks.observe).toHaveBeenCalledWith({
+      sessionId: "channel:qq:chat-1",
+      channel: "qq",
+      chatId: "chat-1",
+      chatType: "group",
+      senderName: "伙伴",
+      lastAt: at.getTime(),
     });
 
-    expect(channelMocks.appendMessage).toHaveBeenCalledWith("desktop-1", expect.objectContaining({
-      role: "user",
-      content: "大家好",
-      modelContext: "[QQ群发送者：伙伴]\n大家好",
-      channelSource: { channel: "qq", chatType: "group", senderName: "伙伴" },
-      sticker: "OK",
-    }));
-  });
+    // 私聊且无显示名：chatType 兜底为 private，且不写入 senderName 字段
+    const privateMessage: IncomingMessage = {
+      channel: "qq",
+      senderId: "user-2",
+      chatId: "user-2",
+      text: "你好",
+      at,
+    };
+    observeExternalChat?.("channel:qq:user-2", privateMessage);
 
-  it("resolves bindings from metadata without reading the full conversation", () => {
-    channelMocks.bindingResolve.mockReturnValue("desktop-1");
-    channelMocks.listSessions.mockReturnValue([{ id: "desktop-1" }]);
-    createChannelsSubsystem(makeChannelsDeps());
-    expect(channelMocks.resolveBoundConversation?.("channel:qq:a")).toBe("desktop-1");
-    channelMocks.listSessions.mockReturnValue([]);
-    expect(channelMocks.resolveBoundConversation?.("channel:qq:a")).toBeNull();
-    expect(channelMocks.getSession).not.toHaveBeenCalled();
+    expect(channelMocks.observe).toHaveBeenLastCalledWith({
+      sessionId: "channel:qq:user-2",
+      channel: "qq",
+      chatId: "user-2",
+      chatType: "private",
+      lastAt: at.getTime(),
+    });
+    expect(channelMocks.observe.mock.calls[1]?.[0]).not.toHaveProperty("senderName");
   });
 
   it.each([false, true])("flushes binding observations after shutdown (failure=%s)", async (fail) => {
@@ -389,6 +350,9 @@ describe("createChannelsSubsystem lifecycle", () => {
         mode: "chat",
         conversationId: "channel-session",
         channel: "telegram",
+        // P2 归属：speakerName 缺失（消息没带 senderName）时不落该字段
+        personKey: "telegram:user-1",
+        chatType: "direct",
       },
     );
 
@@ -489,5 +453,80 @@ describe("createChannelsSubsystem lifecycle", () => {
       status: "runtime_error",
       conversationId: "channel-session",
     });
+  });
+
+  // ── P2 归属透传 ──
+
+  it("P2 归属：personKey / speakerName / userMessageId / chatType 一起进 onRunFinished 的 context", async () => {
+    const onRunFinished = vi.fn(async () => ({ sticker: null }));
+    createChannelsSubsystem({
+      ...makeChannelsDeps(),
+      agentRuntime: makeAgentRuntime(onRunFinished),
+    });
+
+    const buildAndRunAgent = channelMocks.buildAndRunAgent;
+    if (!buildAndRunAgent) throw new Error("渠道 Agent 执行函数未注册");
+    await buildAndRunAgent({
+      channel: "qq",
+      chatType: "group",
+      senderId: "10001",
+      senderName: "小明",
+      at: new Date("2026-09-02T00:00:00Z"),
+    }, "channel-session", [], "msg_1758681234567_a3f9k2");
+
+    // personKey 在 bootstrap 层组合（唯一同时持有 channel 与 senderId 的一层）
+    expect(onRunFinished).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        personKey: "qq:10001",
+        speakerName: "小明",
+        userMessageId: "msg_1758681234567_a3f9k2",
+        chatType: "group",
+      }),
+    );
+  });
+
+  it("P2 归属：chatType 缺省视为 private（私聊兜底判据不能缺）", async () => {
+    const onRunFinished = vi.fn(async () => ({ sticker: null }));
+    createChannelsSubsystem({
+      ...makeChannelsDeps(),
+      agentRuntime: makeAgentRuntime(onRunFinished),
+    });
+
+    const buildAndRunAgent = channelMocks.buildAndRunAgent;
+    if (!buildAndRunAgent) throw new Error("渠道 Agent 执行函数未注册");
+    await buildAndRunAgent({
+      channel: "qq",
+      senderId: "10001",
+      at: new Date("2026-09-02T00:00:00Z"),
+    }, "channel-session", []);
+
+    const context = onRunFinished.mock.calls[0][2] as Record<string, unknown>;
+    expect(context.chatType).toBe("private");
+    // 第 4 参数缺失（落盘失败 / 老调用方）时不落 userMessageId 字段
+    expect("userMessageId" in context).toBe(false);
+  });
+
+  it("P2 归属：落盘失败（无 userMessageId）不阻断成功收尾", async () => {
+    const onRunFinished = vi.fn(async () => ({ sticker: null }));
+    createChannelsSubsystem({
+      ...makeChannelsDeps(),
+      agentRuntime: makeAgentRuntime(onRunFinished),
+    });
+
+    const buildAndRunAgent = channelMocks.buildAndRunAgent;
+    if (!buildAndRunAgent) throw new Error("渠道 Agent 执行函数未注册");
+    const result = await buildAndRunAgent({
+      channel: "qq",
+      chatType: "private",
+      senderId: "10001",
+      senderName: "小明",
+      at: new Date("2026-09-02T00:00:00Z"),
+    }, "channel-session", [], undefined) as { text: string };
+
+    expect(result.text).toBe("渠道回复");
+    expect(onRunFinished).toHaveBeenCalledOnce();
+    expect((onRunFinished.mock.calls[0][2] as Record<string, unknown>).personKey).toBe("qq:10001");
   });
 });

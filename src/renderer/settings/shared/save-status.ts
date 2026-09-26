@@ -2,7 +2,7 @@
 // 从 settings.ts 抽离。
 // 依赖：shared/shell.ts（全局壳 save-status）+ appearance/general 面板内 save-status DOM。
 
-import { saveStatus, cyreneSaveStatus, preferencesSaveStatus, runtimeSaveStatus } from "./shell";
+import { saveStatus, preferencesSaveStatus, runtimeSaveStatus } from "./shell";
 import { appearanceSaveStatus } from "../appearance/dom";
 import { generalSaveStatus } from "../general/dom";
 
@@ -10,12 +10,6 @@ export function setSaveStatus(text: string, cls?: string): void {
   saveStatus.textContent = text;
   saveStatus.className = "save-status";
   if (cls) saveStatus.classList.add(cls);
-}
-
-export function setCyreneSaveStatus(text: string, cls?: string): void {
-  cyreneSaveStatus.textContent = text;
-  cyreneSaveStatus.className = "save-status";
-  if (cls) cyreneSaveStatus.classList.add(cls);
 }
 
 export function setPreferencesSaveStatus(text: string, cls?: string): void {

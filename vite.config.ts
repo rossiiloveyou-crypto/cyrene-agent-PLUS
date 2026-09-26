@@ -52,7 +52,12 @@ export default defineConfig({
     },
   },
   server: {
+    // 必须显式绑 IPv4 回环：本机 Node 解析 localhost 时优先返回 ::1，Vite 默认只监听
+    // [::1]:5173；而 Electron 主进程里 12 处 URL 写的是 http://localhost:5173，
+    // Chromium 走 127.0.0.1 → 无人监听 → ERR_CONNECTION_REFUSED (-102) 启动失败。
+    host: "127.0.0.1",
     port: 5173,
-    strictPort: false,
+    // 主进程端口是硬编码的：5173 被占时必须立刻报错，不能静默改到 5174
+    strictPort: true,
   },
 });

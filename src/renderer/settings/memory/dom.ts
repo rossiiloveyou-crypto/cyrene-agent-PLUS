@@ -25,3 +25,28 @@ export const obsidianVaultSyncBtn = document.getElementById("obsidian-vault-sync
 export const obsidianVaultUnbindBtn = document.getElementById("obsidian-vault-unbind-btn") as HTMLButtonElement | null;
 export const obsidianVaultAutoSync = document.getElementById("obsidian-vault-auto-sync") as HTMLInputElement | null;
 export const obsidianVaultHint = document.getElementById("obsidian-vault-hint") as HTMLParagraphElement | null;
+// RAG / 文档导入卡片已并入记忆面板：Embedding 维度输入
+export const embeddingDimensionsInput = document.getElementById("embedding-dimensions-input") as HTMLInputElement | null;
+// 群聊上下文条数（写入通用设置 groupContextLimit）与保存状态
+export const memoryGroupContextLimitInput = document.getElementById("memory-group-context-limit") as HTMLInputElement | null;
+export const memoryGroupContextStatus = document.getElementById("memory-group-context-status") as HTMLElement | null;
+// 删除全部记忆（危险操作，二次确认在 ./delete-all）
+export const memoryDeleteAllBtn = document.getElementById("memory-delete-all-btn") as HTMLButtonElement | null;
+// 记忆管理控制台（P3，业务逻辑在 ./manager 与 ./erasure-flow）
+export const memoryManagerViewPeople = document.getElementById("memory-manager-view-people") as HTMLButtonElement | null;
+export const memoryManagerViewZones = document.getElementById("memory-manager-view-zones") as HTMLButtonElement | null;
+export const memoryManagerViewSessions = document.getElementById("memory-manager-view-sessions") as HTMLButtonElement | null;
+export const memoryManagerRefreshBtn = document.getElementById("memory-manager-refresh-btn") as HTMLButtonElement | null;
+export const memoryManagerFeedback = document.getElementById("memory-manager-feedback") as HTMLElement | null;
+export const memoryManagerList = document.getElementById("memory-manager-list") as HTMLElement | null;
+export const memoryManagerBatchBar = document.getElementById("memory-manager-batch-bar") as HTMLElement | null;
+export const memoryManagerBatchCount = document.getElementById("memory-manager-batch-count") as HTMLElement | null;
+export const memoryManagerBatchDeleteBtn = document.getElementById("memory-manager-batch-delete-btn") as HTMLButtonElement | null;
+export const memoryManagerDetail = document.getElementById("memory-manager-detail") as HTMLElement | null;
+export const memoryManagerDetailTitle = document.getElementById("memory-manager-detail-title") as HTMLElement | null;
+export const memoryManagerDetailSummary = document.getElementById("memory-manager-detail-summary") as HTMLElement | null;
+export const memoryManagerDetailCloseBtn = document.getElementById("memory-manager-detail-close-btn") as HTMLButtonElement | null;
+export const memoryManagerDetailList = document.getElementById("memory-manager-detail-list") as HTMLElement | null;
+export const memoryManagerDetailDeleteBtn = document.getElementById("memory-manager-detail-delete-btn") as HTMLButtonElement | null;
+export const memoryManagerEraseBtn = document.getElementById("memory-manager-erase-btn") as HTMLButtonElement | null;
+export const memoryManagerTrace = document.getElementById("memory-manager-trace") as HTMLElement | null;

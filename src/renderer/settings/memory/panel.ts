@@ -11,10 +11,12 @@ import {
   memoryImportedList, memoryReflectionList,
   memoryL0EditBtn, memoryL0CancelBtn,
   memoryL1EditBtn, memoryL1CancelBtn,
+  memoryGroupContextLimitInput, memoryGroupContextStatus,
 } from "./dom";
 import { renderInfoList, renderEmptyState } from "../shared/render";
 import { shallowEqual } from "../shared/utils";
 import { formatDateTime, escapeHtml } from "../shared/format";
+import { t } from "../i18n";
 
 function renderL2List(query = ""): void {
   const list = memoryState.panelCache?.l2 ?? [];
@@ -39,6 +41,7 @@ function renderL2List(query = ""): void {
 }
 
 export async function loadMemoryPanel(): Promise<void> {
+  void loadGroupContextLimit();
   try {
     const payload = await window.memoryPanel?.getData();
     if (!payload) return;
@@ -73,6 +76,66 @@ export async function loadMemoryPanel(): Promise<void> {
     renderEmptyState(memoryImportedList, "导入知识读取失败", "请查看终端日志");
     renderEmptyState(memoryReflectionList, "回顾读取失败", "请查看终端日志");
   }
+}
+
+// ── 群聊上下文条数（通用设置 groupContextLimit，主进程范围 3~50，默认 10） ──
+
+export const DEFAULT_GROUP_CONTEXT_LIMIT = 10;
+export const MIN_GROUP_CONTEXT_LIMIT = 3;
+export const MAX_GROUP_CONTEXT_LIMIT = 50;
+const GROUP_CONTEXT_LIMIT_ERROR = "群聊上下文条数需在 3~50 之间";
+
+/**
+ * 归一化群聊上下文条数：空值 / 非数字回落默认 10，越界夹到 3~50 的整数。
+ * 与主进程 normalizeGroupContextLimit 的差别：那边把空字符串当 0 再夹到 3，
+ * 这里把「用户清空输入框」视为恢复默认值，避免莫名变成最小值。
+ */
+export function normalizeGroupContextLimit(value: unknown): number {
+  if (value === null || value === undefined) return DEFAULT_GROUP_CONTEXT_LIMIT;
+  if (typeof value === "string" && value.trim() === "") return DEFAULT_GROUP_CONTEXT_LIMIT;
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_GROUP_CONTEXT_LIMIT;
+  return Math.min(MAX_GROUP_CONTEXT_LIMIT, Math.max(MIN_GROUP_CONTEXT_LIMIT, Math.round(parsed)));
+}
+
+function setGroupContextStatus(text: string, cls?: string): void {
+  if (!memoryGroupContextStatus) return;
+  memoryGroupContextStatus.textContent = text;
+  memoryGroupContextStatus.className = "memory-field__status";
+  if (cls) memoryGroupContextStatus.classList.add(cls);
+}
+
+/** 读通用设置里的 groupContextLimit 填进输入框（缺失/非法回落 10）。 */
+export async function loadGroupContextLimit(): Promise<void> {
+  if (!memoryGroupContextLimitInput) return;
+  try {
+    const cfg = await window.settings!.getGeneral();
+    memoryGroupContextLimitInput.value = String(normalizeGroupContextLimit(cfg?.groupContextLimit));
+    setGroupContextStatus("");
+  } catch (err) {
+    console.warn("[settings] load groupContextLimit failed", err);
+    memoryGroupContextLimitInput.value = String(DEFAULT_GROUP_CONTEXT_LIMIT);
+    setGroupContextStatus(GROUP_CONTEXT_LIMIT_ERROR, "is-error");
+  }
+}
+
+/** 保存：先把输入值夹到 3~50 的整数并写回输入框，再落盘。 */
+export async function saveGroupContextLimit(): Promise<void> {
+  if (!memoryGroupContextLimitInput) return;
+  const limit = normalizeGroupContextLimit(memoryGroupContextLimitInput.value);
+  memoryGroupContextLimitInput.value = String(limit);
+  try {
+    await window.settings!.saveGeneral({ groupContextLimit: limit });
+    setGroupContextStatus(t("settings.panel.memory.groupContext.saved"), "is-ok");
+  } catch (err) {
+    console.error("[settings] save groupContextLimit failed", err);
+    setGroupContextStatus(t("settings.panel.memory.groupContext.saveFailed"), "is-error");
+  }
+}
+
+/** change 事件只绑一次（由 settings.ts 顶层调用）。 */
+export function initGroupContextLimitInput(): void {
+  memoryGroupContextLimitInput?.addEventListener("change", () => void saveGroupContextLimit());
 }
 
 function takeL0Snapshot(): Record<string, string> {

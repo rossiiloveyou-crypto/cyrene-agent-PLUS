@@ -1,0 +1,31 @@
+
+-------------------------------------------------------------------------------
+   ROBOCOPY     ::     Robust File Copy for Windows                              
+-------------------------------------------------------------------------------
+
+  Started : 2026年9月27日 0:11:01
+   Source : E:\AI_Chating\cyrene-agent\
+     Dest : E:\AI_Chating\cyrene-agent-backup-phase0\
+
+    Files : *.*
+	    
+ Exc Dirs : node_modules
+	    
+  Options : *.* /NDL /NFL /S /E /DCOPY:DA /COPY:DAT /NP /R:1 /W:1 
+
+------------------------------------------------------------------------------
+
+
+------------------------------------------------------------------------------
+
+               Total    Copied   Skipped  Mismatch    FAILED    Extras
+    Dirs :       563         0       562         0         1         0
+   Files :      4054         2      4052         0         0         2
+   Bytes :  771.38 m    14.5 k  771.37 m         0         0         4
+   Times :   0:00:00   0:00:00                       0:00:00   0:00:00
+
+
+   Speed :           14,872,000 Bytes/sec.
+   Speed :              850.983 MegaBytes/min.
+   Ended : 2026年9月27日 0:11:01
+

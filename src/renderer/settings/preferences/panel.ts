@@ -4,8 +4,18 @@
 
 import { setPreferencesSaveStatus } from "../shared/save-status";
 import { screenshotHotkeyInput } from "../appearance/dom";
+import { t } from "../i18n";
 import { preferencesState } from "./state";
 import { stickerAddError, stickerAddConfirm, stickerAddCancel, stickerAddPickBtn, stickerAddFileName, stickerAddId, stickerAddDesc, stickerAddPhrases, stickerAddOverlay } from "./dom";
+import {
+  interceptKeywordsInput,
+  interceptKeywordsImportBtn,
+  interceptKeywordsClearBtn,
+  interceptKeywordsStatusEl,
+  triggerKeywordsInput,
+  triggerKeywordsImportBtn,
+  triggerKeywordsStatusEl,
+} from "./dom";
 import { addStickerBtn, openStickerManagerBtn } from "../shared/shell";
 
 // ── 截图热键捕获 ──
@@ -138,3 +148,139 @@ stickerAddConfirm.addEventListener("click", async () => {
     stickerAddError.classList.remove("is-hidden");
   }
 });
+
+// ── 拦截关键词 / 触发关键词 ──
+// 关键词存在渠道设置里（channels-settings.json），因为渠道链路（dispatcher / adapter）
+// 直接读它做拦截与免 @ 触发；这里只在「保存偏好」时整体写回。
+
+const KEYWORD_STATUS_TIMEOUT_MS = 6000;
+/** 清空的二级确认：首次点击后按钮进入待确认态，超时自动复位 */
+const CLEAR_ARM_TIMEOUT_MS = 5000;
+
+function splitKeywordLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+let keywordStatusTimer: number | null = null;
+
+function setKeywordStatus(el: HTMLElement | null, text: string, isError = false): void {
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("is-error", isError);
+  if (keywordStatusTimer !== null) window.clearTimeout(keywordStatusTimer);
+  if (!text) return;
+  keywordStatusTimer = window.setTimeout(() => {
+    el.textContent = "";
+    el.classList.remove("is-error");
+    keywordStatusTimer = null;
+  }, KEYWORD_STATUS_TIMEOUT_MS);
+}
+
+async function loadKeywordSettings(): Promise<void> {
+  try {
+    const cfg = await window.settings?.channelsGetConfig?.() as
+      | { keywords?: { intercept?: string[]; trigger?: string[] } }
+      | undefined;
+    const keywords = cfg?.keywords;
+    if (interceptKeywordsInput) interceptKeywordsInput.value = (keywords?.intercept ?? []).join("\n");
+    if (triggerKeywordsInput) triggerKeywordsInput.value = (keywords?.trigger ?? []).join("\n");
+  } catch (error) {
+    console.warn("[settings] 读取关键词配置失败", error);
+  }
+}
+
+/** 把两个文本框写回渠道设置（跟随「保存偏好」一起提交）。 */
+export async function saveKeywordSettings(): Promise<void> {
+  if (!interceptKeywordsInput && !triggerKeywordsInput) return;
+  try {
+    await window.settings?.channelsSaveConfig?.({
+      keywords: {
+        intercept: splitKeywordLines(interceptKeywordsInput?.value ?? ""),
+        trigger: splitKeywordLines(triggerKeywordsInput?.value ?? ""),
+      },
+    });
+  } catch (error) {
+    console.warn("[settings] 保存关键词失败", error);
+    setKeywordStatus(interceptKeywordsStatusEl, t("settings.panel.preferences.keywords.saveFailed"), true);
+  }
+}
+
+async function importKeywords(
+  target: HTMLTextAreaElement | null,
+  statusEl: HTMLElement | null,
+): Promise<void> {
+  if (!target) return;
+  try {
+    const result = await window.settings?.channelsKeywordsImportTxt?.();
+    if (!result) return;
+    if (!result.ok) {
+      const failure = result as { ok: false; canceled?: boolean; error?: string };
+      if (failure.canceled) return;
+      setKeywordStatus(statusEl, failure.error ?? t("settings.panel.preferences.keywords.importFailed"), true);
+      return;
+    }
+    const existing = splitKeywordLines(target.value);
+    const seen = new Set(existing.map((item) => item.toLowerCase()));
+    const added = (result.keywords ?? []).filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    target.value = [...existing, ...added].join("\n");
+    setPreferencesSaveStatus("有未保存的更改");
+    setKeywordStatus(
+      statusEl,
+      t("settings.panel.preferences.keywords.imported", { n: added.length, file: result.fileName ?? "txt" }),
+    );
+  } catch (error) {
+    console.warn("[settings] 导入关键词失败", error);
+    setKeywordStatus(statusEl, t("settings.panel.preferences.keywords.importFailed"), true);
+  }
+}
+
+/** 一键清空拦截词：二级确认（第二次点击才真正清空）。 */
+function armClearInterceptKeywords(): void {
+  const input = interceptKeywordsInput;
+  const button = interceptKeywordsClearBtn;
+  if (!input || !button) return;
+  const label = button.querySelector("span") ?? button;
+  const original = label.getAttribute("data-original-text") ?? label.textContent ?? "";
+  if (button.dataset.armed === "1") {
+    delete button.dataset.armed;
+    label.textContent = original;
+    input.value = "";
+    setPreferencesSaveStatus("有未保存的更改");
+    setKeywordStatus(interceptKeywordsStatusEl, t("settings.panel.preferences.keywords.cleared"));
+    return;
+  }
+  button.dataset.armed = "1";
+  if (!label.getAttribute("data-original-text")) label.setAttribute("data-original-text", original);
+  label.textContent = t("settings.panel.preferences.keywords.clearArmed");
+  setKeywordStatus(interceptKeywordsStatusEl, t("settings.panel.preferences.keywords.clearHint"));
+  window.setTimeout(() => {
+    if (button.dataset.armed !== "1") return;
+    delete button.dataset.armed;
+    label.textContent = label.getAttribute("data-original-text") ?? original;
+  }, CLEAR_ARM_TIMEOUT_MS);
+}
+
+interceptKeywordsImportBtn?.addEventListener("click", () => {
+  void importKeywords(interceptKeywordsInput, interceptKeywordsStatusEl);
+});
+triggerKeywordsImportBtn?.addEventListener("click", () => {
+  void importKeywords(triggerKeywordsInput, triggerKeywordsStatusEl);
+});
+interceptKeywordsClearBtn?.addEventListener("click", armClearInterceptKeywords);
+interceptKeywordsInput?.addEventListener("input", () => setPreferencesSaveStatus("有未保存的更改"));
+triggerKeywordsInput?.addEventListener("input", () => setPreferencesSaveStatus("有未保存的更改"));
+
+// 「保存偏好」提交时一并写回渠道设置
+document.getElementById("preferences-form")?.addEventListener("submit", () => {
+  void saveKeywordSettings();
+});
+
+void loadKeywordSettings();

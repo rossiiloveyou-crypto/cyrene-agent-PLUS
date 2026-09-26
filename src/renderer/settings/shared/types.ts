@@ -134,6 +134,8 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   mobileMessageSegmentation: MobileMessageSegmentationMode;
   proactiveChatMode: ProactiveChatMode;
   proactiveDeliveryTarget: ProactiveDeliveryTarget;
+  /** 群聊近期上下文注入条数：3~50，默认 10（与主进程 normalizeGroupContextLimit 对齐）。 */
+  groupContextLimit: number;
   /** 聊天段落间距（em）。目前仅设置窗口 UI 使用，主进程归一化尚未持久化该字段。 */
   chatParaSpacing?: number;
   screenshotHotkey?: string;
@@ -211,6 +213,118 @@ export interface MemoryPanelApi {
   getVaultConfig: () => Promise<ObsidianVaultConfig>;
   setAutoSync: (autoSync: boolean) => Promise<{ ok: boolean; config: ObsidianVaultConfig }>;
   syncNow: () => Promise<{ ok: boolean; vaultPath?: string; fileCount?: number; error?: string; skipped?: boolean }>;
+  /** 删除全部长期记忆；restartRequired 表示必须重启才能让进程内缓存失效。 */
+  deleteAll: () => Promise<DeleteAllMemoryResult>;
+  /** 受控重启（删除记忆后调用）。 */
+  restartApp: () => Promise<{ ok: boolean }>;
+  // ── 记忆区块（zones）──
+  getZoneSnapshot: () => Promise<ZonesSnapshot>;
+  createZone: (name: string) => Promise<Zone>;
+  renameZone: (zoneId: string, name: string) => Promise<Zone | null>;
+  deleteZone: (zoneId: string) => Promise<boolean>;
+  updateZoneConfig: (zoneId: string, patch: Partial<ZoneConfig>) => Promise<Zone | null>;
+  addZoneMember: (zoneId: string, member: ZoneMember) => Promise<ZoneMutationResult>;
+  /** 手动按群号 / 群 openid 加入区块（= 加入该渠道的群白名单）。 */
+  addZoneManualGroup: (zoneId: string, channel: string, chatId: string, senderName?: string) => Promise<AddManualGroupResult>;
+  removeZoneMember: (zoneId: string, member: ZoneMember) => Promise<ZoneMutationResult>;
+  moveZoneMembers: (targetZoneId: string, members: ZoneMember[]) => Promise<ZoneMoveResult>;
+  // ── 记忆管理控制台（P3） ──
+  listMemoryManager: (view: MemoryManagerView) => Promise<{ items: MemoryManagerItem[] }>;
+  queryMemoryManager: (view: MemoryManagerView, key: string) => Promise<MemoryManagerQueryResult>;
+  deleteMemoryManager: (payload: { ids?: string[]; view?: MemoryManagerView; key?: string }) => Promise<MemoryManagerDeleteResult>;
+  erasePreview: (personKey: string) => Promise<PersonErasePlan>;
+  erasePerson: (personKey: string, previewId: string) => Promise<PersonEraseReport>;
+  traceMemorySource: (memoryId: string) => Promise<MemoryTraceSourceResult>;
+}
+
+// ── 记忆区块（zones）数据形状 ──
+// 与主进程 src/main/zones/types.ts 保持一致。渲染进程走 vite 打包，
+// 不能直接 import 主进程模块，所以在渲染侧镜像一份类型声明。
+
+/** 区块成员：desktop 只属于 root；external 是外部渠道会话。 */
+export type ZoneMemberKind = "desktop" | "external";
+
+export interface ZoneDesktopMember {
+  kind: "desktop";
+  conversationId: string;
+}
+
+export interface ZoneExternalMember {
+  kind: "external";
+  /** 渠道会话 ID（channel:<channel>:<hash16>），与 channels/history/*.jsonl 文件键一致。 */
+  sessionId: string;
+  /** 渠道 id（qq / wechat / feishu / qqbot / 插件动态渠道）。 */
+  channel: string;
+  /** 平台会话 id（群号 / 私聊对端 id）。 */
+  chatId: string;
+  chatType: "private" | "group";
+  senderName?: string;
+}
+
+export type ZoneMember = ZoneDesktopMember | ZoneExternalMember;
+
+export interface ZoneConfig {
+  /** 群消息旁听：区块内未 @ 昔涟的消息也写入 transcript。 */
+  observeGroupMessages: boolean;
+  /** 是否在本区块注入 owner 的 L0/L1 画像（root 恒为开）。 */
+  injectOwnerProfile: boolean;
+}
+
+export interface Zone {
+  /** "root" 或 "zone_<timestamp>_<rand6>"。 */
+  zoneId: string;
+  /** 展示名。root 固定为 "desktop"。 */
+  zoneName: string;
+  isRoot: boolean;
+  createdAt: number;
+  members: ZoneMember[];
+  config: ZoneConfig;
+}
+
+/** 见过的外部聊天（来自 channels/context-bindings.json 的 externalChats）。 */
+export interface ZoneExternalChat {
+  sessionId: string;
+  channel: string;
+  chatId: string;
+  chatType: "private" | "group";
+  senderName?: string;
+  lastAt: number;
+}
+
+export interface ZoneConversation {
+  id: string;
+  title: string;
+  mode: string;
+  updatedAt: number;
+}
+
+export interface ZonesSnapshot {
+  /** 第一个一定是 root。 */
+  zones: Zone[];
+  externalChats: ZoneExternalChat[];
+  conversations: ZoneConversation[];
+}
+
+export type ZoneMutationResult = { ok: true; zone: Zone } | { ok: false; error: string };
+
+/**
+ * 手动加群结果。`movedFrom` 非空说明该群原本在别的区块里（加成员会自动移出旧区块），
+ * UI 要把这件事说出来，避免用户以为"两个区块同时拥有它"。
+ */
+export type AddManualGroupResult =
+  | { ok: true; zone: Zone; sessionId: string; movedFrom: { zoneId: string; zoneName: string } | null }
+  | { ok: false; error: string };
+
+export interface ZoneMoveResult {
+  moved: number;
+  errors: string[];
+}
+
+export interface DeleteAllMemoryResult {
+  ok: boolean;
+  deleted: string[];
+  failed: Array<{ path: string; error: string }>;
+  restartRequired: boolean;
 }
 
 export interface SettingsApi {
@@ -295,25 +409,15 @@ export interface SettingsApi {
   onSwitchSection?: (callback: (section: string) => void) => (() => void) | void;
   channelsGetConfig: () => Promise<any>;
   channelsSaveConfig: (patch: unknown) => Promise<any>;
+  /** 拦截关键词 / 触发关键词：从 txt 文件导入（每行一个） */
+  channelsKeywordsImportTxt?: () => Promise<
+    { ok: true; keywords: string[]; fileName?: string } | { ok: false; canceled?: boolean; error?: string }
+  >;
   channelsRestart: () => Promise<{ ok: boolean }>;
   channelsQqTestConnection: () => Promise<{ ok: boolean; error?: string; detail?: Record<string, unknown> }>;
   channelsQqBotTestConnection: () => Promise<{ ok: boolean; error?: string; detail?: Record<string, unknown> }>;
   channelsLogGet: (limit?: number) => Promise<unknown[]>;
   channelsLogClear: () => Promise<{ ok: boolean }>;
-  channelsContextBindingsGet: () => Promise<{
-    externalChats: Array<{
-      sessionId: string;
-      channel: string;
-      chatId: string;
-      chatType: "private" | "group";
-      senderName?: string;
-      lastAt: number;
-    }>;
-    bindings: Array<{ sessionId: string; conversationId: string; updatedAt: number }>;
-    conversations: Array<{ id: string; title: string; mode: string; updatedAt: number }>;
-  }>;
-  channelsContextBind: (payload: { sessionId: string; conversationId: string }) => Promise<{ ok: boolean; error?: string }>;
-  channelsContextUnbind: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   onChannelsInstallProgress: (callback: (progress: { channel: string; phase: string; pct: number }) => void) => (() => void) | void;
   onChannelsWechatQrcode: (callback: (dataUrl: string) => void) => (() => void) | void;
   onChannelsWechatLoginDone: (callback: (payload: { ok: boolean; botId?: string; error?: string }) => void) => (() => void) | void;
@@ -322,4 +426,95 @@ export interface SettingsApi {
   onChannelsStatusChanged: (callback: (status: unknown) => void) => (() => void) | void;
   beginScreenshotHotkeyCapture: () => Promise<boolean>;
   endScreenshotHotkeyCapture: () => Promise<boolean>;
+}
+
+// ── 记忆管理控制台（P3） ──
+export type MemoryManagerView = "people" | "zones" | "sessions";
+
+export interface MemoryManagerItem {
+  key: string;            // personKey | scope | sourceConversationId | "__unattributed__"
+  label: string;          // 昵称 / 域显示名 / 会话显示名
+  sublabel?: string;      // QQ 号 / sessionId
+  total: number;
+  own: number;            // 🗣 他的记忆（会被「彻底擦除」删掉）
+  mentioned: number;      // 👥 别人提到他（默认保留）
+  sessions: number;
+  erasable: boolean;      // 仅按人视图、且 key 是合法 personKey 时为 true
+}
+
+export interface MemoryManagerMemory {
+  id: string; content: string; triggerText: string; createdAt: number;
+  status: string; scope?: string; sourceConversationId: string;
+  speakerIds?: string[]; subjectIds?: string[]; isSummary?: boolean;
+  subEntryCount?: number; sourceMessageIds?: string[];
+}
+
+export interface MemoryManagerSessionRef { sessionId: string; label: string; count: number }
+
+export interface MemoryManagerQueryMeta {
+  total: number; own: number; mentioned: number;
+  personKey?: string; sessions: MemoryManagerSessionRef[];
+}
+
+export interface MemoryManagerQueryResult { memories: MemoryManagerMemory[]; meta: MemoryManagerQueryMeta }
+
+export interface MemoryManagerDeleteResult {
+  requested: number; removed: number; evidence: number; dmaeStates: number;
+  conflictLogs: number; danglingRefsFixed: number; reflectionLogs: number; summariesRemoved: number;
+  /** 真正从向量库删掉的条数（P3 §5.2 第 2 步：被删条目的 ragId 必须 0 命中）。 */
+  vectors: number;
+}
+
+export interface PersonErasePlan {
+  personKey: string; channel: string; senderId: string; knownNames: string[];
+  sessions: Array<{ sessionId: string; kind: "private" | "group" | "unknown"; l2Count: number; hotLines: number; archiveLines: number; archiveMonths: number; assistantLines: number }>;
+  l2: { total: number; byRule: { private: number; speaker: number }; ids: string[]; keptSubjectOnly: number; keptSamples: Array<{ content: string; speakerIds: string[] }> };
+  summaries: { decompress: string[]; remove: string[] };
+  vectors: number; evidence: number; dmaeStates: number; conflictLogs: number; reflectionLogs: number;
+  /**
+   * **对话的向量副本**将被删掉的条数（`chat_history_*`，D2）。
+   * 与 `vectors`（记忆的向量副本）分开列：它们是两条不同的通道，混在一起就看不出来了。
+   */
+  chatHistoryVectors: number;
+  entities: Array<{ name: string; scope?: string; relations: number }>;
+  relationshipEntries: { byPersonKey: number; byScope: number; byTextFingerprint: number; unmatched: number; summaries: number };
+  audit: { entries: number; files: number };
+  channelLogLines: number;
+  externalChats: number;
+  /** **agent 运行记录**会被删掉的 run 数（D4：按会话过滤，`cyrene-runs/sessions/`）。 */
+  runs: number;
+  memoryBackups: { files: number; bytes: number };
+  apiLog: { exists: boolean; bytes: number };
+  residues: Array<{ kind: string; file: string; snippet: string }>;
+  /** **有意不擦**的载体（`MEMORY_PRESERVED` 原样列表）—— 供弹窗如实列出会保留什么（O2）。 */
+  preservedPaths: string[];
+  warnings: string[];
+  previewId: string;
+}
+
+export interface PersonEraseReport {
+  personKey: string; partial: boolean; needsReconfirm: boolean; addedSincePreview: number;
+  l2: { requested: number; removed: number; summariesRemoved: number; decompressed: number };
+  transcript: { sessions: number; hotLines: number; archiveLines: number; assistantLines: number };
+  /** 真正从向量库删掉的 `chat_history` 条数（D2）。 */
+  chatHistoryVectors: number;
+  audit: { entries: number; files: number };
+  channelLog: { lines: number };
+  externalChats: number;
+  /** 真正删掉的 agent 运行记录数（D4）。 */
+  runs: number;
+  backups: { files: number; bytes: number };
+  apiLog: { deleted: boolean; bytes: number };
+  entities: { nodes: number; relations: number };
+  relationship: { byPersonKey: number; byScope: number; byTextFingerprint: number; summaries: number };
+  caches: { injections: number; sessionIndex: number; dmaeReloaded: boolean };
+  obsidian: { synced: boolean };
+  keptSubjectOnly: number;
+  residues: Array<{ kind: string; file: string; snippet: string }>;
+  failed: Array<{ step: string; target: string; error: string }>;
+}
+
+export interface MemoryTraceSourceResult {
+  entries: Array<{ role: string; content: string; at: string; speakerName?: string; speakerId?: string; file: string }>;
+  missing: boolean;
 }

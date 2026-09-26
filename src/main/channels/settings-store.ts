@@ -21,6 +21,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { app, safeStorage } from "electron";
 import type { ChannelId } from "./types";
+import { DEFAULT_TOOL_ACCESS, normalizeToolAccessConfig, type ChannelToolAccessConfig } from "./tool-access";
+import { DEFAULT_KEYWORDS, normalizeKeywordConfig, type ChannelKeywordsConfig } from "./keyword-policy";
+import { DEFAULT_AUDIT_CONFIG, normalizeAuditConfig, type ChannelAuditConfig } from "./audit-log";
 
 /** safeStorage 加密后的前缀。读取时遇到这个前缀就解密 */
 const ENC_PREFIX = "enc:";
@@ -159,11 +162,23 @@ export interface QqChannelConfig extends ChannelRuntimeConfig {
   customHost?: string;
   port: number;
   accessToken?: string;
-  allowedPrivateUserIds: string[];
+  /**
+   * 群号白名单：机器人只响应这些群里的消息。
+   * 谁能在这个群里把昔涟叫起来、谁能私聊、谁能调用工具，统一由
+   * 「白名单与权限」（toolAccess）按账号权限决定。
+   *
+   * @deprecated 群聊接入已迁移到「设置 → 记忆区块」：加入区块 = 加入白名单。
+   *   本字段保留**兼容读取**（旧配置仍放行，不会被清空），UI 不再写入；
+   *   判定见 `napcat-adapter.classifyQqEvent` 的 `isGroupAllowed` 选项。
+   */
   allowedGroupIds: string[];
   groupRequireMention: true;
+  /** @deprecated 无读取点；回复形态由 dispatcher 决定。 */
   groupReplyStyle: "reply-and-mention";
-  groupToolPolicy: "off";
+  /**
+   * @deprecated 无读取点；群记忆隔离已由区块（zones）实现：
+   *   同一区块共享记忆，未归区的外部会话是独立域。
+   */
   groupMemoryPolicy: "shared-personal";
 }
 
@@ -176,7 +191,12 @@ export interface QqBotChannelConfig extends ChannelRuntimeConfig {
   allowAnyPrivate: boolean;
   /** 单聊用户 openid 白名单 */
   allowedUserOpenids: string[];
-  /** 群 openid 白名单（群内事件仅 @ 机器人触发） */
+  /**
+   * 群 openid 白名单（群内事件仅 @ 机器人触发）。
+   *
+   * @deprecated 与 QQ(NapCat) 的 `allowedGroupIds` 同理：群聊接入已迁移到
+   *   「设置 → 记忆区块」。本字段保留兼容读取，UI 不再写入。
+   */
   allowedGroupOpenids: string[];
 }
 
@@ -187,7 +207,17 @@ export function decryptFeishuSecret(cfg: FeishuChannelConfig | undefined): strin
 
 export type ChannelToolSandbox = "off" | "all";
 
+/**
+ * 配置文件 schema 版本。
+ * v2 = 白名单合并进聊天窗口「控制台 → 白名单与权限」并改为权限制：
+ *      QQ 的私聊名单 / 群员名单 / 群员发言限制开关不再存在，旧的工具白名单
+ *      也不再迁移，读到 v1 配置时两层名单一次性清空，需要重新添加账号。
+ */
+export const CHANNELS_SETTINGS_SCHEMA_VERSION = 2;
+
 export interface ChannelsSettings {
+  /** 配置文件 schema 版本；低于当前值时执行一次性迁移。 */
+  schemaVersion: number;
   wechat: WechatChannelConfig;
   feishu: FeishuChannelConfig;
   qq: QqChannelConfig;
@@ -204,24 +234,27 @@ export interface ChannelsSettings {
   ttsEnabled: boolean;
   /** 全局：是否发送 sticker */
   stickerEnabled: boolean;
-  /** 全局：是否把 bot 会话镜像到桌面端 chatWindow */
-  mirrorToDesktop: boolean;
   /** 全局：关闭时走 Chat；全部开启时走无交互审批的 Harness。 */
   toolSandbox: ChannelToolSandbox;
+  /** 外部渠道的「白名单与权限」（聊天窗口 → 控制台读写）。 */
+  toolAccess: ChannelToolAccessConfig;
+  /** 拦截关键词 / 触发关键词（偏好设置页与渠道链路共用）。 */
+  keywords: ChannelKeywordsConfig;
+  /** 控制台审计开关。 */
+  audit: ChannelAuditConfig;
 }
 
 const DEFAULT_SETTINGS: ChannelsSettings = {
+  schemaVersion: CHANNELS_SETTINGS_SCHEMA_VERSION,
   wechat: { enabled: false },
   feishu: { enabled: false },
   qq: {
     enabled: false,
     listenMode: "auto",
     port: 6200,
-    allowedPrivateUserIds: [],
     allowedGroupIds: [],
     groupRequireMention: true,
     groupReplyStyle: "reply-and-mention",
-    groupToolPolicy: "off",
     groupMemoryPolicy: "shared-personal",
   },
   qqbot: {
@@ -236,8 +269,10 @@ const DEFAULT_SETTINGS: ChannelsSettings = {
   rateLimitPerChannel: 100,
   ttsEnabled: true,
   stickerEnabled: true,
-  mirrorToDesktop: true,
   toolSandbox: "all",
+  toolAccess: DEFAULT_TOOL_ACCESS,
+  keywords: DEFAULT_KEYWORDS,
+  audit: DEFAULT_AUDIT_CONFIG,
 };
 
 function filePath(): string {
@@ -280,7 +315,12 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
   const normalizeListenMode = (value: unknown): QqListenMode =>
     value === "loopback" || value === "wsl" || value === "custom" ? value : "auto";
 
+  // schemaVersion 缺失（老配置文件）按 v1 处理：v1 的两层名单一次性清空，不做迁移。
+  const schemaVersion = safeNum(input?.schemaVersion, 1, 0, 1_000_000);
+  const legacyAccessReset = schemaVersion < CHANNELS_SETTINGS_SCHEMA_VERSION;
+
   return {
+    schemaVersion: CHANNELS_SETTINGS_SCHEMA_VERSION,
     wechat: {
       enabled: safeBool(w?.enabled, false),
       manualCliPath: typeof w?.manualCliPath === "string" ? w.manualCliPath : undefined,
@@ -310,11 +350,9 @@ feishu: {
         : undefined,
       port: safeNum(q?.port, 6200, 1, 65535),
       accessToken: typeof q?.accessToken === "string" ? q.accessToken : undefined,
-      allowedPrivateUserIds: normalizeIds(q?.allowedPrivateUserIds),
       allowedGroupIds: normalizeIds(q?.allowedGroupIds),
       groupRequireMention: true,
       groupReplyStyle: "reply-and-mention",
-      groupToolPolicy: "off",
       groupMemoryPolicy: "shared-personal",
     },
     qqbot: {
@@ -333,15 +371,22 @@ feishu: {
     rateLimitPerChannel: safeNum(input?.rateLimitPerChannel, 100, 1, 10000),
     ttsEnabled: safeBool(input?.ttsEnabled, true),
     stickerEnabled: safeBool(input?.stickerEnabled, true),
-    mirrorToDesktop: safeBool(input?.mirrorToDesktop, true),
+    // 旧配置里的 mirrorToDesktop（渠道消息镜像到桌面对话）已随该功能删除：
+    // normalize 只读自己认识的字段，多余 key 被自然忽略，无需报错。
     toolSandbox: safeToolSandbox(input?.toolSandbox),
+    // v1 → v2：旧的两层名单（私聊 / 群员 / 工具白名单）不迁移，一次性清空。
+    toolAccess: legacyAccessReset
+      ? normalizeToolAccessConfig(undefined)
+      : normalizeToolAccessConfig(input?.toolAccess),
+    keywords: normalizeKeywordConfig(input?.keywords),
+    audit: normalizeAuditConfig(input?.audit),
   };
 }
 
 export function loadChannelsSettings(): ChannelsSettings {
   try {
     const p = filePath();
-    if (!fs.existsSync(p)) return { ...DEFAULT_SETTINGS };
+    if (!fs.existsSync(p)) return defaultSettings();
     const raw = JSON.parse(fs.readFileSync(p, "utf8")) as Partial<ChannelsSettings>;
     const loaded = normalize(raw);
     // 私密字段解密边界：磁盘上是 enc: 前缀密文，运行时 API 暴露明文
@@ -356,8 +401,13 @@ export function loadChannelsSettings(): ChannelsSettings {
     }
     return loaded;
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return defaultSettings();
   }
+}
+
+/** 默认设置的一份可安全修改的副本（toolAccess 含数组，不能共享引用）。 */
+function defaultSettings(): ChannelsSettings {
+  return { ...DEFAULT_SETTINGS, toolAccess: normalizeToolAccessConfig(undefined) };
 }
 
 export function saveChannelsSettings(patch: Partial<ChannelsSettings>): ChannelsSettings {
@@ -367,6 +417,27 @@ export function saveChannelsSettings(patch: Partial<ChannelsSettings>): Channels
   if (patch.feishu) merged.feishu = { ...existing.feishu, ...patch.feishu };
   if (patch.qq) merged.qq = { ...existing.qq, ...patch.qq };
   if (patch.qqbot) merged.qqbot = { ...existing.qqbot, ...patch.qqbot };
+  // 白名单是数组，浅合并会把整个数组换掉；这里显式按各字段合并，
+  // 允许 UI 只改某个总开关、或只改名单。
+  if (patch.toolAccess) {
+    merged.toolAccess = {
+      groupMemberGate: patch.toolAccess.groupMemberGate ?? existing.toolAccess.groupMemberGate,
+      toolGate: patch.toolAccess.toolGate ?? existing.toolAccess.toolGate,
+      entries: patch.toolAccess.entries ?? existing.toolAccess.entries,
+    };
+  }
+  // 关键词同样是数组；允许 UI 只改拦截词或只改触发词。
+  if (patch.keywords) {
+    merged.keywords = {
+      intercept: patch.keywords.intercept ?? existing.keywords.intercept,
+      trigger: patch.keywords.trigger ?? existing.keywords.trigger,
+    };
+  }
+  if (patch.audit) {
+    merged.audit = {
+      recordSuccessTurns: patch.audit.recordSuccessTurns ?? existing.audit.recordSuccessTurns,
+    };
+  }
 
   // 私密字段加密边界：UI 传来的是明文，写盘前要 wrap
   // 避开"密文回传"场景：检测 enc:/obf:/plain: 前缀，避免重复加密。
@@ -426,8 +497,10 @@ export type ChannelConfigPatch = Partial<{
   rateLimitPerChannel: number;
   ttsEnabled: boolean;
   stickerEnabled: boolean;
-  mirrorToDesktop: boolean;
   toolSandbox: ChannelToolSandbox;
+  toolAccess: Partial<ChannelToolAccessConfig>;
+  keywords: Partial<ChannelKeywordsConfig>;
+  audit: Partial<ChannelAuditConfig>;
 }>;
 
 /** 给定 channelId 返回对应的配置子集（用于 adapter 内部读取自己的开关）。 */

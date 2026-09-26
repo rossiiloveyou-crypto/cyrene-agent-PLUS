@@ -1,0 +1,50 @@
+CONFLICT (modify/delete): README.en.md deleted in HEAD and modified in official/master.  Version official/master of README.en.md left in tree.
+CONFLICT (content): Merge conflict in README.md
+CONFLICT (modify/delete): dist/renderer/toast/index.html deleted in official/master and modified in HEAD.  Version HEAD of dist/renderer/toast/index.html left in tree.
+CONFLICT (content): Merge conflict in package-lock.json
+CONFLICT (content): Merge conflict in src/main/agui-bridge.ts
+CONFLICT (content): Merge conflict in src/main/application/default-dependencies.ts
+CONFLICT (content): Merge conflict in src/main/channels/bootstrap.test.ts
+CONFLICT (content): Merge conflict in src/main/channels/bootstrap.ts
+CONFLICT (content): Merge conflict in src/main/channels/channel-context.test.ts
+CONFLICT (content): Merge conflict in src/main/channels/channel-context.ts
+CONFLICT (content): Merge conflict in src/main/channels/dispatcher.test.ts
+CONFLICT (content): Merge conflict in src/main/channels/dispatcher.ts
+CONFLICT (content): Merge conflict in src/main/channels/settings-store.ts
+CONFLICT (content): Merge conflict in src/main/memory/memory-user-ipc.ts
+CONFLICT (content): Merge conflict in src/main/orchestrator/agent-runtime.ts
+CONFLICT (content): Merge conflict in src/main/orchestrator/build-options.ts
+CONFLICT (content): Merge conflict in src/main/orchestrator/tools/registry/tool-registry.ts
+CONFLICT (content): Merge conflict in src/main/settings/general-settings-lifecycle.ts
+CONFLICT (content): Merge conflict in src/main/settings/general-settings.ts
+CONFLICT (content): Merge conflict in src/main/settings/settings-facade.ts
+CONFLICT (content): Merge conflict in src/main/token-usage-store.ts
+CONFLICT (content): Merge conflict in src/renderer/react/features/chat/components/ChatPageNavigation.tsx
+CONFLICT (content): Merge conflict in src/renderer/react/features/chat/components/ChatPagePanelHost.tsx
+CONFLICT (modify/delete): src/renderer/react/features/chat/components/ModelModePanel.css deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/react/features/chat/components/ModelModePanel.css left in tree.
+CONFLICT (modify/delete): src/renderer/react/features/chat/components/ModelModePanel.tsx deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/react/features/chat/components/ModelModePanel.tsx left in tree.
+CONFLICT (modify/delete): src/renderer/react/features/chat/hooks/useChannelMirrorEvents.test.ts deleted in HEAD and modified in official/master.  Version official/master of src/renderer/react/features/chat/hooks/useChannelMirrorEvents.test.ts left in tree.
+CONFLICT (modify/delete): src/renderer/react/features/chat/hooks/useChannelMirrorEvents.ts deleted in HEAD and modified in official/master.  Version official/master of src/renderer/react/features/chat/hooks/useChannelMirrorEvents.ts left in tree.
+CONFLICT (content): Merge conflict in src/renderer/react/features/chat/pages/ChatPage.tsx
+CONFLICT (modify/delete): src/renderer/react/hooks/useChatAppearance.test.ts deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/react/hooks/useChatAppearance.test.ts left in tree.
+CONFLICT (modify/delete): src/renderer/react/hooks/useChatAppearance.ts deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/react/hooks/useChatAppearance.ts left in tree.
+CONFLICT (content): Merge conflict in src/renderer/react/i18n/en.json
+CONFLICT (content): Merge conflict in src/renderer/react/i18n/zh-CN.json
+CONFLICT (content): Merge conflict in src/renderer/react/styles/react-root.css
+CONFLICT (modify/delete): src/renderer/settings/api/presets.ts deleted in HEAD and modified in official/master.  Version official/master of src/renderer/settings/api/presets.ts left in tree.
+CONFLICT (content): Merge conflict in src/renderer/settings/general/dom.ts
+CONFLICT (modify/delete): src/renderer/settings/i18n/en.json deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/settings/i18n/en.json left in tree.
+CONFLICT (modify/delete): src/renderer/settings/i18n/zh-CN.json deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/settings/i18n/zh-CN.json left in tree.
+CONFLICT (modify/delete): src/renderer/settings/index.html deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/settings/index.html left in tree.
+CONFLICT (modify/delete): src/renderer/settings/mcp/panel.test.ts deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/settings/mcp/panel.test.ts left in tree.
+CONFLICT (content): Merge conflict in src/renderer/settings/memory/panel.ts
+CONFLICT (modify/delete): src/renderer/settings/settings.css deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/settings/settings.css left in tree.
+CONFLICT (modify/delete): src/renderer/settings/settings.ts deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/settings/settings.ts left in tree.
+CONFLICT (content): Merge conflict in src/renderer/settings/shared/modal.ts
+CONFLICT (content): Merge conflict in src/renderer/settings/shared/types.ts
+CONFLICT (modify/delete): src/renderer/settings/tokens/panel.ts deleted in HEAD and modified in official/master.  Version official/master of src/renderer/settings/tokens/panel.ts left in tree.
+CONFLICT (modify/delete): src/renderer/sidebar/sidebar.ts deleted in official/master and modified in HEAD.  Version HEAD of src/renderer/sidebar/sidebar.ts left in tree.
+CONFLICT (modify/delete): src/shared/chat-appearance.test.ts deleted in official/master and modified in HEAD.  Version HEAD of src/shared/chat-appearance.test.ts left in tree.
+CONFLICT (modify/delete): src/shared/chat-appearance.ts deleted in official/master and modified in HEAD.  Version HEAD of src/shared/chat-appearance.ts left in tree.
+CONFLICT (content): Merge conflict in src/shared/ipc-channels.ts
+CONFLICT (modify/delete): vite.config.ts deleted in official/master and modified in HEAD.  Version HEAD of vite.config.ts left in tree.

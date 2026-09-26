@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import {
   normalizeChatAppearance,
+  resolveUsageBadgeImage,
   type ChatAppearanceSettings,
 } from "../../../shared/chat-appearance";
 
@@ -12,6 +13,11 @@ export function applyChatAppearance(input: unknown): void {
   );
   document.documentElement.dataset.assistantBubble =
     settings.assistantBubbleEnabled ? "on" : "off";
+  // 顶栏「用量」徽章的文字渐变
+  document.documentElement.style.setProperty(
+    "--cy-usage-badge-image",
+    resolveUsageBadgeImage(settings.usageBadgeColor),
+  );
 }
 
 export function useChatAppearance(): void {

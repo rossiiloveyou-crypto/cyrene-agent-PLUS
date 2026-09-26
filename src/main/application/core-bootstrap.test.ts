@@ -62,6 +62,7 @@ function makeCoreDeps(calls: string[], overrides: Partial<CoreDependencies> = {}
     activation,
     shutdown: createShutdownCoordinator({ readiness, timeoutMs: 1000 }),
     migrateStagedExternalContent: () => { calls.push("migrate"); },
+    runMemorySchemaGate: () => { calls.push("memory-schema-gate"); return "ok"; },
     initSkills: () => { calls.push("skills"); },
     createLowCostServices: () => { calls.push("services"); return makeServices(); },
     initSandbox: async () => { calls.push("sandbox"); },
@@ -220,5 +221,29 @@ describe("startCore", () => {
 
     expect(calls.indexOf("plugins-stop")).toBeGreaterThan(-1);
     expect(calls.indexOf("plugins-stop")).toBeLessThan(calls.indexOf("channels-stop"));
+  });
+
+  it("runs the memory schema gate before RAG and channel startup", async () => {
+    const calls: string[] = [];
+    await startCore(makeCoreDeps(calls));
+
+    expect(calls).toContain("memory-schema-gate");
+    // 闸门可能删掉 memory.json / 向量库文件，必须早于任何 load
+    expect(calls.indexOf("memory-schema-gate")).toBeLessThan(calls.indexOf("rag"));
+    expect(calls.indexOf("memory-schema-gate")).toBeLessThan(calls.indexOf("channels-initialize"));
+    expect(calls.indexOf("memory-schema-gate")).toBeLessThan(calls.indexOf("runtime"));
+  });
+
+  it("aborts startup when the memory schema gate is declined", async () => {
+    const calls: string[] = [];
+    const deps = makeCoreDeps(calls, {
+      runMemorySchemaGate: () => "aborted",
+    });
+
+    await expect(startCore(deps)).rejects.toMatchObject({ code: "E_STARTUP_ABORTED" });
+    // 用户选择退出：后续任何初始化都不应发生
+    expect(calls).not.toContain("rag");
+    expect(calls).not.toContain("runtime");
+    expect(calls).not.toContain("channels-initialize");
   });
 });

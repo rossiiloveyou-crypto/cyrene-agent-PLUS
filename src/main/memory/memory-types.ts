@@ -69,6 +69,31 @@ export interface L2Memory {
    * 由 content 分词 + evidence 实体在写入时提取；缺失时 memory-store 会自动补充。
    */
   keywords?: string[]
+  /**
+   * 所属记忆域（Phase 2 引入）。取值见 zones/types.ts 的 MemoryScopeId：
+   * `zone:root` / `zone:<zoneId>` / `solo:<sessionId>`。
+   *
+   * 缺失（undefined）视为 legacy：读取时按"不属于任何域"处理 —— 正常不会出现
+   * （Phase 2 启动闸门会清空旧数据），仅作为防御。
+   */
+  scope?: string
+  /**
+   * 本条记忆的说话人 personKey 列表（Phase 3 P2 引入）。
+   *
+   * 取值形如 `qq:2914636187`。语义是**证据归因** —— 这句话是谁说的。
+   * 缺失 = P2 之前的老数据，或桌面路径（桌面对话没有 `msg.senderId`）。
+   */
+  speakerIds?: string[]
+  /**
+   * 本条记忆「关于谁」的 personKey 列表（Phase 3 P2 引入）。
+   *
+   * 用于召回重排（P3.5）、按人定位删除、隐私边界判定（P3）。
+   * 缺失或空数组 = 公共记忆（与具体的人无关，例如项目进展）。
+   *
+   * ⚠️ 与 `speakerIds` 是**两个不同维度**，不能互相替代：
+   * 「小红说小明在学 Rust」的 speakerIds 是小红、subjectIds 是小明。
+   */
+  subjectIds?: string[]
 }
 
 export type L2MemoryStatus = "active" | "aging" | "archived" | "superseded" | "merged"
@@ -188,11 +213,65 @@ export interface MemoryCandidate {
   forbiddenOverclaims?: string[]
   /** 来源会话 ID，由调度层注入（非 LLM 输出），用于 L2 回溯 */
   sourceConversationId?: string
+  /**
+   * 本条候选所属记忆域，由调度层注入（非 LLM 输出）。
+   * 非 root 域的 L0/L1 候选会被 MemoryManager 丢弃，避免群聊改写 owner 画像。
+   */
+  scope?: string
+  /**
+   * LLM 输出：本条记忆主要关于谁（人名数组，自然语言）。
+   *
+   * ⚠️ 与下面的 `subjectIds` 是**输入/产出**关系，不是同一件事：
+   * LLM 只输出人名，调度层用本批名册把它映射成 `subjectIds`（见 person-attribution.ts）。
+   * 映射不上就丢弃，绝不猜。
+   */
+  subjectNames?: string[]
+  /** LLM 输出：本条候选来自第几轮（1-based 轮次号数组）。缺失时退化为整批。 */
+  sourceTurnIndexes?: number[]
+  /** 调度层注入：来源说话人 personKey。**非 LLM 产出。** */
+  speakerIds?: string[]
+  /** 调度层注入：本条记忆关于的 personKey。**非 LLM 产出。** */
+  subjectIds?: string[]
+  /** 调度层注入：来源消息 id（P1 的消息身份）。**非 LLM 产出。** */
+  sourceMessageIds?: string[]
 }
 
 export interface MemoryJudgeTurn {
   userInput: string
   assistantReply: string
+  /**
+   * 说话人的稳定标识（`<channel>:<senderId>`）。
+   *
+   * 桌面路径与老调用方为 undefined —— 此时归属解析整体退化为 P1 行为
+   * （不写 speakerIds / subjectIds / sourceMessageIds），零副作用。
+   */
+  personKey?: string
+  /** 说话人昵称；唯一用途是把 LLM 的 `subjectNames` 映射回 personKey。 */
+  speakerName?: string
+  /** 该轮 user 消息在渠道 transcript 里的 id（P1 产出）。 */
+  messageId?: string
+  /**
+   * 会话类型（`IncomingMessage.chatType`）。
+   *
+   * ⚠️ 这是"单人会话兜底"的**唯一可靠判据**，不能用"本批只有一个 personKey"代替：
+   * 群里只有一个人说过话时，后者会把公共记忆错误地挂成"关于他"的记忆，
+   * 而那恰好是 `subjectNames` 抽取失败的场景，挂错代价最大。
+   */
+  chatType?: string
+}
+
+/**
+ * 一轮对话的说话人归属。由渠道入口注入，**非 LLM 产出**。
+ *
+ * 透传链（5 层，少改一层就静默失效）：
+ *   dispatcher → bootstrap → agent-runtime → build-options → memory-scheduler
+ */
+export interface TurnAttribution {
+  personKey?: string
+  speakerName?: string
+  messageId?: string
+  /** 会话类型，决定是否允许"单人会话兜底"。 */
+  chatType?: string
 }
 
 /**

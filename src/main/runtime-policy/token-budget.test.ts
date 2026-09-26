@@ -5,7 +5,10 @@ describe("resolveMaxOutputTokens", () => {
   it("returns stage default when no override", () => {
     expect(resolveMaxOutputTokens({ stage: "task-plan" })).toBe(1200);
     expect(resolveMaxOutputTokens({ stage: "ask-soul" })).toBe(1600);
-    expect(resolveMaxOutputTokens({ stage: "memory-judge" })).toBe(800);
+    // memory-judge：800 → 32768。一条候选 ≈1000 字符（含 sourceQuote 软上限 500 字），
+    // 800 会让「一批里有 2 个以上话题」的判定必然被截断 → REPAIR_EXHAUSTED → 整批记忆丢失。
+    // 直接拉到端点允许的上限，让"这批有几个话题"不再需要被猜。
+    expect(resolveMaxOutputTokens({ stage: "memory-judge" })).toBe(32768);
     expect(resolveMaxOutputTokens({ stage: "memory-compressor" })).toBe(500);
     expect(resolveMaxOutputTokens({ stage: "memory-reflect" })).toBe(500);
     expect(resolveMaxOutputTokens({ stage: "memory-resolver" })).toBe(700);

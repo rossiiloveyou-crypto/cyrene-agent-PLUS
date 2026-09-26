@@ -16,6 +16,8 @@ import type {
 } from "./types";
 import type { ChannelsSettings } from "./settings-store";
 import { appendLog } from "./message-log";
+import { findInterceptKeyword } from "./keyword-policy";
+import { recordMessageBlocked } from "./audit-events";
 import type { MobileMessageSegmentationMode } from "../../shared/preferences";
 import { rememberProactiveChannelRecipient } from "./proactive-delivery";
 import type { ChannelRateLimiter } from "./rate-limiter";
@@ -35,7 +37,6 @@ export {
   makeSessionId,
 } from "./channel-context";
 export type {
-  BoundConversationMessageMetadata,
   ChatMessage,
   DispatchContext,
 } from "./channel-context";
@@ -44,11 +45,11 @@ const LOG = "[ChannelDispatcher]";
 
 /** Dispatcher 配置（依赖注入）。 */
 export interface DispatcherDeps {
-  /** 按外部会话和绑定桌面会话串行执行。 */
+  /** 按外部会话串行执行。 */
   readonly queue: KeyedQueue;
   /** 原子消费渠道和用户限速额度。 */
   readonly limiter: ChannelRateLimiter;
-  /** 读取和提交渠道与绑定桌面会话上下文。 */
+  /** 读取和提交渠道会话上下文。 */
   readonly context: ChannelContext;
   /** 根据渠道能力组装出站消息。 */
   readonly composer: OutgoingComposer;
@@ -59,6 +60,8 @@ export interface DispatcherDeps {
     msg: IncomingMessage,
     sessionId: string,
     priorMessages?: ChatMessage[],
+    /** P1 产出的 user 消息 id；用于建立「记忆 → 原话」指针（P2 归属链路起点）。 */
+    userMessageId?: string,
   ) => Promise<{ text: string; sticker: string | null }>;
   /** 延迟读取渠道设置，避免应用就绪前访问加密存储。 */
   readonly loadSettings: () => ChannelsSettings;
@@ -66,18 +69,8 @@ export interface DispatcherDeps {
   readonly loadGeneralSettings: () => {
     mobileMessageSegmentation?: MobileMessageSegmentationMode;
   };
-  /** 记录最近见到的外部聊天，供设置页列出可绑定的来源。 */
+  /** 记录最近见到的外部聊天，供设置页列出见过的外部会话。 */
   readonly observeExternalChat?: (sessionId: string, msg: IncomingMessage) => void;
-  /** 可选 — 桌面端镜像广播：bot 入站/出站消息通知给 chatWindow。 */
-  readonly broadcastChat?: (event: {
-    type: "bot:incoming" | "bot:outgoing";
-    channel: string;
-    senderId: string;
-    senderName?: string;
-    chatId: string;
-    text: string;
-    at: number;
-  }) => void;
 }
 
 export class ChannelDispatcher {
@@ -114,6 +107,9 @@ export class ChannelDispatcher {
     const sessionId = makeSessionId(msg.channel, msg.chatId);
     // 读取设置会同步刷新限速器，必须发生在本轮额度消费之前。
     void this.settings;
+    // 拦截关键词：命中即不进 Agent、不回复，只留拦截记录。
+    // 放在限速之前，被拦截的消息不消耗用户额度。
+    if (this.interceptByKeyword(msg, sessionId)) return null;
     return this.deps.queue.run(`external:${sessionId}`, async () => {
       if (!this.deps.limiter.tryConsume(msg.channel, msg.senderId)) {
         console.warn(LOG, `限速: ${msg.channel}:${msg.senderId}`);
@@ -127,11 +123,37 @@ export class ChannelDispatcher {
       }
 
       const context = this.deps.context.resolveDispatchContext(sessionId);
-      const execute = () => this.processIncoming(msg, context);
-      return context.boundConversationId
-        ? this.deps.queue.run(`conversation:${context.boundConversationId}`, execute)
-        : execute();
+      return this.processIncoming(msg, context);
     });
+  }
+
+  /**
+   * 检测拦截关键词：命中则记录到控制台并中断本轮。
+   * 返回 true 表示消息已被拦截（调用方直接结束处理）。
+   */
+  private interceptByKeyword(msg: IncomingMessage, sessionId: string): boolean {
+    const keywords = this.settings.keywords.intercept;
+    if (keywords.length === 0) return false;
+    const matched = findInterceptKeyword(msg.text, keywords);
+    if (!matched) return false;
+    console.warn(LOG, `拦截关键词命中: ${msg.channel}:${msg.senderId} keyword=${matched}`);
+    try {
+      recordMessageBlocked({
+        channel: msg.channel,
+        chatType: msg.chatType ?? "private",
+        chatId: msg.chatId,
+        senderId: msg.senderId,
+        ...(msg.senderName ? { senderName: msg.senderName } : {}),
+        sessionId,
+        ...(msg.trigger ? { trigger: msg.trigger } : {}),
+      }, {
+        text: msg.text,
+        reason: `命中拦截关键词「${matched}」`,
+      });
+    } catch (err) {
+      console.warn(LOG, "写拦截审计失败:", err instanceof Error ? err.message : err);
+    }
+    return true;
   }
 
   private async processIncoming(
@@ -139,26 +161,8 @@ export class ChannelDispatcher {
     context: DispatchContext,
   ): Promise<OutgoingMessage | null> {
     const { sessionId } = context;
-    // 绑定只选择历史与消息镜像目标，Agent 运行身份始终属于原渠道。
     this.deps.context.recordIncomingSession(msg, context);
     rememberProactiveChannelRecipient(msg, sessionId);
-
-    // 入站消息广播到桌面端 chatWindow（让用户看到 bot 在和谁聊天）
-    if (this.settings.mirrorToDesktop) {
-      try {
-        this.deps.broadcastChat?.({
-          type: "bot:incoming",
-          channel: msg.channel,
-          senderId: msg.senderId,
-          senderName: msg.senderName,
-          chatId: msg.chatId,
-          text: msg.text,
-          at: msg.at.getTime(),
-        });
-      } catch (err) {
-        console.warn(LOG, "broadcastChat (incoming) 失败:", err);
-      }
-    }
 
     // 入站消息写日志
     try {
@@ -180,14 +184,16 @@ export class ChannelDispatcher {
     // 消息追加给 agent，模型会把同一条消息读两遍。
     const priorMessages = await this.deps.context.resolvePriorMessages(context, 16);
 
-    // 入站消息落对话历史（下一轮滑窗的数据源）
-    await this.deps.context.appendIncomingContext(msg, context);
+    // 入站消息落对话历史（下一轮滑窗的数据源）。
+    // ⚠️ 顺序不能反、返回值不能丢：返回的 entry.id 是 P2 归属链路的起点
+    //（记忆的 sourceMessageIds 要指回这条原话）。落盘失败时返回 null，归属整体退化。
+    const userEntry = await this.deps.context.appendIncomingContext(msg, context);
 
     // 拼接最近 16 条历史（同桌面端模型消息构造行为）。
     let replyText: string;
     let sticker: string | null;
     try {
-      const result = await this.deps.buildAndRunAgent(msg, sessionId, priorMessages);
+      const result = await this.deps.buildAndRunAgent(msg, sessionId, priorMessages, userEntry?.id);
       replyText = result.text;
       sticker = result.sticker;
     } catch (err) {
@@ -237,23 +243,6 @@ export class ChannelDispatcher {
           console.warn(LOG, "appendLog (delivery error) 失败:", err);
         }
         return null;
-      }
-
-      // 出站消息广播到桌面端
-      if (this.settings.mirrorToDesktop) {
-        try {
-          this.deps.broadcastChat?.({
-            type: "bot:outgoing",
-            channel: msg.channel,
-            senderId: msg.senderId,
-            senderName: msg.senderName,
-            chatId: msg.chatId,
-            text: prepared.assistantText,
-            at: Date.now(),
-          });
-        } catch (err) {
-          console.warn(LOG, "broadcastChat (outgoing) 失败:", err);
-        }
       }
 
       // 出站消息写日志（仅文本片段，附件路径不写入日志）
