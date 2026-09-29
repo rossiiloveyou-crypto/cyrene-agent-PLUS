@@ -1,3 +1,4 @@
+import { app } from "electron";
 import { loadPromptFile } from "../prompts/prompt-loader";
 import type { AguiRunInput } from "../agui-bridge";
 import type { ScheduledTask } from "../scheduler/types";
@@ -5,12 +6,12 @@ import type { ChannelId } from "../channels/types";
 import type { ModelSettings } from "../settings/model-settings";
 import type { GeneralSettings } from "../settings/general-settings";
 import type { UserProfile } from "../settings-store";
-import { loadVisionConfig } from "../settings/model-settings";
+import { resolveCaptionVisionConfig } from "./image-router";
 import { getTimeoutSettings } from "../timeout-manager";
 import { resolveModelSettingsProfile } from "../settings/model-settings";
 import { normalizeChatMessages } from "../chat-api-utils";
 import { parseObserverFeeling } from "../chat-stream-utils";
-import { validateCaptionImagePath, IMAGE_CAPTION_PROMPT } from "../chat/image-caption";
+import { captionImageSafe, IMAGE_CAPTION_PROMPT } from "../chat/image-caption";
 import { buildEnvironmentContext } from "./environment";
 import { buildToneInjection } from "./tone-injector";
 import { buildAlwaysOnContext, scheduleMemoryWrite } from "./index";
@@ -40,6 +41,10 @@ import {
   type OnRunFinishedDeps,
   type ModelSettingsLite,
 } from "./build-options";
+import { buildModelContext } from "./conversation-transcript-context";
+import { getConversationTranscriptStore } from "./conversation-transcript-store";
+import { getHarnessRunStore } from "./harness/run-store";
+import { ConversationTranscriptCompactor } from "./conversation-transcript-compactor";
 import { type CyreneRunResult, type CyreneRunOptions } from "./cyrene-agent";
 import type { HarnessToolFinishedEvent } from "./harness/types";
 import type { ToolFinishedInput } from "../plugin-host/lifecycle-publisher";
@@ -79,10 +84,8 @@ export interface AgentRuntimeDeps {
     getEnabledToolsForMode: (mode: ConversationMode, overrides?: ToolModeOverrides) => ToolDefinition[];
   };
   skillRegistry: typeof skillRegistry;
-  getSceneEmbeddingIndex: () => unknown;
   getStickerEmbeddingIndex: () => unknown;
   getEmbeddingProvider: () => unknown;
-  getSceneEmbeddingProvider: () => unknown;
   broadcastRuntimeStateChanged: () => void;
   citaService: CitaService;
   socialContextScheduler: { schedule: (input: SocialExtractionInput) => void };
@@ -92,6 +95,8 @@ export interface AgentRuntimeDeps {
   publishPluginHostEvent: <T>(event: string, payload: T) => Promise<void>;
   /** 工具完成事件发布入口；缺省不发布（早期装配与测试场景）。 */
   publishToolFinished?: (event: ToolFinishedInput) => void;
+  /** Composition-root-owned singleton shared with manual CHATS_COMPACT. */
+  transcriptCompactor?: ConversationTranscriptCompactor;
 }
 
 type SchedulerRunOptions = Omit<CyreneRunOptions, "toolSystemContent" | "soulSystemBaseContent">;
@@ -131,6 +136,15 @@ export interface AgentRuntime {
 
 export function createAgentRuntime(rawDeps: AgentRuntimeDeps): AgentRuntime {
   const runtimeStateService = rawDeps.runtimeStateService;
+  const transcriptStore = getConversationTranscriptStore(app.getPath("userData"));
+  const transcriptRunStore = getHarnessRunStore(app.getPath("userData"));
+  // Production composition owns the singleton; unit/fallback callers retain
+  // the same service contract but fail closed until one is injected.
+  const transcriptCompactor = rawDeps.transcriptCompactor ?? new ConversationTranscriptCompactor({
+    store: transcriptStore,
+    runReader: transcriptRunStore,
+    summarize: async () => { throw new Error("TRANSCRIPT_COMPACTION_REQUIRED"); },
+  });
 
   async function observeRuntimeState(
     settings: ModelSettingsLite,
@@ -199,11 +213,7 @@ export function createAgentRuntime(rawDeps: AgentRuntimeDeps): AgentRuntime {
       },
       resolveSlashActivation: ((messages, mode, overrides) =>
         resolveSlashActivation(messages as any, mode, overrides)) as BuildOptionsDeps["resolveSlashActivation"],
-      buildToneInjection: ((userText, messages, provider, index) =>
-        buildToneInjection(userText, messages as any, provider as any, index as any)) as BuildOptionsDeps["buildToneInjection"],
-      sceneEmbeddingIndex: rawDeps.getSceneEmbeddingIndex(),
-      getSceneEmbeddingProvider: (() =>
-        rawDeps.getSceneEmbeddingProvider() as unknown) as BuildOptionsDeps["getSceneEmbeddingProvider"],
+      buildToneInjection: (() => buildToneInjection()) as BuildOptionsDeps["buildToneInjection"],
       buildAlwaysOnContext: ((userText, messages, trace) =>
         buildAlwaysOnContext(userText, messages as any, trace)) as BuildOptionsDeps["buildAlwaysOnContext"],
       buildRelationshipContext,
@@ -227,22 +237,11 @@ export function createAgentRuntime(rawDeps: AgentRuntimeDeps): AgentRuntime {
         normalizeChatMessages(raw as any)) as BuildOptionsDeps["normalizeChatMessages"],
       chatRequestTimeoutMs: getTimeoutSettings().chatRequestTimeout,
       captionImageForFallback: async (filePath: string) => {
-        const validated = validateCaptionImagePath(filePath);
-        if (!validated.ok) return { ok: false, error: validated.error };
-        const visionCfg = loadVisionConfig();
-        if (!visionCfg) return { ok: false, error: "未配置视觉模型，无法分析图片" };
-        try {
-          const { captionImage } = await import("./vision-captioner");
-          const caption = await captionImage(
-            { base64: validated.buffer.toString("base64"), mime: validated.mime },
-            IMAGE_CAPTION_PROMPT,
-            visionCfg,
-          );
-          if (caption.startsWith("[错误")) return { ok: false, error: caption };
-          return { ok: true, caption };
-        } catch (err: any) {
-          return { ok: false, error: err?.message || String(err) };
-        }
+        // 走注入的设置加载（与 buildSchedulerOptions 同策略），保证可测且不绕过依赖装配
+        const settings = resolveModelSettingsProfile(rawDeps.loadModelSettings());
+        const vision = resolveCaptionVisionConfig(settings);
+        if (!vision.ok) return { ok: false, error: vision.error };
+        return captionImageSafe(filePath, IMAGE_CAPTION_PROMPT, vision.config);
       },
       prepareCitaTurn: (input) => rawDeps.citaService.prepareTurn(input),
       buildChatSocialContext: async ({ conversationId, query }) => {
@@ -263,6 +262,14 @@ export function createAgentRuntime(rawDeps: AgentRuntimeDeps): AgentRuntime {
         return rawDeps.chatsStore.getWorkspaceBinding(conversationId);
       },
       buildPluginPromptContext: (input) => rawDeps.buildPluginPromptContext(input),
+      // 权威轨迹上下文（CTA Phase 1）：桌面端与 bridge 共用同一 userData 根下的单例 store
+      buildModelContext: (conversationId, retainTokens) => buildModelContext({
+        store: transcriptStore,
+        conversationId,
+        retainTokens,
+        runReader: transcriptRunStore,
+      }),
+      compactTranscript: (input) => transcriptCompactor.compact(input),
     };
   }
 
@@ -378,6 +385,7 @@ export function createAgentRuntime(rawDeps: AgentRuntimeDeps): AgentRuntime {
           // 协议与推理偏好需与聊天路径一致透传，否则定时任务会按默认协议发请求。
           explicitTransport: settings.explicitTransport,
           reasoning: settings.reasoning,
+          manualReasoning: settings.manualReasoning,
           contextWindowTokens: settings.contextWindowTokens,
         },
         messages: [{ role: "system" as const, content: systemContent }, ...messages],

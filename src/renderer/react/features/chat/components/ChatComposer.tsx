@@ -1,7 +1,9 @@
 import { Sender } from "@ant-design/x";
 import { Popover } from "antd";
-import { useEffect, useRef, useState, type ClipboardEvent } from "react";
+import { FolderOpen } from "lucide-react";
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "../../../i18n";
+import { useUserCallPreference } from "../../../hooks/useUserNickname";
 import { resolveAsset } from "../../../../../shared/renderer-base";
 import type { ContextUsageSnapshot } from "../../../../../shared/context-usage";
 import { ContextUsageRing } from "./ContextUsageRing";
@@ -10,6 +12,7 @@ import { StyleControl } from "./StyleControl";
 import { PermissionControl } from "./PermissionControl";
 import { PlanModeToggle } from "./PlanModeToggle";
 import { ModelSelector } from "./ModelSelector";
+import { PendingQueueDock, type PendingQueueDockItem } from "./PendingQueueDock";
 import chatWelcomeUrl from "../../../assets/welcome/chat.png?url";
 import codeWelcomeUrl from "../../../assets/welcome/code.png?url";
 import learnWelcomeUrl from "../../../assets/welcome/learn.png?url";
@@ -27,13 +30,21 @@ interface ChatComposerProps {
   attachments: ComposerAttachment[];
   attachmentBusy?: boolean;
   modelBusy?: boolean;
-  pendingQueue?: Array<{ id: string; content: string }>;
+  pendingQueue?: PendingQueueDockItem[];
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
   onCancel?: () => void;
   onQueueMessage?: (value: string) => void;
   onRemoveQueuedMessage?: (id: string) => void;
+  onEditQueuedMessage?: (id: string, content: string) => Promise<boolean>;
+  onAdjustQueuedMessage?: (id: string) => Promise<boolean>;
   onChooseWorkspace: () => void;
+  /** 最近绑定的项目文件夹：非空时点击按钮先弹出下拉复选，空则直接弹系统选择框。 */
+  recentProjects?: string[];
+  /** 下拉打开时刷新最近项目列表。 */
+  onOpenRecentProjects?: () => void;
+  /** 从最近项目下拉直接选定历史项目。 */
+  onSelectRecentProject?: (projectPath: string) => void;
   onChooseFiles: (files: File[]) => void;
   onRemoveAttachment: (index: number) => void;
   onScreenshot: () => void;
@@ -42,6 +53,10 @@ interface ChatComposerProps {
   onChooseSticker: (id: string) => void;
   activeModelProfileId?: string;
   onSelectModelProfile?: (id: string) => void;
+  /** 当前会话的 raw model（子下拉据此解析 effective 当前项）。 */
+  activeSessionModel?: string;
+  /** 会话级切模型回调；未传 = 欢迎页（无会话可写）。 */
+  onSelectSessionModel?: (model: string) => void;
   /** 上下文容量快照：运行中实时刷新，空闲时为最近一次终态快照；无快照不渲染圆环。 */
   contextUsage?: ContextUsageSnapshot;
 }
@@ -65,6 +80,35 @@ const WELCOME_IMAGE_BY_MODE: Record<string, string> = {
   learn: learnWelcomeUrl,
   work: workWelcomeUrl,
 };
+
+const WELCOME_GREETING_BOUNDARY_HOURS = [5, 9, 12, 14, 18, 23] as const;
+
+function getWelcomeGreetingKey(date: Date) {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 9) return "composer.greetingMorningEarly";
+  if (hour >= 9 && hour < 12) return "composer.greetingMorning";
+  if (hour >= 12 && hour < 14) return "composer.greetingNoon";
+  if (hour >= 14 && hour < 18) return "composer.greetingAfternoon";
+  if (hour >= 18 && hour < 23) return "composer.greetingEvening";
+  return "composer.greetingLateNight";
+}
+
+function getNextWelcomeGreetingDelayMs(date: Date) {
+  const nextBoundary = WELCOME_GREETING_BOUNDARY_HOURS
+    .map((hour) => {
+      const boundary = new Date(date);
+      boundary.setHours(hour, 0, 0, 0);
+      return boundary;
+    })
+    .find((boundary) => boundary.getTime() > date.getTime());
+
+  if (nextBoundary) return nextBoundary.getTime() - date.getTime();
+
+  const tomorrowMorning = new Date(date);
+  tomorrowMorning.setDate(tomorrowMorning.getDate() + 1);
+  tomorrowMorning.setHours(WELCOME_GREETING_BOUNDARY_HOURS[0], 0, 0, 0);
+  return tomorrowMorning.getTime() - date.getTime();
+}
 
 /** 粘贴图片 MIME 白名单：与主进程截图临时文件的校验口径一致。 */
 const PASTE_IMAGE_MIME_WHITELIST = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
@@ -164,26 +208,6 @@ function StickerPicker({ onChoose }: { onChoose: (id: string) => void }) {
   );
 }
 
-function FolderIcon() {
-  return (
-    <svg className="cy-composer__terminal-folder-icon" width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M5 8C5 6.89543 5.89543 6 7 6H19L24 12H41C42.1046 12 43 12.8954 43 14V40C43 41.1046 42.1046 42 41 42H7C5.89543 42 5 41.1046 5 40V8Z" />
-      <path d="M14 22L19 27L14 32" />
-      <path d="M26 32H34" />
-    </svg>
-  );
-}
-
-function CodeFolderIcon() {
-  return (
-    <svg className="cy-composer__code-folder-icon" width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M43 23V14C43 12.8954 42.1046 12 41 12H24L19 6H7C5.89543 6 5 6.89543 5 8V40C5 41.1046 5.89543 42 7 42H22" />
-      <path d="M38 29L43 34L38 39" />
-      <path d="M30 29L25 34L30 39" />
-    </svg>
-  );
-}
-
 function ChevronIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>;
 }
@@ -196,6 +220,63 @@ function ObsidianVaultIcon() {
       <path d="M8.52 22.57c.073.01.146.018.22.02.781.023 2.095.091 3.16.288.87.16 2.593.642 4.011 1.056 1.082.316 2.197-.548 2.354-1.664.115-.814.33-1.735.725-2.58l-.009.004c-.67-1.87-1.523-3.077-2.417-3.847a5.294 5.294 0 00-2.777-1.258c-1.541-.216-2.952.189-3.841.45.532 2.218.368 4.828-1.425 7.53z" fill="#A88BFA" />
       <path d="M19.676 18.538a69.072 69.072 0 001.858-2.952.811.811 0 00-.061-.901c-.516-.684-1.504-2.075-2.042-3.362-.554-1.323-.636-3.378-.64-4.378a1.708 1.708 0 00-.359-1.051L15.235 1.83a3.757 3.757 0 01-.076.545c-.107.503-.307 1.004-.536 1.498-.135.29-.29.601-.446.915-.105.21-.21.42-.31.626-.517 1.068-.998 2.227-1.132 3.59-.125 1.262.046 2.73.814 4.484.128.01.257.025.386.043a6.364 6.364 0 013.327 1.506c.916.79 1.743 1.921 2.414 3.5z" fill="#A88BFA" />
     </svg>
+  );
+}
+
+/** 工作文件夹按钮：有最近项目时点击弹出下拉（历史项目 + 选择其他文件夹），否则直接弹系统选择框。 */
+function WorkspaceFolderButton({
+  icon,
+  label,
+  ariaLabel,
+  recentProjects,
+  onOpenRecentProjects,
+  onSelectRecentProject,
+  onChooseWorkspace,
+}: {
+  icon: ReactNode;
+  label: string;
+  ariaLabel: string;
+  recentProjects?: string[];
+  onOpenRecentProjects?: () => void;
+  onSelectRecentProject?: (projectPath: string) => void;
+  onChooseWorkspace: () => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const projects = recentProjects ?? [];
+  const showMenu = projects.length > 0 && Boolean(onSelectRecentProject);
+
+  const button = (
+    <button type="button" className="cy-composer__footer-button" aria-label={ariaLabel}
+      onClick={showMenu ? undefined : onChooseWorkspace}>
+      {icon}
+      <span>{label}</span>
+      <ChevronIcon />
+    </button>
+  );
+  if (!showMenu) return button;
+  return (
+    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) onOpenRecentProjects?.(); }} trigger="click" placement="topLeft" rootClassName="cy-recent-projects-popover"
+      content={
+        <div className="cy-recent-projects__menu">
+          {projects.map((projectPath) => {
+            const folderName = projectPath.split(/[\\/]/).filter(Boolean).pop() ?? projectPath;
+            return (
+              <button type="button" key={projectPath} className="cy-recent-projects__item" title={projectPath}
+                onClick={() => { setOpen(false); onSelectRecentProject?.(projectPath); }}>
+                <strong>{folderName}</strong>
+                <small>{projectPath}</small>
+              </button>
+            );
+          })}
+          <button type="button" className="cy-recent-projects__item cy-recent-projects__item--choose-other"
+            onClick={() => { setOpen(false); onChooseWorkspace(); }}>
+            {t("composer.chooseOtherFolder")}
+          </button>
+        </div>
+      }>
+      {button}
+    </Popover>
   );
 }
 
@@ -215,7 +296,12 @@ export function ChatComposer({
   onCancel,
   onQueueMessage,
   onRemoveQueuedMessage,
+  onEditQueuedMessage,
+  onAdjustQueuedMessage,
   onChooseWorkspace,
+  recentProjects,
+  onOpenRecentProjects,
+  onSelectRecentProject,
   onChooseFiles,
   onRemoveAttachment,
   onScreenshot,
@@ -223,10 +309,15 @@ export function ChatComposer({
   onChooseSticker,
   activeModelProfileId,
   onSelectModelProfile,
+  activeSessionModel,
+  onSelectSessionModel,
   contextUsage,
 }: ChatComposerProps) {
   const { t } = useTranslation();
+  const preferredAddress = useUserCallPreference();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const compositionActiveRef = useRef(false);
+  const [welcomeGreetingDate, setWelcomeGreetingDate] = useState(() => new Date());
   const [enabledStickers, setEnabledStickers] = useState<EnabledSticker[]>([]);
   const supportsWorkFiles = ["work", "code"].includes(mode);
   const supportsObsidianLibrary = mode === "learn";
@@ -235,6 +326,7 @@ export function ChatComposer({
   const supportsStyle = mode === "chat" || mode === "learn";
   const supportsStickers = mode !== "code";
   const welcomeImageUrl = WELCOME_IMAGE_BY_MODE[mode] ?? chatWelcomeUrl;
+  const welcomeGreeting = t(getWelcomeGreetingKey(welcomeGreetingDate), { name: preferredAddress });
   const requiresWorkspace = supportsWorkFiles;
   const placeholder = mode === "chat"
     ? t("composer.placeholderChat")
@@ -267,6 +359,11 @@ export function ChatComposer({
     };
   }, []);
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setWelcomeGreetingDate(new Date()), getNextWelcomeGreetingDelayMs(welcomeGreetingDate));
+    return () => window.clearTimeout(timeout);
+  }, [welcomeGreetingDate]);
+
   const removeSelectedSticker = (id: string, targetIndex: number) => {
     let index = -1;
     const nextValue = value.replace(/\[sticker:([^\]]+)\]/gi, (marker, rawId: string) => {
@@ -277,8 +374,18 @@ export function ChatComposer({
     onChange(nextValue.replace(/ {2,}/g, " ").trim());
   };
 
-  const hasComposerHeader = attachments.length > 0 || selectedStickers.length > 0 || pendingQueue.length > 0;
-  const shiftPressedRef = useRef(false);
+  const hasComposerHeader = attachments.length > 0 || selectedStickers.length > 0;
+
+  // Sender 的 onKeyDown 声明在 Element 层级；函数体只用基类属性，参数随组件声明放宽
+  const handleSenderKeyDown = (event: KeyboardEvent<Element>) => {
+    if (!modelBusy || event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+    const nativeEvent = event.nativeEvent as globalThis.KeyboardEvent;
+    if (compositionActiveRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229) return;
+    event.preventDefault();
+    if (value.trim()) onQueueMessage?.(value);
+    // Sender 会先调用 onKeyDown；返回 false 可阻止它继续执行内建提交逻辑。
+    return false;
+  };
 
   // Ctrl+V 粘贴图片：仅当剪贴板无 text/plain 且含白名单图片时才拦截默认粘贴行为——
   // 浏览器剪贴板常同时带 text/plain + image/png（复制网页富文本），
@@ -297,8 +404,24 @@ export function ChatComposer({
   };
 
   return (
-    <div className={`cy-composer-stack ${docked ? "is-docked" : "is-centered"}`}>
+    <div
+      className={`cy-composer-stack ${docked ? "is-docked" : "is-centered"}`}
+      onCompositionStartCapture={() => { compositionActiveRef.current = true; }}
+      onCompositionEndCapture={() => { compositionActiveRef.current = false; }}
+    >
       {!docked && <img className="cy-composer-welcome" src={welcomeImageUrl} alt="" />}
+      {!docked && (
+        <div className="cy-composer-greeting">
+          <p className="cy-composer-greeting__text">{welcomeGreeting}</p>
+        </div>
+      )}
+      <PendingQueueDock
+        items={pendingQueue}
+        adjustmentAvailable={modelBusy}
+        onEdit={onEditQueuedMessage}
+        onAdjust={onAdjustQueuedMessage}
+        onRemove={onRemoveQueuedMessage}
+      />
       <div className="cy-composer-shell">
         <input
           ref={fileInputRef}
@@ -316,37 +439,26 @@ export function ChatComposer({
         rootClassName="cy-composer"
         value={value}
         placeholder={modelBusy ? t("composer.placeholderBusy") : placeholder}
+        // 忙态使用 Sender 自带的停止按钮；Enter 入队由 onKeyDown 在内建提交前处理。
         loading={modelBusy}
-        // `disabled` 会同时禁掉 Sender 内建的取消键；运行中的任务必须始终可停止。
         disabled={!modelBusy && requiresWorkspace && !workspaceName}
         autoSize={{ minRows: 3, maxRows: 7 }}
         onChange={onChange}
         onCancel={onCancel}
         onPaste={handlePaste}
-        onKeyDown={(event) => { shiftPressedRef.current = event.shiftKey; }}
+        onKeyDown={handleSenderKeyDown}
         onSubmit={(submitValue) => {
-          if (modelBusy) {
-            if (shiftPressedRef.current) {
-              onQueueMessage?.(submitValue);
-            } else {
-              onCancel?.();
-            }
-          } else {
-            onSubmit(submitValue);
-          }
+          if (!submitValue.trim()) return;
+          onSubmit(submitValue);
         }}
+        suffix={(actionNode, { components }) => modelBusy ? (
+          <components.LoadingButton
+            title={t("composer.stopRun")}
+            aria-label={t("composer.stopRun")}
+          />
+        ) : actionNode}
         header={hasComposerHeader ? (
           <div className="cy-composer__attachments" aria-label={t("composer.attachmentsLabel")}>
-            {pendingQueue.length > 0 && (
-              <div className="cy-composer__queue" aria-label={t("composer.queueLabel")}>
-                {pendingQueue.map((item) => (
-                  <div className="cy-composer__queue-item" key={item.id}>
-                    <span className="cy-composer__queue-text" title={item.content}>{item.content.slice(0, 40)}{item.content.length > 40 ? "..." : ""}</span>
-                    <button type="button" aria-label={t("composer.removeQueuedMessage")} onClick={() => onRemoveQueuedMessage?.(item.id)}>×</button>
-                  </div>
-                ))}
-              </div>
-            )}
             {attachments.map((attachment, index) => (
               <div className={`cy-composer__attachment ${attachment.kind === "image" && attachment.previewUrl ? "is-image" : ""}`} key={`${attachment.filePath ?? attachment.name}-${index}`}>
                 {attachment.kind === "image" && attachment.previewUrl ? (
@@ -392,18 +504,26 @@ export function ChatComposer({
         />
         <div className="cy-composer__footer">
         {supportsWorkFiles && (
-          <button type="button" className="cy-composer__footer-button" aria-label={t("composer.workspaceChoose")} onClick={onChooseWorkspace}>
-            {mode === "code" ? <CodeFolderIcon /> : <FolderIcon />}
-            <span>{workspaceName ?? (docked ? t("composer.workspaceFolder") : t("composer.workspaceEnter"))}</span>
-            <ChevronIcon />
-          </button>
+          <WorkspaceFolderButton
+            icon={<FolderOpen />}
+            label={workspaceName ?? (docked ? t("composer.workspaceFolder") : t("composer.workspaceEnter"))}
+            ariaLabel={t("composer.workspaceChoose")}
+            recentProjects={recentProjects}
+            onOpenRecentProjects={onOpenRecentProjects}
+            onSelectRecentProject={onSelectRecentProject}
+            onChooseWorkspace={onChooseWorkspace}
+          />
         )}
         {supportsObsidianLibrary && (
-          <button type="button" className="cy-composer__footer-button" aria-label={t("composer.obsidianChoose")} onClick={onChooseWorkspace}>
-            <ObsidianVaultIcon />
-            <span>{workspaceName ?? t("composer.obsidianLibrary")}</span>
-            <ChevronIcon />
-          </button>
+          <WorkspaceFolderButton
+            icon={<ObsidianVaultIcon />}
+            label={workspaceName ?? t("composer.obsidianLibrary")}
+            ariaLabel={t("composer.obsidianChoose")}
+            recentProjects={recentProjects}
+            onOpenRecentProjects={onOpenRecentProjects}
+            onSelectRecentProject={onSelectRecentProject}
+            onChooseWorkspace={onChooseWorkspace}
+          />
         )}
         {supportsPlanToggle && conversationId && (
           <PlanModeToggle conversationId={conversationId} workspaceRoot={workspaceRoot} />
@@ -413,10 +533,10 @@ export function ChatComposer({
           <PermissionControl />
         )}
         {supportsStyle && <StyleControl />}
-        {onSelectModelProfile && <ModelSelector activeProfileId={activeModelProfileId} onSelect={onSelectModelProfile} />}
+        {onSelectModelProfile && <ModelSelector activeProfileId={activeModelProfileId} sessionModel={activeSessionModel} onSelect={onSelectModelProfile} onSelectModel={onSelectSessionModel} />}
         <span className="cy-composer__footer-spacer" />
         <ContextUsageRing usage={contextUsage} sessionId={conversationId} busy={modelBusy} />
-        <ReasoningControl sessionId={conversationId} modelProfileId={activeModelProfileId} />
+        <ReasoningControl sessionId={conversationId} modelProfileId={activeModelProfileId} model={activeSessionModel} />
         </div>
       </div>
     </div>

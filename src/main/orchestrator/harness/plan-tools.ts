@@ -1,27 +1,36 @@
 /**
- * 计划模式工具组：enter_plan_mode / write_plan
+ * 计划模式工具组：enter_plan_mode / write_plan / submit_plan
  *
  * 与 ask_user 同属 harness builtin：控制流工具需要访问会话状态与事件，
  * 不走 toolRegistry 权限链（builtin 在 checkPermission 之前 dispatch）。
- * write_plan 是 PLAN_DISCUSSING 期间唯一合法写操作，只写 plan-mode 固定路径。
+ * write_plan 是 PLAN_DISCUSSING 期间唯一合法写操作，只写 plan-mode 固定路径；
+ * submit_plan 是交卷工具：写入过的计划提交用户审批，run 原地等待三档决定，
+ * 决定作为工具结果回传（批准=同 run 开工，需要修改=回讨论改方案，不批准=退出计划模式）。
  */
 
 import * as fs from "fs";
 import * as path from "path";
-import type { AskClarificationCard } from "../../../shared/ask-clarification";
+import type { AskClarificationCard, AskUserAnswer } from "../../../shared/ask-clarification";
 import type { ToolCall, ToolSpec } from "../vendors/types";
 import type { HarnessEvent, ToolObservation } from "./types";
 import { parseToolCallArgs } from "./types";
 import type { ToolContext } from "../tools/registry/tool-context";
+import { toastEvents } from "../../toast/toast-events";
 import {
+  approvePlan,
   enterPlanDiscussing,
+  exitPlanMode,
   getPlanPath,
   getPlanState,
+  hasPlanWrittenThisRun,
   markPlanWritten,
+  moveToReview,
+  supplementPlan,
 } from "../plan-mode";
 
 export const ENTER_PLAN_MODE_TOOL_ID = "enter_plan_mode";
 export const WRITE_PLAN_TOOL_ID = "write_plan";
+export const SUBMIT_PLAN_TOOL_ID = "submit_plan";
 
 export const enterPlanModeToolSpec: ToolSpec = {
   name: ENTER_PLAN_MODE_TOOL_ID,
@@ -53,8 +62,8 @@ export const writePlanToolSpec: ToolSpec = {
   description: [
     "把完整实施计划写入计划文件（仅计划模式可用）。",
     "内容为 Markdown：目标、背景、任务清单（checkbox 列表，每项可独立验证）、风险与回退。",
-    "整份计划经 content 参数传入，Runtime 落盘并提交用户审批；需要修改时再次调用整份覆盖。",
-    "写入后本轮继续正常收尾，用户会在你回复结束后看到审批卡片。",
+    "整份计划经 content 参数传入，Runtime 落盘；讨论中方案有变时再次调用整份覆盖。",
+    "写入本身不触发审批：讨论收敛后调用 submit_plan 提交用户审批。",
   ].join("\n"),
   parameters: {
     type: "object",
@@ -65,30 +74,25 @@ export const writePlanToolSpec: ToolSpec = {
   },
 };
 
+export const submitPlanToolSpec: ToolSpec = {
+  name: SUBMIT_PLAN_TOOL_ID,
+  description: [
+    "提交计划交用户审批（仅计划模式且本轮已 write_plan 时可用）。",
+    "调用后运行会原地等待用户决定，结果作为工具结果返回：",
+    "- 批准：立即开始执行计划",
+    "- 需要修改：根据用户意见修订计划，write_plan 整份覆盖后再次 submit_plan",
+    "- 不批准：退出计划模式，不再执行计划",
+    "讨论尚未收敛时不要调用本工具；先与用户把方案聊透、write_plan 落盘，再交卷。",
+  ].join("\n"),
+  parameters: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+};
+
 function conversationIdOf(ctx?: ToolContext): string {
   return ctx?.conversationId ?? "default";
-}
-
-/** 计划文件落在工作区 .cyrene/ 下时，确保项目 .gitignore 忽略它（幂等，失败静默降级）。 */
-async function ensureCyreneIgnored(workspaceRoot: string): Promise<void> {
-  try {
-    const gitignorePath = path.join(workspaceRoot, ".gitignore");
-    let current = "";
-    try {
-      current = await fs.promises.readFile(gitignorePath, "utf8");
-    } catch {
-      // 无 .gitignore（可能尚未 git init）：新建一个仅含忽略规则的文件
-    }
-    if (/(^|\n)\s*\.cyrene\/?\s*(\n|$)/.test(current)) return;
-    const addition = current.endsWith("\n") || current === "" ? "" : "\n";
-    await fs.promises.writeFile(
-      gitignorePath,
-      `${current}${addition}\n# Cyrene agent\n.cyrene/\n`,
-      "utf8",
-    );
-  } catch {
-    // 只读目录 / 权限问题：不阻塞计划写入，仅放弃忽略
-  }
 }
 
 export async function executeEnterPlanMode(
@@ -145,10 +149,6 @@ export async function executeWritePlan(
   const planPath = getPlanPath(conversationId);
   try {
     await fs.promises.mkdir(path.dirname(planPath), { recursive: true });
-    // 计划在项目工作区下时，顺带确保 .cyrene/ 不进 git（幂等）
-    if (planPath.includes(".cyrene") && ctx?.resolvedWorkspaceRoot) {
-      await ensureCyreneIgnored(ctx.resolvedWorkspaceRoot);
-    }
     await fs.promises.writeFile(planPath, content, "utf8");
   } catch (err) {
     return {
@@ -165,48 +165,177 @@ export async function executeWritePlan(
     outcome: "success",
     tool: WRITE_PLAN_TOOL_ID,
     target: planPath,
-    message: `计划已写入 ${planPath}，本轮收尾后将提交用户审批。如需修改请再次调用整份覆盖。`,
+    message: `计划已写入 ${planPath}。讨论收敛后调用 submit_plan 提交用户审批；如需继续修改方案，再次调用本工具整份覆盖。`,
   };
 }
 
-/** 计划审批卡片（第一段，两选项、无自由输入；计划全文经 cyrene.plan.review 事件下发）。 */
-export function buildPlanReviewCard(planPath: string): AskClarificationCard & { planPath: string } {
+/**
+ * 执行 submit_plan：交卷并原地等待三档审批，用户决定作为工具结果回传（同 run 继续，不新开 run）。
+ * 状态迁移全部在 runtime 内完成：moveToReview（交卷）→ approvePlan / supplementPlan / exitPlanMode（三档）。
+ * moveToReview 是 durable transition：返回时 state.json 已落盘，等待中崩溃按 P1 语义统一降级恢复。
+ * 等待中用户取消（abort）：raceWithSignal 在排他轮拦截，本函数的等待被遗弃，
+ * REVIEW 残留由用户下条消息经 preparePlanRunContext 拉回讨论态（审批被中断的事实本身）。
+ */
+export async function executeSubmitPlan(
+  _call: ToolCall,
+  ctx: ToolContext | undefined,
+  requestUserClarification: ((card: unknown) => Promise<unknown>) | undefined,
+  onEvent?: (event: HarnessEvent) => void,
+): Promise<ToolObservation> {
+  const conversationId = conversationIdOf(ctx);
+  const runId = ctx?.runId ?? "";
+  // 状态守卫：仅讨论态可交卷。REVIEW=重复交卷、EXECUTING=执行中、NORMAL=未进计划模式，一律拒绝
+  if (getPlanState(conversationId) !== "PLAN_DISCUSSING") {
+    return {
+      outcome: "failure",
+      category: "runtime_safety",
+      tool: SUBMIT_PLAN_TOOL_ID,
+      message: "submit_plan 仅在计划讨论状态可用",
+    };
+  }
+  if (!hasPlanWrittenThisRun(conversationId)) {
+    return {
+      outcome: "failure",
+      category: "runtime_safety",
+      tool: SUBMIT_PLAN_TOOL_ID,
+      message: "本轮尚未 write_plan，请先写入计划再提交审批",
+    };
+  }
+  if (!requestUserClarification) {
+    return {
+      outcome: "failure",
+      category: "runtime_safety",
+      tool: SUBMIT_PLAN_TOOL_ID,
+      message: "requestUserClarification 函数未注入，无法提交审批",
+    };
+  }
+  // 交卷：DISCUSSING → REVIEW（durable 落盘后才发起等待）
+  if (!moveToReview(conversationId)) {
+    return {
+      outcome: "failure",
+      category: "runtime_safety",
+      tool: SUBMIT_PLAN_TOOL_ID,
+      message: "计划状态异常，无法提交审批",
+    };
+  }
+
+  const planPath = getPlanPath(conversationId);
+  let planContent = "";
+  try {
+    planContent = await fs.promises.readFile(planPath, "utf8");
+  } catch (err) {
+    // 读不到计划全文不能让用户盲批：拉回讨论态，让模型重写落盘后再交卷
+    supplementPlan(conversationId);
+    toastEvents.publishPlanReviewEnded({ sessionId: conversationId, runId });
+    return {
+      outcome: "failure",
+      category: "runtime_safety",
+      tool: SUBMIT_PLAN_TOOL_ID,
+      message: `计划文件读取失败，无法提交审批：${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  // 计划全文经独立事件下发（渲染端打开计划面板）；审批卡走 ask 卡通道等待
+  onEvent?.({ type: "plan_submitted", conversationId, planPath, planContent });
+  // 注意力提醒：先于审批卡发布，ToastService 据此把同 runId 的 choice 卡归类为 plan-review，避免双弹
+  toastEvents.publishPlanReview({ sessionId: conversationId, runId });
+
+  const answer = await requestUserClarification(buildPlanApprovalCard(planPath)) as AskUserAnswer;
+  const decision = answer.answers.find((a) => a.field === "plan_decision");
+
+  // 批准：REVIEW → EXECUTING。回执自带计划全文——同 run 原地开工，run 上下文里没有
+  // [PLAN_CONTEXT] 注入块，执行许可必须由工具结果自带给模型
+  if (decision?.selectedValues?.includes("approve") && approvePlan(conversationId)) {
+    toastEvents.publishPlanApproved({ sessionId: conversationId, runId });
+    return {
+      outcome: "success",
+      tool: SUBMIT_PLAN_TOOL_ID,
+      message: [
+        "用户已批准该计划，现在开始执行。",
+        "请严格按计划清单顺序执行，用 update_todo 维护任务进度。",
+        "以下是批准的计划全文：",
+        "",
+        planContent.trim(),
+      ].join("\n"),
+    };
+  }
+
+  // 需要修改：REVIEW → DISCUSSING。意见经 option_with_text 随档位同卡回传，不再弹第二段纯文本卡
+  if (decision?.selectedValues?.includes("revise")) {
+    supplementPlan(conversationId);
+    const reviseText = decision.customText?.trim();
+    // 审批卡结算即计划流终点（无论是否带意见），清理注意力提醒（幂等）
+    toastEvents.publishPlanReviewEnded({ sessionId: conversationId, runId });
+    if (reviseText) {
+      return {
+        outcome: "success",
+        tool: SUBMIT_PLAN_TOOL_ID,
+        message: [
+          "用户要求先修改计划，再重新提交审批。修改意见如下：",
+          "",
+          reviseText,
+          "",
+          "请根据意见修订计划，调用 write_plan 整份覆盖后，再调用 submit_plan 重新提交。",
+        ].join("\n"),
+      };
+    }
+    // 意见缺失（协议层已拦空文本，防御兜底）：回讨论态等用户消息，模型引导用户说清要改什么
+    return {
+      outcome: "success",
+      tool: SUBMIT_PLAN_TOOL_ID,
+      message: "用户选择了需要修改，但未填写具体意见，已回到计划讨论状态。请与用户确认要修改的内容。",
+    };
+  }
+
+  // 不批准：退出计划模式。计划文件保留（项目资产），回执明确禁止执行
+  if (decision?.selectedValues?.includes("reject")) {
+    exitPlanMode(conversationId);
+    toastEvents.publishPlanReviewEnded({ sessionId: conversationId, runId });
+    return {
+      outcome: "success",
+      tool: SUBMIT_PLAN_TOOL_ID,
+      message: "用户否决了该计划，已退出计划模式。不要执行计划中的任何步骤。请询问用户接下来想如何处理。",
+    };
+  }
+
+  // 超时/空答案：拉回讨论态等用户回来。绝不默认批准，也不默认否决
+  supplementPlan(conversationId);
+  toastEvents.publishPlanReviewEnded({ sessionId: conversationId, runId });
   return {
-    mode: "semantic_clarification",
-    intro: "计划已生成，请审阅右侧计划内容后决定",
+    outcome: "success",
+    tool: SUBMIT_PLAN_TOOL_ID,
+    message: "等待审批超时，已回到计划讨论状态。计划文件已保留，用户下次回复后可继续讨论；讨论收敛后可重新提交审批。",
+  };
+}
+
+/**
+ * 计划审批卡（三档：批准 / 需要修改 / 不批准）。
+ * mode=plan_approval：渲染端专属三按钮面板按此识别（批准/不批准直接提交，
+ * 需要修改原地展开输入框附意见）；选项顺序是渲染端的位置契约
+ * （第 1 个=批准、第 2 个=需要修改、第 3 个=不批准），不可调整。
+ * allowCustom=true 使"需要修改"档能把意见原文随档位同卡回传（option_with_text），不再弹第二段纯文本卡。
+ * 等待档位 plan_approval：审批要通读计划，超时用 planApprovalTimeout 而非快问快答配置。
+ */
+export function buildPlanApprovalCard(planPath: string): AskClarificationCard {
+  return {
+    mode: "plan_approval",
+    intro: "计划已提交，请审阅计划内容后决定",
     questions: [
       {
         field: "plan_decision",
         question: "是否批准此计划？",
         type: "single_select",
         options: [
-          { label: "批准计划，开始执行", value: "approve" },
-          { label: "我要修改 / 补充", value: "supplement" },
+          { label: "批准", value: "approve" },
+          { label: "需要修改", value: "revise" },
+          { label: "不批准", value: "reject" },
         ],
-        allowCustom: false,
-        freeTextPlaceholder: "",
-      },
-    ],
-    deferredFields: [],
-    planPath,
-  };
-}
-
-/** 计划补充卡片（第二段，纯文本输入，复用同一 ask 卡片样式）。 */
-export function buildPlanSupplementCard(): AskClarificationCard {
-  return {
-    mode: "semantic_clarification",
-    intro: "请在下方描述你想补充或修改的内容，我会更新计划后再次提交",
-    questions: [
-      {
-        field: "plan_supplement",
-        question: "请描述你的补充：",
-        type: "text",
-        options: [],
         allowCustom: true,
-        freeTextPlaceholder: "例如：第三步改成先写测试；补充一个回滚方案…",
+        freeTextPlaceholder: "请描述你想修改的内容…",
       },
     ],
     deferredFields: [],
+    waitTimeoutTone: "plan_approval",
+    planPath,
   };
 }

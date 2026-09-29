@@ -1,6 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "../../../../../shared/chat-types";
-import { getInitialMode, LAST_MODE_STORAGE_KEY, normalizeWeatherData, stageForStep, toUiMessages } from "./chat-page-normalizers";
+import { getInitialMode, LAST_MODE_STORAGE_KEY, normalizeWeatherData, parseSessionRunActiveError, stageForStep, toUiMessages } from "./chat-page-normalizers";
+
+describe("parseSessionRunActiveError", () => {
+  it("解析干净守卫错误串", () => {
+    expect(parseSessionRunActiveError("SESSION_RUN_ACTIVE:run-old")).toBe("run-old");
+  });
+
+  it("解析 Electron 包装后的 invoke 拒绝消息", () => {
+    expect(parseSessionRunActiveError(
+      "Error invoking remote method 'agui:run': Error: SESSION_RUN_ACTIVE:run-1790073753338-53omeg",
+    )).toBe("run-1790073753338-53omeg");
+  });
+
+  it("普通错误消息不误触发", () => {
+    expect(parseSessionRunActiveError("Error: MODEL_FAILED")).toBeUndefined();
+    expect(parseSessionRunActiveError("")).toBeUndefined();
+  });
+});
 
 describe("chat page normalizers", () => {
   it("preserves channel source metadata while hydrating a bound conversation", () => {
@@ -46,6 +63,38 @@ describe("chat page normalizers", () => {
     };
 
     expect(toUiMessages(session)[0].modelContext).toBe("[QQ群发送者：伙伴]\n大家好");
+  });
+
+  it("hydrates reload messages with the same run snapshot as the live reducer", () => {
+    const runSnapshot = { runId: "scheduler-run-1", status: "terminal" as const, terminalStatus: "success" as const, updatedAt: 42 };
+    const toolExecutions = [{ id: "tool-1", name: "disk_usage", status: "success" as const, result: "C: 80%" }];
+    const session: ChatSession = {
+      id: "conversation-1",
+      title: "调度会话",
+      identityId: null,
+      mode: "work",
+      schemaVersion: 1,
+      createdAt: 1,
+      updatedAt: 2,
+      messages: [{
+        id: "scheduler-reply-scheduler-run-1",
+        role: "model",
+        content: "disk_usage：完成",
+        at: 2,
+        toolExecutions,
+        runSnapshot,
+      }],
+    };
+    const [reloaded] = toUiMessages(session);
+    const live = {
+      id: "scheduler-reply-scheduler-run-1",
+      content: "disk_usage：完成",
+      toolExecutions,
+      runSnapshot,
+    };
+
+    expect({ id: reloaded.id, content: reloaded.content, toolExecutions: reloaded.toolExecutions, runSnapshot: reloaded.runSnapshot })
+      .toEqual(live);
   });
 
   it("drops invalid persisted channel metadata during hydration", () => {

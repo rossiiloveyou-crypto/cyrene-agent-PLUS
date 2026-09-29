@@ -3,12 +3,13 @@ import * as os from "os"
 import * as path from "path"
 import { describe, expect, it, vi } from "vitest"
 import {
-  buildAgentRunOptions,
+  buildAgentRunOptions as buildAgentRunOptionsProduction,
   buildChannelSystem,
   onAgentRunFinished,
   type BuildOptionsDeps,
   type OnRunFinishedDeps,
 } from "./build-options"
+import type { MaterializedTranscript } from "./conversation-transcript-context"
 import type { SocialAtom } from "../social-context/types"
 import type { ConversationMode } from "../../shared/chat-types"
 
@@ -33,9 +34,7 @@ function createBuildDeps(): BuildOptionsDeps {
       getBody: () => null,
     },
     resolveSlashActivation: () => "",
-    buildToneInjection: async () => "",
-    sceneEmbeddingIndex: null,
-    getSceneEmbeddingProvider: () => null,
+    buildToneInjection: () => "",
     buildAlwaysOnContext: async () => "ALWAYS",
     buildRelationshipContext: async () => "RELATIONSHIP",
     buildSystemPrompt: () => "BASE_SYSTEM",
@@ -54,6 +53,26 @@ function createBuildDeps(): BuildOptionsDeps {
     normalizeChatMessages: (raw) => raw as never,
     chatRequestTimeoutMs: 1000,
   }
+}
+
+// 测试夹具把历史消息物化为 canonical journal 的 modelContext；生产入口不再接受旁路 messages。
+async function buildAgentRunOptions(
+  input: Record<string, unknown>,
+  deps: BuildOptionsDeps,
+) {
+  const rawMessages = input.messages
+  const { messages: _legacyMessages, ...canonicalInput } = input
+  const modelContext = !canonicalInput.currentUser && Array.isArray(rawMessages)
+    ? {
+      messages: rawMessages,
+      uncertainEffects: [],
+      throughSeq: 0,
+    } as MaterializedTranscript
+    : undefined
+  return buildAgentRunOptionsProduction({
+    ...canonicalInput,
+    ...(modelContext ? { modelContext } : {}),
+  } as never, deps)
 }
 
 describe("build-options", () => {
@@ -400,7 +419,8 @@ describe("build-options", () => {
       conversationId: "chat-a",
       query: "message-13",
     })
-    expect(result.options.messages).toHaveLength(12)
+    // CTA Phase 1：社交开关只影响检索块，不再截断模型历史
+    expect(result.options.messages).toHaveLength(14)
     expect(result.options.soulRuntimeContext).toContain("用户喜欢海边")
     expect(result.options.socialContext).toMatchObject({
       enabled: true,
@@ -648,6 +668,7 @@ describe("build-options", () => {
     const deps = createBuildDeps()
     deps.loadModelSettings = () => ({
       provider: "test", baseUrl: "https://example.test", model: "text-only", apiKey: "k", multimodal: false,
+      vision: { baseUrl: "https://vlm.test/v1", apiKey: "k", model: "vlm-model" },
     })
     deps.captionImageForFallback = async () => ({ ok: true, caption: "截图显示一个红色错误提示" })
 
@@ -661,6 +682,24 @@ describe("build-options", () => {
       "这张图报什么错？\n\n【图片视觉信息】\n以下内容是视觉模型对用户本轮图片的观察结果，请将其视为你已经看到的图片内容；如果某张图分析失败，请不要编造。\n- error.png：截图显示一个红色错误提示",
     )
     expect(result.options.imageCaptionFallback).toBeUndefined()
+  })
+
+  it("纯文本主模型且未配视觉模型时注入人话拒绝提示（不再静默丢图）", async () => {
+    const deps = createBuildDeps()
+    deps.loadModelSettings = () => ({
+      provider: "test", baseUrl: "https://example.test", model: "text-only", apiKey: "k", multimodal: false,
+    })
+
+    const result = await buildAgentRunOptions({
+      messages: [{ role: "user", content: "这张图报什么错？" }],
+      imageAttachments: [{ name: "error.png", filePath: "C:\\tmp\\error.png", mime: "image/png" }],
+    }, deps)
+
+    const latestUser = result.options.messages.at(-1)
+    expect(latestUser?.content).toContain("【图片发送失败】")
+    expect(latestUser?.content).toContain("error.png")
+    expect(latestUser?.content).toContain("视觉模型")
+    expect(latestUser?.content).not.toContain("image_url")
   })
 
   it("builds caption fallback messages for direct image send failures", async () => {
@@ -965,6 +1004,42 @@ describe("build-options", () => {
       now: 100,
     })
   })
+
+  it("#26 sessionModelSettings 直达请求装配：会话模型不被 loadModelSettings 重解析覆盖", async () => {
+    const deps = createBuildDeps()
+    deps.loadModelSettings = vi.fn(() => ({
+      provider: "test", baseUrl: "https://example.test", model: "profile-default", apiKey: "k",
+    }))
+
+    const result = await buildAgentRunOptions({
+      sessionId: "session-override",
+      messages: [{ role: "user", content: "你好" }],
+      // 即便同时携带 modelProfileId，也不允许 downstream 据此把会话模型覆盖回档案默认
+      modelProfileId: "p-a",
+      sessionModelSettings: {
+        provider: "test", baseUrl: "https://example.test", model: "glm-session", apiKey: "k",
+      },
+    }, deps)
+
+    expect(result.options.settings.model).toBe("glm-session")
+    expect(deps.loadModelSettings).not.toHaveBeenCalled()
+  })
+
+  it("不传 sessionModelSettings 时按 modelProfileId 解析（非桌面入口回退路径不变）", async () => {
+    const deps = createBuildDeps()
+    deps.loadModelSettings = vi.fn((modelProfileId?: string) => ({
+      provider: "test", baseUrl: "https://example.test", model: `by-profile:${modelProfileId}`, apiKey: "k",
+    }))
+
+    const result = await buildAgentRunOptions({
+      sessionId: "channel-run",
+      messages: [{ role: "user", content: "你好" }],
+      modelProfileId: "p-b",
+    }, deps)
+
+    expect(deps.loadModelSettings).toHaveBeenCalledWith("p-b")
+    expect(result.options.settings.model).toBe("by-profile:p-b")
+  })
 })
 
 describe("moments context 注入（Phase 3 Chat Awareness）", () => {
@@ -1056,5 +1131,178 @@ describe("moments context 注入（Phase 3 Chat Awareness）", () => {
 
     expect(result.options.soulRuntimeContext).not.toContain("【近期朋友圈动态】")
     expect(result.options.soulRuntimeContext).not.toMatch(/(^|\n)---(\n|$)\s*(^|\n)---/)
+  })
+})
+
+describe("权威轨迹上下文源（CTA Phase 1）", () => {
+  it("desktop transcript context 启用时忽略渲染端消息", async () => {
+    const deps = createBuildDeps()
+    deps.buildModelContext = vi.fn(async () => ({
+      messages: [{ role: "user" as const, content: "authoritative" }],
+      uncertainEffects: [],
+      throughSeq: 3,
+    }))
+
+    const built = await buildAgentRunOptions({
+      sessionId: "c1",
+      currentUser: { turnId: "turn-1", text: "next", visibleContent: "next" },
+      messages: [{ role: "user" as const, content: "stale renderer" }],
+    } as never, deps)
+
+    expect(deps.buildModelContext).toHaveBeenCalledWith("c1", expect.any(Number))
+    expect(built.options.cleanMessages).toContainEqual(expect.objectContaining({ content: "authoritative" }))
+    expect(JSON.stringify(built.options.messages)).not.toContain("stale renderer")
+    expect(built.latestUserText).toBe("authoritative")
+  })
+
+  it("渠道与内部调用方不触发轨迹上下文，继续使用传入消息", async () => {
+    const deps = createBuildDeps()
+    deps.buildModelContext = vi.fn(async () => ({
+      messages: [],
+      uncertainEffects: [],
+      throughSeq: 0,
+    }))
+
+    const built = await buildAgentRunOptions({
+      sessionId: "channel-binding",
+      messages: [{ role: "user" as const, content: "channel text" }],
+    } as never, deps)
+
+    expect(deps.buildModelContext).not.toHaveBeenCalled()
+    expect(built.latestUserText).toBe("channel text")
+    expect(built.options.cleanMessages).toContainEqual(expect.objectContaining({ content: "channel text" }))
+  })
+
+  it("缺失 buildModelContext 注入时轨迹上下文请求 fail-closed", async () => {
+    const deps = createBuildDeps()
+    await expect(buildAgentRunOptions({
+      sessionId: "missing-dep",
+      currentUser: { turnId: "turn-1", text: "hi", visibleContent: "hi" },
+      messages: [{ role: "user" as const, content: "hi" }],
+    } as never, deps)).rejects.toThrow("buildModelContext")
+  })
+
+  it("完整活动视图超预算时先提交会话级 compaction，再重新物化上下文", async () => {
+    const deps = createBuildDeps()
+    deps.loadModelSettings = () => ({
+      provider: "test", baseUrl: "https://example.test", model: "m", apiKey: "k",
+      contextWindowTokens: 10_000,
+    })
+    const full = [{ role: "user" as const, content: "历史".repeat(2_000) }]
+    const compacted = [{ role: "system" as const, content: "<cyrene_compaction_checkpoint>\n摘要\n</cyrene_compaction_checkpoint>" }]
+    let reads = 0
+    deps.buildModelContext = vi.fn(async () => ({
+      messages: reads++ === 0 ? full : compacted,
+      uncertainEffects: [], throughSeq: 8,
+    }))
+    deps.compactTranscript = vi.fn(async () => ({ checkpointEntryId: "cp-1" }))
+
+    const built = await buildAgentRunOptions({
+      sessionId: "auto-compact", currentUser: { turnId: "turn-1", text: "继续", visibleContent: "继续" },
+    } as never, deps)
+
+    expect(deps.compactTranscript).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: "auto-compact", trigger: "automatic", retainTokens: expect.any(Number),
+    }))
+    expect(deps.buildModelContext).toHaveBeenCalledTimes(2)
+    expect(built.options.cleanMessages).toContainEqual(expect.objectContaining({ content: expect.stringContaining("<cyrene_compaction_checkpoint>") }))
+  })
+
+  it("传入 modelContext 超预算时同样执行自动压缩并重读 journal", async () => {
+    const deps = createBuildDeps()
+    deps.loadModelSettings = () => ({
+      provider: "test", baseUrl: "https://example.test", model: "m", apiKey: "k",
+      contextWindowTokens: 10_000,
+    })
+    const compacted = [{ role: "system" as const, content: "<cyrene_compaction_checkpoint>\n摘要\n</cyrene_compaction_checkpoint>" }]
+    deps.buildModelContext = vi.fn(async () => ({
+      messages: compacted, uncertainEffects: [], throughSeq: 8,
+    }))
+    deps.compactTranscript = vi.fn(async () => ({ checkpointEntryId: "cp-1" }))
+
+    const built = await buildAgentRunOptions({
+      sessionId: "prebuilt-compact",
+      currentUser: { turnId: "turn-1", text: "继续", visibleContent: "继续" },
+      // 模拟桌面/渠道入口预传入的超长上下文
+      modelContext: {
+        messages: [{ role: "user" as const, content: "历史".repeat(2_000) }],
+        uncertainEffects: [], throughSeq: 8,
+      },
+    } as never, deps)
+
+    expect(deps.compactTranscript).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: "prebuilt-compact", trigger: "automatic", retainTokens: expect.any(Number),
+    }))
+    // 压缩后只发生一次重读（初始上下文来自传入值）
+    expect(deps.buildModelContext).toHaveBeenCalledTimes(1)
+    expect(built.options.cleanMessages).toContainEqual(expect.objectContaining({ content: expect.stringContaining("<cyrene_compaction_checkpoint>") }))
+  })
+
+  it("自动 compaction 摘要失败时对外只报告 TRANSCRIPT_COMPACTION_REQUIRED", async () => {
+    const deps = createBuildDeps()
+    deps.loadModelSettings = () => ({
+      provider: "test", baseUrl: "https://example.test", model: "m", apiKey: "k", contextWindowTokens: 100,
+    })
+    deps.buildModelContext = vi.fn(async () => ({
+      messages: [{ role: "user" as const, content: "历史".repeat(300) }], uncertainEffects: [], throughSeq: 8,
+    }))
+    deps.compactTranscript = vi.fn(async () => { throw new Error("provider down") })
+
+    await expect(buildAgentRunOptions({
+      sessionId: "auto-compact-failure",
+      currentUser: { turnId: "turn-1", text: "继续", visibleContent: "继续" },
+    } as never, deps)).rejects.toThrow("TRANSCRIPT_COMPACTION_REQUIRED")
+  })
+
+  it("崩溃孤儿不确定效果并入 recoveryContext", async () => {
+    const deps = createBuildDeps()
+    deps.buildModelContext = vi.fn(async () => ({
+      messages: [{ role: "user" as const, content: "authoritative" }],
+      uncertainEffects: [{
+        id: "run-1:call-1",
+        toolCallId: "call-1",
+        fingerprint: "send_email:abc",
+        toolName: "send_email",
+        message: "该外部副作用在应用中断时尚未确认结果",
+      }],
+      throughSeq: 5,
+    }))
+
+    const built = await buildAgentRunOptions({
+      sessionId: "uncertain",
+      currentUser: { turnId: "turn-1", text: "继续", visibleContent: "继续" },
+      messages: [{ role: "user" as const, content: "继续" }],
+    } as never, deps)
+
+    expect(built.options.recoveryContext).toContain("send_email")
+    expect(built.options.recoveryContext).toContain("不得自动重放")
+  })
+
+  it("开启社交上下文不再截断模型历史（slice(-12) 已废除）", async () => {
+    const deps = createBuildDeps()
+    deps.buildChatSocialContext = vi.fn(async () => ({ contextBlock: "SOCIAL", retrievedAtoms: [] }))
+    const messages = Array.from({ length: 16 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      content: `消息${index}`,
+    }))
+
+    const built = await buildAgentRunOptions({
+      sessionId: "social-no-truncate",
+      executionMode: "chat",
+      userTurnId: "turn-8",
+      assistantTurnId: "turn-7",
+      messages,
+    } as never, {
+      ...deps,
+      loadGeneralSettings: () => ({
+        ...deps.loadGeneralSettings(),
+        chatSocialContextEnabled: true,
+      }),
+    })
+
+    // 16 条消息全部进入模型上下文，社交开关只影响检索块不再影响历史
+    expect(built.options.cleanMessages).toHaveLength(16)
+    expect(JSON.stringify(built.options.messages)).toContain("消息0")
+    expect(JSON.stringify(built.options.messages)).toContain("消息15")
   })
 })

@@ -1,17 +1,16 @@
-import { randomUUID } from "node:crypto";
-import type { BrowserWindow } from "electron";
+import { app, type BrowserWindow } from "electron";
 import type { IpcScope } from "../application/ipc-scope";
 import type { PluginPromptMode, PluginTurnStatus } from "../../plugins/api";
 import { loadGeneralSettings } from "../settings/settings-facade";
-import { loadModelSettings, loadVisionConfig, resolveModelSettingsProfile } from "../settings/model-settings";
+import { loadModelSettings, resolveModelSettingsProfile } from "../settings/model-settings";
 import type { LifecyclePublisher } from "../plugin-host/lifecycle-publisher";
 import { CyreneAgent } from "../orchestrator/cyrene-agent";
 import { toolRegistry } from "../orchestrator/tools/registry/tool-registry";
-import { decideImageSendStrategy } from "../chat/image-send-strategy";
-import {
-  IMAGE_CAPTION_PROMPT,
-  validateCaptionImagePath,
-} from "../chat/image-caption";
+import { captionImageSafe, IMAGE_CAPTION_PROMPT } from "../chat/image-caption";
+import { resolveCaptionVisionConfig, resolveImageRoute } from "../orchestrator/image-router";
+import { ConversationJournalService } from "../orchestrator/conversation-journal-service";
+import { getConversationTranscriptStore } from "../orchestrator/conversation-transcript-store";
+import { getHarnessRunStore } from "../orchestrator/harness/run-store";
 import { indexConversationTurn } from "../orchestrator/tools/history-tools";
 import type { AgentRuntime } from "../orchestrator/agent-runtime";
 import type { TtsSynthesisService } from "../services/tts/tts-synthesis-service";
@@ -23,7 +22,7 @@ import { recordTurnFailure, recordTurnSuccess } from "./audit-events";
 import { runWithConversationScope } from "../conversation-usage-store";
 import { buildPersonKey } from "../memory/person-attribution";
 import { getChannelConversationBindingStore } from "./conversation-binding-store";
-import { ChannelDispatcher, type DispatcherDeps } from "./dispatcher";
+import { ChannelDispatcher, type ChannelAgentInput, type DispatcherDeps } from "./dispatcher";
 import {
   createChannelContext,
   formatChannelUserText,
@@ -66,6 +65,8 @@ export interface ChannelsSubsystemDeps {
   ipc?: IpcScope;
   /** 生命周期事件发布器：渠道轮次事件由此发布。 */
   publishLifecycle?: LifecyclePublisher;
+  /** 可选注入共享 CTA journal；缺省复用主进程 transcript store 单例。 */
+  conversationJournal?: ConversationJournalService;
 }
 
 /** 轮次终态 → 控制台里可读的失败原因。 */
@@ -100,6 +101,14 @@ export function createChannelsSubsystem(
     return loadRecentHistory(sessionId, limit, { conversationOnly: true });
   };
 
+  const conversationJournal = deps.conversationJournal
+    // runReader 接入 harness 运行存储：渠道会话同样需要把崩溃孤儿工具
+    // 按运行状态归类为 unknown，避免被误判为 not_executed。
+    ?? new ConversationJournalService({
+      store: getConversationTranscriptStore(app.getPath("userData")),
+      runReader: getHarnessRunStore(app.getPath("userData")),
+    });
+
   const observeExternalChat: DispatcherDeps["observeExternalChat"] = (sessionId, msg) => {
     getChannelConversationBindingStore().observe({
       sessionId,
@@ -113,10 +122,14 @@ export function createChannelsSubsystem(
 
   const buildAndRunAgent: DispatcherDeps["buildAndRunAgent"] = async (
     msg,
-    sessionId,
-    priorMessages,
-    userMessageId,
+    input,
   ) => {
+    const channelInput = input as ChannelAgentInput;
+    // 🔴 D1：桌面对话绑定已删除 → 渠道轮次一律归属渠道会话自身。
+    //    官方此处是 channelInput.target.conversationId；D1 之后两者恒等。
+    const channelConversationId = channelInput.target.conversationId;
+    // P2 归属起点：dispatcher 把入站消息落盘后的 entry id 挂在这里。
+    const userMessageId = channelInput.userMessageId;
     const channelResult: { text: string; sticker: string | null } = { text: "", sticker: null };
 
     // P2 归属：说话人的稳定标识。
@@ -130,56 +143,32 @@ export function createChannelsSubsystem(
     const exposedTools = policy.exposeTools ? allTools : [];
     console.log(
       "[Channels] bot run:",
-      `msg.channel=${msg.channel} chatType=${msg.chatType} sandbox=${sandbox} tools=${exposedTools.length}/${allTools.length} priorMsgs=${priorMessages?.length ?? 0}`,
+      `msg.channel=${msg.channel} sandbox=${sandbox} tools=${exposedTools.length}/${allTools.length}`,
     );
 
-    // 群聊历史在 history-log 里已被剥掉 `[群聊发送者：…]` 前缀（结构化到 speakerName），
-    // 这里必须把说话人补回正文，否则多人群聊里"谁说的"会丢失，全部看起来像请求方说的。
-    const historyMessages = (priorMessages ?? [])
-      .filter((m) => typeof m.content === "string" && m.content.trim().length > 0)
-      .map((m) => {
-        const speaker = m.speakerName || m.speakerId;
-        return {
-          role: m.role as "user" | "assistant" | "system",
-          content: speaker ? `[${speaker}]: ${m.content}` : m.content,
-        };
-      });
-
-    // 图片发送策略也基于解析后的配置（默认档案）——顶层镜像可能是全空的空壳
+    // 图片路由统一收口在 image-router（基于解析后的默认档案——顶层镜像可能是空壳）
     const channelModelSettings = resolveModelSettingsProfile(loadModelSettings());
-    const imageSendStrategy = decideImageSendStrategy({
-      multimodal: channelModelSettings.multimodal,
-      vision: loadVisionConfig(),
-    });
+    const channelImageRoute = resolveImageRoute("channel", channelModelSettings);
     const attachmentInputs = await buildChannelAttachmentInputs(msg, {
-      imageMode: imageSendStrategy.mode,
+      // reject 时走 caption 分支：每张图会拿到路由的人话错误并诚实告知用户
+      imageMode: channelImageRoute.mode === "direct" ? "direct" : "caption",
       captionImage: async (filePath: string) => {
-        const validated = validateCaptionImagePath(filePath);
-        if (!validated.ok) return { ok: false, error: validated.error };
-        const visionCfg = loadVisionConfig();
-        if (!visionCfg) return { ok: false, error: "未配置视觉模型，无法分析图片" };
-        try {
-          const { captionImage } = await import("../orchestrator/vision-captioner");
-          const caption = await captionImage(
-            { base64: validated.buffer.toString("base64"), mime: validated.mime },
-            IMAGE_CAPTION_PROMPT,
-            visionCfg,
-          );
-          if (caption.startsWith("[错误")) return { ok: false, error: caption };
-          return { ok: true, caption };
-        } catch (err: any) {
-          return { ok: false, error: err?.message || String(err) };
-        }
+        const settings = resolveModelSettingsProfile(loadModelSettings());
+        const vision = resolveCaptionVisionConfig(settings);
+        if (!vision.ok) return { ok: false, error: vision.error };
+        return captionImageSafe(filePath, IMAGE_CAPTION_PROMPT, vision.config);
       },
     });
     const agentUserText = formatChannelUserText(msg);
     const { options } = await deps.agentRuntime.buildOptions({
-      messages: [
-        ...historyMessages,
-        { role: "user", content: agentUserText },
-      ],
+      modelContext: channelInput.modelContext,
+      currentUser: {
+        turnId: channelInput.userTurnId,
+        text: agentUserText,
+        visibleContent: msg.text,
+      },
       style: "01_default.md",
-      sessionId,
+      sessionId: channelInput.target.conversationId,
       // 渠道绑定只共享文字上下文，不继承桌面对话的工作区权限。
       workspaceBindingSessionId: null,
       attachments: attachmentInputs.attachments,
@@ -188,10 +177,14 @@ export function createChannelsSubsystem(
       chatType: msg.chatType ?? "private",
       executionMode: policy.executionMode,
       ...(policy.executionMode === "chat" ? {
-        userTurnId: `${msg.channel}:${msg.senderId}:${msg.at.toISOString()}:user`,
-        assistantTurnId: `${msg.channel}:${msg.senderId}:${msg.at.toISOString()}:assistant`,
+        userTurnId: channelInput.userTurnId,
+        assistantTurnId: channelInput.assistantTurnId,
       } : {}),
     });
+    if (channelInput.transcriptSink) options.transcriptSink = channelInput.transcriptSink;
+    // 运行标识贯通：sink 写入、runStore 会话与生命周期事件使用同一 runId，
+    // 崩溃孤儿工具才能按 assistant 条目上的 runId 查回运行状态。
+    options.runId = channelInput.runId;
     // 工具白名单在「执行层」逐次判定：非白名单用户的调用会被拦截并写入
     // 「工具调用控制台」审计，所以模型仍然看得到工具目录。
     const grantedTools = policy.exposeTools
@@ -203,7 +196,7 @@ export function createChannelsSubsystem(
       chatId: msg.chatId,
       senderId: msg.senderId,
       ...(msg.senderName ? { senderName: msg.senderName } : {}),
-      sessionId,
+      sessionId: channelConversationId,
     });
     options.tools = channelTools;
     // run-preparation 优先读 capabilities.tools，这里必须一起换掉，否则守卫被绕过。
@@ -212,17 +205,17 @@ export function createChannelsSubsystem(
     }
     enforceChannelAgentPolicy(options, policy);
 
-    const threadId = `thread-${sessionId}-${Date.now()}`;
+    const threadId = `thread-${channelInput.target.conversationId}-${Date.now()}`;
     const agent = new CyreneAgent({ threadId, description: `bot:${msg.channel}:${msg.senderId}` });
     // 轮次事件只带渠道会话标识，不提供桌面消息边界；绑定消息由 dispatcher 镜像写入。
     const mode: PluginPromptMode = options.conversationMode
       ?? (options.executionMode === "chat" ? "chat" : "work");
-    const runId = randomUUID();
+    const runId = channelInput.runId;
     const runStartedAt = Date.now();
     deps.publishLifecycle?.publishTurnStarted({
       source: "channel",
       channel: msg.channel,
-      conversationId: sessionId,
+      conversationId: channelInput.target.conversationId,
       runId,
       mode,
     });
@@ -234,13 +227,13 @@ export function createChannelsSubsystem(
       chatId: msg.chatId,
       senderId: msg.senderId,
       ...(msg.senderName ? { senderName: msg.senderName } : {}),
-      sessionId,
+      sessionId: channelConversationId,
       ...(msg.trigger ? { trigger: msg.trigger } : {}),
     };
     try {
       const reply = await new Promise<string>((resolve, reject) => {
-        // 渠道轮次同样归属到自己的渠道会话（绑定桌面会话时用量徽章也能看到这部分消耗）
-        runWithConversationScope(sessionId, () => agent.runWithEvents(options).subscribe({
+        // 渠道轮次同样归属到自己的渠道会话（用量徽章也能看到这部分消耗）
+        runWithConversationScope(channelConversationId, () => agent.runWithEvents(options).subscribe({
           complete: () => {
             resolve(agent.lastResult?.reply ?? "");
           },
@@ -256,7 +249,7 @@ export function createChannelsSubsystem(
         const finished = await deps.agentRuntime.onRunFinished(agent.lastResult, agentUserText, {
           source: "channel",
           mode,
-          conversationId: sessionId,
+          conversationId: channelInput.target.conversationId,
           channel: msg.channel,
           // P2 归属：沿 build-options → memory-scheduler 透传到 L2 落库。
           // ⚠️ 这里在 runWithConversationScope 之外，ALS 已经退出，必须显式透传。
@@ -289,7 +282,7 @@ export function createChannelsSubsystem(
       } catch (auditError) {
         console.warn("[Channels] 写轮次审计失败:", auditError);
       }
-      void indexConversationTurn(sessionId, agentUserText, reply);
+      void indexConversationTurn(channelInput.target.conversationId, agentUserText, reply);
       return channelResult;
     } catch (error) {
       // 智能体调用异常：同样记一条失败轮次，便于在控制台看到"哪句话把昔涟弄崩了"
@@ -310,7 +303,7 @@ export function createChannelsSubsystem(
       deps.publishLifecycle?.publishTurnFinished({
         source: "channel",
         channel: msg.channel,
-        conversationId: sessionId,
+        conversationId: channelInput.target.conversationId,
         runId,
         mode,
         status: lifecycleStatus,
@@ -349,6 +342,7 @@ export function createChannelsSubsystem(
     limiter,
     context,
     composer,
+    journal: conversationJournal,
     delivery: createChannelDeliveryService(channelManager),
     buildAndRunAgent,
     loadSettings: loadChannelsSettings,

@@ -7,6 +7,17 @@ import { useComposerAttachments, type ComposerAttachmentsApi } from "./useCompos
 import type { ComposerAttachment } from "../components/ChatComposer";
 import { t } from "../../../i18n";
 
+// 统一反馈入口的稳定 spy：断言附件链路的提示/失败走语义化反馈而非浏览器默认弹窗
+const feedbackSpies = vi.hoisted(() => ({
+  notice: vi.fn(),
+  alert: vi.fn(() => Promise.resolve()),
+  confirm: vi.fn(() => Promise.resolve(true)),
+}));
+
+vi.mock("../../../components/feedback/FeedbackProvider", () => ({
+  useFeedback: () => feedbackSpies,
+}));
+
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let latest: ComposerAttachmentsApi;
@@ -62,7 +73,9 @@ beforeEach(() => {
   chatMock.getImageSendStrategy.mockReset();
   chatMock.captionImage.mockReset();
   vi.stubGlobal("chat", chatMock);
-  vi.stubGlobal("alert", vi.fn());
+  feedbackSpies.notice.mockClear();
+  feedbackSpies.alert.mockClear().mockReturnValue(Promise.resolve());
+  feedbackSpies.confirm.mockClear().mockReturnValue(Promise.resolve(true));
   let blobSeq = 0;
   (URL as unknown as { createObjectURL: (o: unknown) => string }).createObjectURL = vi.fn(() => `blob:${++blobSeq}`);
   (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = vi.fn();
@@ -90,8 +103,25 @@ describe("useComposerAttachments", () => {
     await act(async () => {
       await latest.handlePastedImage(big);
     });
-    expect(window.alert).toHaveBeenCalledWith(t("chatPage.pastedImageTooLargeSkipped"));
+    // 超限走非阻塞警告轻提示，而不是浏览器默认弹窗
+    expect(feedbackSpies.notice).toHaveBeenCalledWith(expect.objectContaining({
+      tone: "warning",
+      message: t("chatPage.pastedImageTooLargeSkipped"),
+    }));
     expect(chatMock.saveScreenshotTemp).not.toHaveBeenCalled();
+    expect(latest.attachments).toHaveLength(0);
+    expect(latest.attachmentBusy).toBe(false);
+  });
+
+  it("chooseFiles 摄入失败走错误轻提示且附件不追加", async () => {
+    chatMock.ingestDroppedFiles.mockRejectedValue(new Error("boom"));
+    await act(async () => {
+      await latest.chooseFiles([new File(["x"], "a.png", { type: "image/png" })]);
+    });
+    expect(feedbackSpies.notice).toHaveBeenCalledWith(expect.objectContaining({
+      tone: "error",
+      message: expect.stringContaining("boom"),
+    }));
     expect(latest.attachments).toHaveLength(0);
     expect(latest.attachmentBusy).toBe(false);
   });
@@ -229,11 +259,11 @@ describe("useComposerAttachments", () => {
     // 按下标移除
     act(() => { latest.removeAttachment(0); });
     expect(latest.attachments).toHaveLength(0);
-    // 清空当前 scope：写入的是空数组而非删除键
+    // 清空当前 scope：写入的是空数组而非删除键（快照传入当前全部附件）
     act(() => {
       insertCallback!({ mime: "image/png", filePath: "C:/tmp/s3.png", previewUrl: "p3", hasAnnotations: false });
     });
-    act(() => { latest.clearScopeAttachments(); });
+    act(() => { latest.clearScopeAttachments(latest.attachments.map((attachment) => ({ ...attachment }))); });
     expect(latest.attachments).toHaveLength(0);
     // 删除整个 mode scope（键消失，与清空不同）
     act(() => {
@@ -241,6 +271,40 @@ describe("useComposerAttachments", () => {
     });
     act(() => { latest.deleteScopeAttachments("mode:chat"); });
     expect(latest.attachments).toHaveLength(1);
+  });
+
+  it("clearScopeAttachments 带快照只移除随消息发送的附件，期间新加的保留", () => {
+    // 截图插入目标切换到当前 scope（s1）后依次插入两张
+    activeScope = "s1";
+    act(() => {
+      insertCallback!({ mime: "image/png", filePath: "C:/tmp/a.png", previewUrl: "pa", hasAnnotations: false });
+      insertCallback!({ mime: "image/png", filePath: "C:/tmp/b.png", previewUrl: "pb", hasAnnotations: false });
+    });
+    const sent = latest.attachments.map((attachment) => ({ ...attachment }));
+    // 入队请求期间用户又加了一张
+    act(() => {
+      insertCallback!({ mime: "image/png", filePath: "C:/tmp/c.png", previewUrl: "pc", hasAnnotations: false });
+    });
+    expect(latest.attachments).toHaveLength(3);
+    // 只清随消息发送的 a/b：请求期间新加的 c 保留
+    act(() => { latest.clearScopeAttachments(sent); });
+    expect(latest.attachments).toHaveLength(1);
+    expect(latest.attachments[0]).toMatchObject({ filePath: "C:/tmp/c.png" });
+  });
+
+  it("clearScopeAttachments 空快照不清任何附件：发送时无附件，请求期间新加的必须保留", () => {
+    activeScope = "s1";
+    // 发送瞬间没有任何附件（空快照）
+    const sent: ComposerAttachment[] = [];
+    // 入队请求期间用户加了两张
+    act(() => {
+      insertCallback!({ mime: "image/png", filePath: "C:/tmp/x.png", previewUrl: "px", hasAnnotations: false });
+      insertCallback!({ mime: "image/png", filePath: "C:/tmp/y.png", previewUrl: "py", hasAnnotations: false });
+    });
+    // 空快照清理后：期间新加的附件原样保留
+    act(() => { latest.clearScopeAttachments(sent); });
+    expect(latest.attachments).toHaveLength(2);
+    expect(latest.attachments.map((attachment) => attachment.filePath)).toEqual(["C:/tmp/x.png", "C:/tmp/y.png"]);
   });
 
   it("卸载时释放全部本地 objectURL", async () => {

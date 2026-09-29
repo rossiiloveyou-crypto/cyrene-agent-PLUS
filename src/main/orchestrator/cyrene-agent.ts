@@ -85,6 +85,7 @@ export interface AgentLoopSettings {
   apiKey: string;
   explicitTransport?: "openai" | "anthropic" | "responses" | "auto";
   reasoning?: import("../../shared/reasoning").ReasoningPreference;
+  manualReasoning?: import("../../shared/manual-reasoning").ManualReasoningConfig;
   /** 用户设置的模型上下文窗口（Token）。用于非 code 模式的对话压缩触发阈值。 */
   contextWindowTokens: number;
 }
@@ -104,8 +105,6 @@ export interface CyreneRunOptions {
    *   不得再各自生成 harness-${Date.now()} 等本地 ID。
    */
   runId?: string;
-  /** 用户明确要求继续的旧 Harness Run；仅由恢复入口注入。 */
-  resumeFromRunId?: string;
   /** 原始消息（不含 system）。system 由 chat-loop / harness-adapter 按 promptLayers 组装，不随消息持久化。 */
   messages: ChatMessage[];
   conversationId?: string;
@@ -194,6 +193,17 @@ export interface CyreneRunOptions {
    * 只携带稳定元数据供插件事件旁路使用，不参与执行决策。
    */
   onToolFinished?: (event: import("./harness/types").HarnessToolFinishedEvent) => void;
+  /**
+   * 插话轮询（AG-UI bridge 注入，透传给 harness）：
+   * 返回待插入当前运行的用户消息；harness 在每轮模型请求前与最终结算前调用。
+   * Chat 无工具链路是单请求运行，不消费该回调。
+   */
+  pollRunAdjustments?: () => Promise<import("./harness/types").RunAdjustmentMessage[]> | undefined;
+  /**
+   * Run 级轨迹提交端（CTA Phase 1）：canonical 消息权威落盘。
+   * 桌面链路由上游创建并注入；缺省（渠道/插件/测试）不写轨迹。
+   */
+  transcriptSink?: import("./transcript-sink").TranscriptSink;
 }
 
 /** Agent run 最终结果（供桥层做副作用用）。 */
@@ -258,12 +268,16 @@ export function toAguiEvent(event: AgentLoopEvent): BaseEvent {
       return { type: EventType.STEP_STARTED, stepName: event.stepName };
     case "step_finished":
       return { type: EventType.STEP_FINISHED, stepName: event.stepName };
-    case "tool_call_start":
+    case "tool_call_start": {
+      // 查注册表补中文展示名；查不到不填，前端回退原始 ID
+      const registryTool = toolRegistry.getById(event.toolCallName ?? "");
       return {
         type: EventType.TOOL_CALL_START,
         toolCallId: event.toolCallId,
         toolCallName: event.toolCallName,
+        toolCallDisplayName: registryTool?.name,
       };
+    };
     case "tool_call_args":
       return {
         type: EventType.TOOL_CALL_ARGS,
@@ -457,6 +471,7 @@ export class CyreneAgent extends AbstractAgent {
               onEvent,
               signal: abortController.signal,
               mode: options.conversationMode,
+              transcriptSink: options.transcriptSink,
             }));
           } else {
             const executeTool = (tc: Parameters<typeof executeToolCall>[0], runnableToolIds: Set<string>) => executeToolCall(tc, runnableToolIds, {
@@ -494,6 +509,15 @@ export class CyreneAgent extends AbstractAgent {
           flowLog("── 本轮完成 ────────────────────────");
 
           if (cancelled) return;
+          // timeout 属系统侧未完成（非用户取消）：写 runtime_error interruption 边界。
+          // Harness 路径已在 adapter 内按 runStore 闭合过，这里幂等重写不产生重复条目
+          if (this.lastResult.terminal?.status === "timeout") {
+            try {
+              await options.transcriptSink?.closeInterruption({ reason: "runtime_error", runSession: null });
+            } catch (closureError) {
+              console.error(LOG_PREFIX, "transcript timeout closure failed:", closureError);
+            }
+          }
           // success / timeout 都通过 RUN_FINISHED.result 上报 canonical 终态。
           // Bridge 据此决定是否跑 sticker / memory 等成功收尾副作用。
           subscriber.next({
@@ -516,6 +540,29 @@ export class CyreneAgent extends AbstractAgent {
           );
           console.error(LOG_PREFIX, `run 失败 [${classification.source}]:`, classification.diagnostics);
           if (classification.source === "user_cancelled") {
+            // 权威轨迹：取消边界先于终态事件落盘。
+            // ChatLoop 无工具调用，runSession 传空只写 interruption 边界；
+            // Harness 路径已在 adapter 内按 runStore 状态闭合，这里幂等不重复。
+            try {
+              await options.transcriptSink?.closeInterruption({ reason: "user_cancel", runSession: null });
+            } catch (closureError) {
+              // 闭合失败不得伪装成取消成功：按运行时错误上报
+              console.error(LOG_PREFIX, "transcript interruption closure failed:", closureError);
+              subscriber.next({
+                type: EventType.RUN_FINISHED,
+                threadId,
+                runId,
+                result: {
+                  status: "runtime_error",
+                  reason: "transcript_interruption_closure_failed",
+                  externalEffectsMayContinue: true,
+                },
+              });
+              finished = true;
+              detachExternalAbort();
+              subscriber.complete();
+              return;
+            }
             // 取消走 RUN_FINISHED + result.status="cancelled"，
             // 不伪装成 AG-UI interrupt，也不写 outcome。
             subscriber.next({
@@ -532,6 +579,14 @@ export class CyreneAgent extends AbstractAgent {
             detachExternalAbort();
             subscriber.complete();
             return;
+          }
+          // 权威轨迹：运行失败（含 ChatLoop 抛错）同样写 runtime_error interruption
+          // 边界，下一轮上下文能区分「系统没完成」与「用户主动取消」；
+          // 闭合失败只记日志——终态本身就是失败，不再改写
+          try {
+            await options.transcriptSink?.closeInterruption({ reason: "runtime_error", runSession: null });
+          } catch (closureError) {
+            console.error(LOG_PREFIX, "transcript failure closure failed:", closureError);
           }
           const safeErr = new Error(classification.userMessage);
           finished = true;

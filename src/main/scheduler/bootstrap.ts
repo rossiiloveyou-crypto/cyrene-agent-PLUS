@@ -1,7 +1,11 @@
 import type { BrowserWindow } from "electron";
+import { IPC } from "../../shared/ipc-channels";
 import type { IpcScope } from "../application/ipc-scope";
 import type { AgentRuntime } from "../orchestrator/agent-runtime";
 import type { LifecyclePublisher } from "../plugin-host/lifecycle-publisher";
+import type { ConversationJournalService } from "../orchestrator/conversation-journal-service";
+import type { ActiveConversationSelection } from "../chats/active-conversation-registry";
+import * as chatsStore from "../chats/chats-store";
 import { toolRegistry } from "../orchestrator/tools/registry/tool-registry";
 import type { ScheduledTask } from "./types";
 import { SchedulerEngine, type SchedulerEngineDeps } from "./scheduler-engine";
@@ -24,6 +28,8 @@ export interface SchedulerSubsystemDeps {
   canRunTask?: (task: ScheduledTask) => boolean;
   /** 生命周期事件发布器：调度轮次事件与 scheduler:finished 由此发布。 */
   publishLifecycle?: LifecyclePublisher;
+  conversationJournal?: ConversationJournalService;
+  getActiveConversation?: () => ActiveConversationSelection | null;
 }
 
 export interface SchedulerSubsystem {
@@ -43,6 +49,21 @@ export function createSchedulerSubsystem(deps: SchedulerSubsystemDeps): Schedule
 
   const runner = createSchedulerRunner({
     buildOptions: (task) => deps.agentRuntime.buildSchedulerOptions(task),
+    createRunSession: (task) => {
+      if (!task.workspaceBinding) throw new Error("定时任务缺少绑定工作区");
+      const session = chatsStore.createSession({
+        title: `定时任务：${task.title}`,
+        mode: task.mode === "code" ? "code" : "work",
+      });
+      if (!chatsStore.setWorkspaceBinding(session.id, task.workspaceBinding)) {
+        throw new Error("无法将会话绑定到定时任务工作区");
+      }
+      const win = deps.getReactChatWindow();
+      if (win && !win.isDestroyed()) {
+        try { win.webContents.send(IPC.CHATS_CHANGED); } catch { /* 窗口关闭时不阻断任务运行 */ }
+      }
+      return session.id;
+    },
     getChatWebContents: () => {
       const win = deps.getReactChatWindow();
       return win && !win.isDestroyed() ? win.webContents : null;
@@ -51,6 +72,8 @@ export function createSchedulerSubsystem(deps: SchedulerSubsystemDeps): Schedule
     id: () => `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     now: () => new Date(),
     ...(deps.publishLifecycle ? { publishLifecycle: deps.publishLifecycle } : {}),
+    ...(deps.conversationJournal ? { conversationJournal: deps.conversationJournal } : {}),
+    ...(deps.getActiveConversation ? { getActiveConversation: deps.getActiveConversation } : {}),
   });
 
   const engineDeps: SchedulerEngineDeps = {

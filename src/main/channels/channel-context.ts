@@ -19,9 +19,27 @@ export interface ChatMessage {
   triggered?: boolean;
 }
 
-/** 单条入站消息已经确定的上下文快照。 */
+/**
+ * 单条入站消息已经确定的上下文快照。
+ *
+ * 🔴 本分支决定（D1）：桌面对话绑定已**彻底删除**。
+ * 官方在此处多一个「绑定的桌面对话 id」字段，本分支不带该字段 ——
+ * 渠道会话自带短期上下文，不再绑定桌面对话（见 resolveDispatchContext 的注释）。
+ */
 export interface DispatchContext {
   sessionId: string;
+}
+
+/**
+ * 队列内冻结的会话目标。
+ *
+ * ⚠️ 本分支保留该类型：`dispatcher.ts` 的 `ChannelAgentInput.target` 与非冲突区的
+ * 6 处 `target.conversationId` 都用它，且 `acceptance.test.ts` 直接断言
+ * `input.target.conversationId`。D1 只删**绑定语义**（原来的可选取 `boundConversationId`
+ * 字段与那个解析函数），不删这个"纯会话目标"的形状。
+ */
+export interface ChannelConversationTarget {
+  conversationId: string;
 }
 
 export interface ChannelContext {
@@ -151,6 +169,8 @@ export function createChannelContext(
 ): ChannelContext {
   return {
     resolveDispatchContext(sessionId): DispatchContext {
+      // 🔴 D1：桌面对话绑定已彻底删除 → 渠道会话一律使用自己的 sessionId 作为上下文键。
+      //    （官方此处会查绑定存储并优先用之；其 else 分支正是本形态。）
       return { sessionId };
     },
 

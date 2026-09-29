@@ -15,6 +15,31 @@ vi.mock("electron", () => ({
   },
 }));
 
+describe("general window state persistence setting", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    electronMock.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyrene-window-state-settings-"));
+  });
+
+  it("defaults to true for fresh and legacy settings", () => {
+    expect(normalizeGeneralSettings({}).rememberWindowState).toBe(true);
+    expect(normalizeGeneralSettings({ petAlwaysOnTop: false } as never).rememberWindowState).toBe(true);
+  });
+
+  it("keeps an explicit false value", () => {
+    expect(normalizeGeneralSettings({ rememberWindowState: false }).rememberWindowState).toBe(false);
+  });
+
+  it("round trips through general-settings.json", async () => {
+    const first = await import("./settings-facade");
+    first.saveGeneralSettings({ rememberWindowState: false });
+
+    vi.resetModules();
+    const reloaded = await import("./settings-facade");
+    expect(reloaded.loadGeneralSettings().rememberWindowState).toBe(false);
+  });
+});
+
 describe("general LSP settings", () => {
   it("keeps valid user server overrides and safely drops malformed settings", () => {
     const settings = normalizeGeneralSettings({
@@ -189,5 +214,31 @@ describe("general early-read TTS split settings", () => {
       .toBe("paragraph");
     expect(normalizeGeneralSettings({ ttsEarlyReadSplitMode: "chapter" } as never).ttsEarlyReadSplitMode)
       .toBe("sentence");
+  });
+});
+
+describe("general interface language settings", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    electronMock.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyrene-locale-settings-"));
+  });
+
+  it("defaults to Chinese and keeps an explicit English choice", () => {
+    expect(normalizeGeneralSettings({}).language).toBe("zh-CN");
+    expect(normalizeGeneralSettings({ language: "en" } as never).language).toBe("en");
+  });
+
+  it("falls back to Chinese for languages that are not translated yet", () => {
+    expect(normalizeGeneralSettings({ language: "ja" } as never).language).toBe("zh-CN");
+    expect(normalizeGeneralSettings({ language: "" } as never).language).toBe("zh-CN");
+  });
+
+  it("keeps the English choice across a simulated restart", async () => {
+    const first = await import("./settings-facade");
+    first.saveGeneralSettings({ language: "en" });
+
+    vi.resetModules();
+    const reloaded = await import("./settings-facade");
+    expect(reloaded.loadGeneralSettings().language).toBe("en");
   });
 });

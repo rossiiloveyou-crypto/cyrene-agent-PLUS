@@ -11,7 +11,7 @@
 // 字段依赖梳理（按 index.ts:3175-3281）：
 //   loadModelSettings / loadUserProfile / buildEnvironmentContext
 //   buildSkillCatalog / skillRegistry / resolveSlashActivation
-//   buildToneInjection / sceneEmbeddingIndex / getSceneEmbeddingProvider
+//   buildToneInjection
 //   buildSystemPrompt / CHAT_REQUEST_TIMEOUT_MS
 //   normalizeChatMessages / buildAlwaysOnContext / ToolDefinition
 //   scheduleMemoryWrite / inferRuntimeState / runtimeState / feelingToExpression
@@ -35,6 +35,7 @@ import type { AguiRunInput } from "../agui-bridge";
 import type { RelationshipChannel, RelationshipTurnInput } from "../relationship/relationship-log";
 import type { ChannelChatType, ChannelId } from "../channels/types";
 import { validateCaptionImagePath } from "../chat/image-caption";
+import { resolveImageRoute } from "./image-router";
 import {
   buildConversationTimeContext,
   resolveChatContextTimezone,
@@ -64,6 +65,15 @@ import { policyFor, type ToolRiskLevel } from "../permission-policy";
 import { resolveScopeId, rootScope } from "../zones/scope";
 import type { TurnAttribution } from "../memory/memory-types";
 import { normalizeGroupContextLimit } from "../settings/general-settings";
+// 转录（CTA）侧依赖：官方把这 5 个 import 放在冲突块内，而**块外调用方**
+// （:150 MaterializedTranscript / :498 UncertainEffect / :537-589 harness 常量与估算）
+// 全部依赖它们 → 块内取 ours 后必须把这 5 行补回，否则块外整片 TS2304。
+// 实测（P6）：官方版在 :65-69，工作区块外**不存在**第二份 → 补回不会重复声明。
+import { resolveTranscriptRetainTokens, type MaterializedTranscript } from "./conversation-transcript-context";
+import type { UncertainEffect } from "./harness/types";
+import { DEFAULT_HARNESS_CONFIG } from "./harness/types";
+import { estimateMessageTokens } from "./context-manager";
+import { createTranscriptCompactionRequiredError } from "./conversation-transcript-compactor";
 
 /**
  * 本轮运行所属的渠道会话快照，供 always-on 上下文按会话补充渠道专属内容。
@@ -109,14 +119,7 @@ export interface BuildOptionsDeps {
     mode?: import("../skills/types").SkillMode,
     overrides?: SkillModeOverrides,
   ) => string;
-  buildToneInjection: (
-    userText: string,
-    messages: ReadonlyArray<{ role: string; content?: string }>,
-    provider: unknown,
-    index: unknown,
-  ) => Promise<string>;
-  sceneEmbeddingIndex: unknown;
-  getSceneEmbeddingProvider: () => unknown;
+  buildToneInjection: () => string;
   buildAlwaysOnContext: (
     userText: string,
     messages: ReadonlyArray<{ role: string; content?: string }>,
@@ -149,6 +152,17 @@ export interface BuildOptionsDeps {
     getEnabledToolsForMode(mode: ConversationMode, overrides?: ToolModeOverrides): ReadonlyArray<unknown>;
   };
   normalizeChatMessages: (raw: ReadonlyArray<unknown>) => ChatMessage[];
+  /** 权威轨迹上下文构建：桌面 currentUser dispatch 时物化模型消息。 */
+  buildModelContext?: (
+    conversationId: string,
+    retainTokens: number,
+  ) => Promise<MaterializedTranscript>;
+  /** 会话级权威压缩；成功后 buildModelContext 必须重新物化 checkpoint + suffix。 */
+  compactTranscript?: (input: {
+    conversationId: string;
+    trigger: "automatic" | "manual";
+    retainTokens: number;
+  }) => Promise<unknown>;
   chatRequestTimeoutMs: number;
   captionImageForFallback?: (filePath: string) => Promise<{ ok: boolean; caption?: string; error?: string }>;
   prepareCitaTurn?: (input: {
@@ -189,6 +203,9 @@ export interface BuildOptionsDeps {
     channel?: string;
   }) => Promise<string>;
 }
+
+/** 所有入口都从 canonical journal 构建上下文；不再接受旁路历史消息。 */
+export type BuildOptionsInput = AguiRunInput;
 
 /** onRunFinished 副作用所需的 deps（与 BuildOptionsDeps 部分重叠） */
 export interface OnRunFinishedDeps {
@@ -239,11 +256,14 @@ export interface ModelSettingsLite {
   explicitTransport?: "openai" | "anthropic" | "responses" | "auto";
   /** 顶层 reasoning 镜像（来自 perProvider[currentProvider].reasoning）。adapter 直接读。 */
   reasoning?: import("../../shared/reasoning").ReasoningPreference;
+  manualReasoning?: import("../../shared/manual-reasoning").ManualReasoningConfig;
   runtimeSync?: string;
   stickerEnabled?: boolean;
   stickerSimilarityThreshold?: number;
   /** 默认为 true；用户显式关闭时，图片先交给独立视觉模型转成文字。 */
   multimodal?: boolean;
+  /** 独立视觉模型配置（可选）。image-router 路由判定用。 */
+  vision?: { baseUrl: string; apiKey: string; model: string };
   /** 上下文窗口大小（Token）。来自 ModelSettings.contextWindowTokens。 */
   contextWindowTokens?: number;
 }
@@ -427,6 +447,35 @@ function buildImageCaptionFallbackMessages(
   ];
 }
 
+/**
+ * 路由拒绝时的诚实提示：当前配置既不能直发也没有可用的转述链路，
+ * 把原因写进最后一条 user 消息，让模型如实告知用户怎么修，而不是静默丢图。
+ */
+function withImageRejectNotice(
+  messages: ChatMessage[],
+  input: AguiRunInput,
+  reason: string,
+): ChatMessage[] {
+  const images = input.imageAttachments?.filter((image) =>
+    typeof image?.filePath === "string" && typeof image?.name === "string",
+  ) ?? [];
+  if (images.length === 0) return messages;
+
+  const latestUserIndex = messages.map((message) => message.role).lastIndexOf("user");
+  if (latestUserIndex < 0) return messages;
+
+  const current = messages[latestUserIndex];
+  const text = contentToText(current.content);
+  const names = images.map((image) => image.name).join("、");
+  const notice = `【图片发送失败】用户发送的图片（${names}）无法处理：${reason}请如实告知用户当前无法查看图片及修复方法，不要编造图片内容。`;
+  const next = messages.slice();
+  next[latestUserIndex] = {
+    ...current,
+    content: text ? `${text}\n\n${notice}` : notice,
+  };
+  return next;
+}
+
 function isStyleId(value: unknown): value is StyleId {
   return typeof value === "string" && (STYLE_IDS as readonly string[]).includes(value);
 }
@@ -480,20 +529,80 @@ function buildStylePromptBlock(markdown: string): string {
   ].join("\n");
 }
 
+/** 轨迹侧崩溃孤儿说明：进入 recoveryContext 提示模型先查证，不得自动重放。 */
+export function formatTranscriptUncertainEffects(effects: UncertainEffect[]): string {
+  const lines = effects.map((effect) =>
+    `- [${effect.toolName}]（调用 ${effect.toolCallId}，指纹 ${effect.fingerprint}）：${effect.message}`);
+  return [
+    "【上次运行的未确认外部副作用】",
+    ...lines,
+    "以上副作用结果未知，不得自动重放；先向用户查证实际结果后再决定下一步。",
+  ].join("\n");
+}
+
+/** fail-closed：桌面轨迹上下文开启但装配缺失时直接报错，不得静默回退渲染端消息。 */
+function requireBuildModelContext(
+  deps: BuildOptionsDeps,
+): NonNullable<BuildOptionsDeps["buildModelContext"]> {
+  const reader = deps.buildModelContext;
+  if (!reader) throw new Error("buildModelContext is not wired for transcript context");
+  return reader;
+}
+
 /**
  * 构造 CyreneAgent.runWithEvents 所需的 options + 提取 latestUserText。
  * 与 index.ts 原 AG-UI bridge 的 buildOptions 行为完全一致。
  */
 export async function buildAgentRunOptions(
-  input: AguiRunInput,
+  input: BuildOptionsInput,
   deps: BuildOptionsDeps,
 ): Promise<{ options: CyreneRunOptions; latestUserText: string }> {
-  const settings = deps.loadModelSettings(input.modelProfileId);
+  // 会话级模型配置（consumer #4 的 request assembly boundary）：
+  // 桌面 bridge 已按会话解析好（含 effective model），直接消费；
+  // 只有非桌面入口（渠道等）才按 modelProfileId 解析——同一输入二选一，
+  // 不允许 downstream 再解析一遍把会话模型覆盖回档案默认。
+  const settings = input.sessionModelSettings ?? deps.loadModelSettings(input.modelProfileId);
   const styleSettings = deps.loadGeneralSettings();
   if (!settings.baseUrl) {
     throw new Error("还没有填写 API URL，请先在设置里保存 API 配置。");
   }
-  const messages = deps.normalizeChatMessages(input.messages);
+  // 权威轨迹上下文：桌面 bridge 在 canonical append 后传入 modelContext；
+  // 若由其它主进程入口调用，则从同一 journal reader 构建，不读取 renderer 历史。
+  const contextWindowTokens = settings.contextWindowTokens ?? 256_000;
+  const retainTokens = resolveTranscriptRetainTokens(contextWindowTokens);
+  let transcriptContext = input.modelContext
+    ?? (input.currentUser && input.sessionId
+      ? await requireBuildModelContext(deps)(input.sessionId, retainTokens)
+      : undefined);
+  // 预算检查对传入与自建上下文一视同仁：长会话无论从桌面还是渠道入口进入，
+  // 都必须先提交自动压缩检查点，再重读 journal 作为最终上下文。
+  if (input.currentUser && input.sessionId && transcriptContext) {
+    const usableInputBudget = contextWindowTokens
+      - DEFAULT_HARNESS_CONFIG.reservedOutputTokens
+      - DEFAULT_HARNESS_CONFIG.safetyMarginTokens;
+    const estimatedMessages = estimateMessageTokens(transcriptContext.messages);
+    if (estimatedMessages >= usableInputBudget * DEFAULT_HARNESS_CONFIG.compactionThreshold) {
+      if (!deps.compactTranscript) throw new Error("TRANSCRIPT_COMPACTION_REQUIRED");
+      try {
+        await deps.compactTranscript({
+          conversationId: input.sessionId,
+          trigger: "automatic",
+          retainTokens: Math.max(1, Math.floor(contextWindowTokens * DEFAULT_HARNESS_CONFIG.compactionRetainRatio)),
+        });
+      } catch (error) {
+        console.error("[BuildOptions] transcript compaction failed", error);
+        throw createTranscriptCompactionRequiredError(error);
+      }
+      transcriptContext = await requireBuildModelContext(deps)(input.sessionId, retainTokens);
+      if (estimateMessageTokens(transcriptContext.messages) >= usableInputBudget * DEFAULT_HARNESS_CONFIG.compactionThreshold) {
+        throw createTranscriptCompactionRequiredError();
+      }
+    }
+  }
+  const messages = transcriptContext?.messages
+    ?? (input.currentUser
+      ? [{ role: "user" as const, content: input.currentUser.text } as ChatMessage]
+      : []);
   if (messages.length === 0) {
     throw new Error("没有可发送的聊天内容。");
   }
@@ -537,10 +646,9 @@ export async function buildAgentRunOptions(
     && styleSettings.chatMomentsContextEnabled === true
     && styleSettings.momentsEnabled === true
     && Boolean(deps.buildMomentsContext);
-  const messagesForSoul = socialContextEnabled ? messages.slice(-12) : messages;
   const profile = deps.loadUserProfile();
   const { cleanMessages: cleanLlm, timestampedMessages: llmMessages, timeContext: conversationTimeContext } = buildConversationTimeContext(
-    messagesForSoul as unknown as ChatContextMessage[],
+    messages as unknown as ChatContextMessage[],
     resolveChatContextTimezone(profile.timezone),
   );
   const slimLlmMessages = llmMessages as Array<{ role: string; content?: string }>;
@@ -655,18 +763,12 @@ export async function buildAgentRunOptions(
     }
   }
 
+  // 语气注入（通用语气规则；场景匹配已移除）
   let toneInjection = "";
-  if (deps.sceneEmbeddingIndex) {
-    try {
-      toneInjection = await perf.track("build_tone_injection", () => deps.buildToneInjection(
-        latestUserText,
-        slimLlmMessages,
-        deps.getSceneEmbeddingProvider(),
-        deps.sceneEmbeddingIndex,
-      ));
-    } catch (err) {
-      console.warn("[Cyrene] tone injection failed:", err);
-    }
+  try {
+    toneInjection = deps.buildToneInjection();
+  } catch (err) {
+    console.warn("[Cyrene] tone injection failed:", err);
   }
 
   let attachmentContext = "";
@@ -869,31 +971,33 @@ export async function buildAgentRunOptions(
     pluginPromptContext,
   ].filter((context): context is string => Boolean(context?.trim())).join("\n\n---\n\n");
 
-  // 原始 messages 不携带 system。system 由 chat-loop / harness-adapter 按 promptLayers 组装。
-  // `multimodal=false` is an explicit user decision: never send image bytes to
-  // the main model.  Describe first with the independent vision model, then
-  // give Harness only the resulting text context.
-  // 直发判定只看用户开关：能力对错交给服务端仲裁（400 时 chat-loop 会用
-  // imageCaptionFallback 自动降级重试）。不维护「哪个协议支持发图」的静态表——
-  // 该信息必然滞后于服务端实际状态（MiniMax /anthropic 支持发图晚于文档标注）。
-  const directVisionOk = settings.multimodal !== false;
+  // 图片路由统一收口在 image-router：direct 直发 / caption 转述 / reject 拒绝。
+  // 能力对错交给服务端仲裁（直发 400 时 chat-loop 会用 imageCaptionFallback
+  // 自动降级重试）。不维护「哪个协议支持发图」的静态表——该信息必然滞后于
+  // 服务端实际状态（MiniMax /anthropic 支持发图晚于文档标注）。
+  const imageRoute = resolveImageRoute("attachment", settings);
+  const directVisionOk = imageRoute.mode === "direct";
   // [image-send] 链路日志①：直发判定。图片"传不过去"先看这条——
   // direct=false 时图片走 caption 降级/文本占位，根本不会以 image 块发给主模型。
   if (input.imageAttachments?.length) {
     console.log("[image-send] 直发判定:", {
       provider: settings.provider,
       model: settings.model,
-      multimodal开关: directVisionOk,
+      multimodal开关: settings.multimodal !== false,
       图片数: input.imageAttachments.length,
-      结果: directVisionOk ? "直发 image 块" : "降级（caption/文本占位）",
+      结果: directVisionOk ? "直发 image 块" : imageRoute.mode === "caption" ? "降级（caption/文本占位）" : "拒绝（无可用视觉链路）",
     });
   }
   const fcMessages: ChatMessage[] = directVisionOk
     ? withDirectImageAttachments(llmMessages as unknown as ChatMessage[], input)
-    : await withCaptionedImageAttachments(llmMessages as unknown as ChatMessage[], input, deps);
+    : imageRoute.mode === "caption"
+      ? await withCaptionedImageAttachments(llmMessages as unknown as ChatMessage[], input, deps)
+      : withImageRejectNotice(llmMessages as unknown as ChatMessage[], input, imageRoute.reason);
   const cleanFcMessages: ChatMessage[] = directVisionOk
     ? withDirectImageAttachments(cleanLlm as unknown as ChatMessage[], input)
-    : await withCaptionedImageAttachments(cleanLlm as unknown as ChatMessage[], input, deps);
+    : imageRoute.mode === "caption"
+      ? await withCaptionedImageAttachments(cleanLlm as unknown as ChatMessage[], input, deps)
+      : withImageRejectNotice(cleanLlm as unknown as ChatMessage[], input, imageRoute.reason);
   const imageCaptionFallback = directVisionOk
     ? buildImageCaptionFallbackMessages(
     isChatMode
@@ -905,6 +1009,11 @@ export async function buildAgentRunOptions(
     )
     : undefined;
 
+  // 轨迹侧崩溃孤儿：并入 recoveryContext，与派发侧（渠道恢复上下文）在 bridge 合并
+  const transcriptRecoveryContext = transcriptContext?.uncertainEffects.length
+    ? formatTranscriptUncertainEffects(transcriptContext.uncertainEffects)
+    : undefined;
+
   return {
     options: {
       settings: {
@@ -914,6 +1023,7 @@ export async function buildAgentRunOptions(
         apiKey: settings.apiKey,
         explicitTransport: settings.explicitTransport,
         reasoning: settings.reasoning,
+        manualReasoning: settings.manualReasoning,
         contextWindowTokens: settings.contextWindowTokens ?? 256000,
       },
       maxParallelToolCalls: typeof generalSettings.maxParallelToolCalls === "number"
@@ -947,6 +1057,7 @@ export async function buildAgentRunOptions(
           now: Date.now(),
         },
       } : {}),
+      ...(transcriptRecoveryContext ? { recoveryContext: transcriptRecoveryContext } : {}),
       ...(imageCaptionFallback ? { imageCaptionFallback } : {}),
       tools: [...runTools],
       capabilities,

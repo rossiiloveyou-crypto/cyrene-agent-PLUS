@@ -1,9 +1,7 @@
 import { app, nativeImage, type Tray } from "electron";
 import { IPC } from "../../shared/ipc-channels";
-import { broadcastToAllWindows } from "../windows/broadcast";
 import type { WindowManager } from "../windows/window-manager";
 import { setGetCurrentAppIconPath } from "../windows/window-state";
-import { normalizeChatAppearance } from "../../shared/chat-appearance";
 import { updateLocaleContext } from "../locale-context";
 import { validateSearchApiKey } from "../orchestrator/search-backend-filter";
 import { addMcpServer, listMcpServers, removeMcpServer } from "../orchestrator/mcp-manager";
@@ -13,6 +11,7 @@ import { loadModelSettings, getPublicModelConfig } from "./model-settings";
 import type { GeneralSettings } from "./general-settings";
 import type { UiIcon } from "../../shared/ui-icon";
 import { syncLaunchAtLogin } from "./launch-at-login";
+import { CURRENT_DISCLAIMER_VERSION } from "../../shared/disclaimer";
 
 export interface GeneralSettingsLifecycleDependencies {
   get windowManager(): WindowManager | null;
@@ -34,9 +33,25 @@ export function applyGeneralSettings(
   if (!before || before.petAlwaysOnTop !== settings.petAlwaysOnTop) {
     deps.windowManager?.setPetWindowAlwaysOnTop(settings.petAlwaysOnTop);
   }
-  if (!before || before.petVisible !== settings.petVisible) {
+  const disclaimerAccepted = settings.disclaimerAcceptedVersion === undefined
+    || settings.disclaimerAcceptedVersion === CURRENT_DISCLAIMER_VERSION;
+  const disclaimerAcceptanceChanged = before?.disclaimerAcceptedVersion !== settings.disclaimerAcceptedVersion;
+  if (!disclaimerAccepted) {
+    deps.windowManager?.hidePetWindow();
+  } else if (!before || before.petVisible !== settings.petVisible || disclaimerAcceptanceChanged) {
     if (settings.petVisible) deps.windowManager?.showPetWindow();
     else deps.windowManager?.hidePetWindow();
+  }
+  const wasDisclaimerAccepted = !before
+    || before.disclaimerAcceptedVersion === undefined
+    || before.disclaimerAcceptedVersion === CURRENT_DISCLAIMER_VERSION;
+  if (!wasDisclaimerAccepted && disclaimerAccepted) {
+    setTimeout(() => {
+      deps.windowManager?.closeOnboardingWindow?.();
+      void deps.windowManager?.openReactChatWindow().catch((error) => {
+        console.error("[Cyrene] failed to open workspace after disclaimer acceptance:", error);
+      });
+    }, 0);
   }
   if (!before || before.launchAtLogin !== settings.launchAtLogin) {
     syncLaunchAtLogin(settings.launchAtLogin, app);
@@ -147,11 +162,6 @@ export function handleGeneralSettingsChanged(
   }
   if (JSON.stringify(before.uiFont) !== JSON.stringify(after.uiFont)) {
     deps.windowManager?.broadcast(IPC.UI_FONT_CHANGED, after.uiFont);
-  }
-  const prevAppearance = normalizeChatAppearance(before);
-  const nextAppearance = normalizeChatAppearance(after);
-  if (JSON.stringify(prevAppearance) !== JSON.stringify(nextAppearance)) {
-    broadcastToAllWindows(IPC.CHAT_TYPOGRAPHY_CHANGED, nextAppearance);
   }
   if (before.uiIcon !== after.uiIcon) {
     applyUiIcon(after.uiIcon, deps);

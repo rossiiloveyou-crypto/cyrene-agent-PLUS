@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import type { ChatMessage, VendorConfig } from "../../vendors/types";
 import type { ToolDefinition } from "../../tools/registry/tool-registry";
 import { toolRegistry } from "../../tools/registry/tool-registry";
-import { prepareHarnessRecovery } from "../run-recovery";
 import { getHarnessRunStore, type HarnessRequestSnapshot } from "../run-store";
 import type { CyreneRunOptions } from "../../cyrene-agent";
 import type { PromptLayers } from "../../prompt-layers";
@@ -73,7 +72,6 @@ export interface PreparedHarnessRun {
   harnessPromptLayers: PromptLayers;
   systemPrompt: string;
   runMessages: ChatMessage[];
-  recovered?: ReturnType<typeof prepareHarnessRecovery>;
   runStore: ReturnType<typeof getHarnessRunStore>;
 }
 
@@ -104,31 +102,15 @@ export async function prepareHarnessRun(
     apiKey: options.settings.apiKey,
     explicitTransport: options.settings.explicitTransport,
     reasoning: options.settings.reasoning,
+    manualReasoning: options.settings.manualReasoning,
   };
 
   const tools = [...(options.capabilities?.tools ?? options.tools ?? toolRegistry.getEnabledTools())];
   const runStore = getHarnessRunStore(app.getPath("userData"));
-  const recovered = options.resumeFromRunId
-    ? (() => {
-      const previous = runStore.get(options.resumeFromRunId!);
-      if (!previous || previous.conversationId !== threadId) throw new Error("HARNESS_RECOVERY_NOT_FOUND");
-      return prepareHarnessRecovery(previous, {
-        workspaceRoot: options.resolvedWorkspaceRoot,
-        provider: options.settings.provider,
-        model: options.settings.model,
-        enabledToolIds: tools.map((tool) => tool.id),
-      });
-    })()
-    : undefined;
-
-  const latestIncomingMessage = options.messages.at(-1);
-  const baseRunMessages = recovered
-    ? [
-      ...recovered.messages,
-      ...(latestIncomingMessage?.role === "user" ? [{ ...latestIncomingMessage }] : []),
-    ]
-    : options.messages;
-  const recoveryContext = [options.recoveryContext, recovered?.recoveryContext, planContextBlock]
+  // 消息历史始终来自 Task 6 journal；不再有 resume 旁路——中断轮的执行状态
+  // （todos/未决副作用）由轨迹投影与 recoveryContext 在下一轮自然携带。
+  const baseRunMessages = options.messages;
+  const recoveryContext = [options.recoveryContext, planContextBlock]
     .filter(Boolean).join("\n\n");
   const promptLayers = buildHarnessPromptLayers(
     recoveryContext ? { ...options, recoveryContext } : options,
@@ -137,8 +119,7 @@ export async function prepareHarnessRun(
     messages: baseRunMessages,
     runId,
     runtimeContext: promptLayers.runtimeContext,
-    initialState: recovered?.state,
-    kind: recovered ? "recovery" : "run_start",
+    kind: "run_start",
   });
   // create 必须发生在 Harness 启动前，并使用最终消息/提示词/工具指纹，供 checkpoint 和恢复校验复用。
   const harnessPromptLayers: PromptLayers = {
@@ -152,8 +133,6 @@ export async function prepareHarnessRun(
     runId,
     messages: runMessages,
     request: snapshotHarnessRequest(options, harnessPromptLayers, tools),
-    ...(recovered ? { state: recovered.state, cache: recovered.cache } : {}),
-    ...(options.resumeFromRunId ? { resumedFromRunId: options.resumeFromRunId } : {}),
   });
 
   return {
@@ -167,7 +146,6 @@ export async function prepareHarnessRun(
     harnessPromptLayers,
     systemPrompt,
     runMessages,
-    ...(recovered ? { recovered } : {}),
     runStore,
   };
 }

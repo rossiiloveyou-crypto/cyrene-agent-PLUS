@@ -3,11 +3,17 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "../orchestrator/model-config";
 import { foldReasoning, normalizeReasoningPreference, type ReasoningPreference } from "../../shared/reasoning";
+import { normalizeManualReasoningConfig, type ManualReasoningConfig } from "../../shared/manual-reasoning";
 import type { StickerSize } from "../../shared/sticker-types";
 import { getSettingsPath } from "../settings-store";
-import type { VisionConfig } from "../orchestrator/vision-captioner";
 import { migrateLegacyMinimaxDefaults } from "../orchestrator/vendors/minimax-defaults";
 import { getCapabilityOrOpenAI } from "../orchestrator/vendors/capabilities";
+import { getVendorShortName } from "../../shared/vendor-registry";
+import {
+  resolveSessionProfileBinding,
+  resolveEffectiveSessionModel,
+  type SessionModelBindingInput,
+} from "../../shared/session-model";
 import { addModelProfile, resolveDefaultModelProfile, updateModelProfile, type SavedModelProfile } from "./model-catalog";
 
 /**
@@ -31,7 +37,16 @@ export interface PublicModelConfig {
 // 单个厂商的可缓存配置：用户切到别的厂商再切回来，这三个字段从这里恢复。
 export interface ProviderProfile {
   baseUrl: string;
+  /** 此档案"新对话"的默认模型（语义降级：不再是运行时唯一真值）。 */
   model: string;
+  /** 档案内可切换的模型清单。缺省 = 单模型档案，行为与现状一致。 */
+  models?: string[];
+  /** 每个模型单独的能力配置；旧档案仍可通过下方档案级字段兼容回退。 */
+  modelOptions?: Record<string, {
+    multimodal?: boolean;
+    contextWindowTokens?: number;
+    manualReasoning?: ManualReasoningConfig;
+  }>;
   apiKey: string;
   displayName?: string;
   /**
@@ -103,6 +118,11 @@ function migrateProviderRenames(
 
 export interface ModelSettings {
   mode: "auto" | "manual";
+  /**
+   * 配置文件 schema 版本。当前 2：multimodal 旧判定（syncWithMain / 无字段推断）已迁移落盘。
+   * 旧文件（无此字段）首次加载时执行一次性迁移并写回，之后走干净路径。
+   */
+  schemaVersion?: number;
   provider: string;
   // 用户给模型起的自定义昵称，留空时状态栏用厂商 shortName。
   displayName?: string;
@@ -120,6 +140,8 @@ export interface ModelSettings {
    * 保存的是用户 preference（不覆盖）；effective config 由 capability 决定。
    */
   reasoning?: ReasoningPreference;
+  /** 当前实际模型的手动推理规则；由档案展开，仅用于运行时。 */
+  manualReasoning?: ManualReasoningConfig;
   // 按厂商缓存：currentProvider 之外的厂商配置也保留在这里，切回来时回填。
   // 真值（source of truth）是 perProvider；顶层 baseUrl/model/apiKey 是当前厂商那一份的展开镜像，
   // 仅为兼容现有 main 进程里大量直接读 settings.baseUrl 等代码而保留。
@@ -159,8 +181,12 @@ export interface VisionModelConfig {
   model: string;
 }
 
+/** 当前配置文件 schema 版本。2 = multimodal 旧判定迁移完成标记。 */
+const MODEL_SETTINGS_SCHEMA_VERSION = 2;
+
 const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   mode: "auto",
+  schemaVersion: MODEL_SETTINGS_SCHEMA_VERSION,
   // 默认厂商改为 MiniMax（v1 vendor adapter 第一个落地的），DeepSeek 已从 v1 清单移除。
   provider: "MiniMax（稀宇科技）",
   baseUrl: "https://api.minimaxi.com/anthropic",
@@ -209,9 +235,54 @@ function normalizeProviderProfile(
   const explicitTransport: ProviderProfile["explicitTransport"] =
     migrateLegacyExplicitTransport(input, provider);
   const rawContextWindow = (input as { contextWindowTokens?: unknown })?.contextWindowTokens;
+  const model = typeof input?.model === "string" ? input.model.trim() : "";
+  // 模型清单六步契约（顺序是业务数据，删除当前模型后的顺位 fallback 依赖它）：
+  // 1. trim model；2. models 逐项 trim → 去空；3. 稳定去重（保持首现顺序，大小写原样）；
+  // 4. 清单为空 → 移除字段、保留 model；5. model ∉ models → 顺位取 models[0]；
+  // 6. 清单长度 ≤ 1 → 移除字段（单模型档案不落盘清单，旧档案 JSON 零变化）。
+  let models: string[] | undefined;
+  const rawModels = (input as { models?: unknown })?.models;
+  if (Array.isArray(rawModels)) {
+    const seen = new Set<string>();
+    const cleaned: string[] = [];
+    for (const item of rawModels) {
+      if (typeof item !== "string") continue;
+      const trimmed = item.trim();
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      cleaned.push(trimmed);
+    }
+    if (cleaned.length > 0) models = cleaned;
+  }
+  let effectiveModel = model;
+  if (models) {
+    if (!models.includes(effectiveModel)) effectiveModel = models[0];
+    if (models.length <= 1) models = undefined;
+  }
+  const selectableModels = models ?? (effectiveModel ? [effectiveModel] : []);
+  const rawModelOptions = (input as { modelOptions?: unknown })?.modelOptions;
+  const modelOptions: NonNullable<ProviderProfile["modelOptions"]> = {};
+  if (rawModelOptions && typeof rawModelOptions === "object" && !Array.isArray(rawModelOptions)) {
+    for (const name of selectableModels) {
+      const rawOption = (rawModelOptions as Record<string, unknown>)[name];
+      if (!rawOption || typeof rawOption !== "object" || Array.isArray(rawOption)) continue;
+      const option = rawOption as { multimodal?: unknown; contextWindowTokens?: unknown; manualReasoning?: unknown };
+      const manualReasoning = normalizeManualReasoningConfig(option.manualReasoning);
+      const normalized = {
+        ...(typeof option.multimodal === "boolean" ? { multimodal: option.multimodal } : {}),
+        ...(typeof option.contextWindowTokens === "number" && Number.isFinite(option.contextWindowTokens) && option.contextWindowTokens >= 4096
+          ? { contextWindowTokens: Math.round(option.contextWindowTokens) }
+          : {}),
+        ...(manualReasoning ? { manualReasoning } : {}),
+      };
+      if (Object.keys(normalized).length > 0) modelOptions[name] = normalized;
+    }
+  }
   return {
     baseUrl: typeof input?.baseUrl === "string" ? input.baseUrl.trim() : "",
-    model: typeof input?.model === "string" ? input.model.trim() : "",
+    model: effectiveModel,
+    ...(models ? { models } : {}),
+    ...(Object.keys(modelOptions).length > 0 ? { modelOptions } : {}),
     apiKey: typeof input?.apiKey === "string" ? input.apiKey.trim() : "",
     displayName: typeof input?.displayName === "string" && input?.displayName.trim() ? input.displayName.trim() : undefined,
     explicitTransport,
@@ -277,22 +348,25 @@ export function normalizeModelSettings(input: Partial<ModelSettings> | null | un
   // 顶层镜像：用 perProvider[provider] 展开
   const profile = perProvider[provider];
 
-  // 迁移旧配置：vision.syncWithMain === true -> multimodal: true
-  // 默认 true（未持久化时）：直发判错有服务端仲裁 + caption 自动降级兜底，
+  // multimodal 判定：schemaVersion >= 2 的文件已迁移落盘，直接读字段（缺省 true）；
+  // 旧文件（无 schemaVersion）首次加载走一次性迁移，结果随 schemaVersion: 2 写盘后不再进入。
+  // 默认 true 的理由：直发判错有服务端仲裁 + caption 自动降级兜底，
   // 而默认 false 会让多模态模型的用户发图莫名降级/看不了图（比发错更迷惑）。
   let multimodal = input?.multimodal !== false;
   const rawVision = input?.vision as Partial<VisionModelConfig> & { syncWithMain?: boolean } | undefined;
-  if (rawVision && rawVision.syncWithMain === true) {
-    multimodal = true;
-  } else if (
-    // 旧版配置没有 multimodal 字段（那时只有独立视觉模型，没有直发开关）：
-    // 已配好独立视觉模型且未声明与主模型同步的用户，升级后继续走独立视觉模型，
-    // 不被默认 true 静默旁路；一旦字段持久化过就不再进这条迁移
-    typeof input?.multimodal !== "boolean"
-    && rawVision
-    && rawVision.baseUrl && rawVision.apiKey && rawVision.model
-  ) {
-    multimodal = false;
+  if ((input?.schemaVersion ?? 1) < MODEL_SETTINGS_SCHEMA_VERSION) {
+    if (rawVision && rawVision.syncWithMain === true) {
+      multimodal = true;
+    } else if (
+      // 旧版配置没有 multimodal 字段（那时只有独立视觉模型，没有直发开关）：
+      // 已配好独立视觉模型且未声明与主模型同步的用户，升级后继续走独立视觉模型，
+      // 不被默认 true 静默旁路
+      typeof input?.multimodal !== "boolean"
+      && rawVision
+      && rawVision.baseUrl && rawVision.apiKey && rawVision.model
+    ) {
+      multimodal = false;
+    }
   }
 
   const hasPersistedProfiles = Array.isArray(input?.modelProfiles);
@@ -324,6 +398,7 @@ export function normalizeModelSettings(input: Partial<ModelSettings> | null | un
 
   return {
     mode,
+    schemaVersion: MODEL_SETTINGS_SCHEMA_VERSION,
     provider,
     displayName: profile.displayName,
     baseUrl: profile.baseUrl,
@@ -388,6 +463,7 @@ export function resolveModelSettingsProfile(settings: ModelSettings, id?: string
     ? profiles.find((item) => item.id === id)
     : resolveDefaultModelProfile(profiles, settings.defaultModelProfileId);
   if (!profile) return settings;
+  const modelOption = profile.modelOptions?.[profile.model];
   return {
     ...settings,
     provider: profile.provider,
@@ -397,9 +473,37 @@ export function resolveModelSettingsProfile(settings: ModelSettings, id?: string
     apiKey: profile.apiKey,
     explicitTransport: profile.explicitTransport,
     reasoning: profile.reasoning,
+    manualReasoning: modelOption?.manualReasoning,
     // 档案级字段覆盖镜像；未定义时回退全局值（老档案 = 现行为）
-    contextWindowTokens: profile.contextWindowTokens ?? settings.contextWindowTokens,
-    multimodal: profile.multimodal ?? settings.multimodal,
+    contextWindowTokens: modelOption?.contextWindowTokens ?? profile.contextWindowTokens ?? settings.contextWindowTokens,
+    multimodal: modelOption?.multimodal ?? profile.multimodal ?? settings.multimodal,
+  };
+}
+
+/**
+ * ④ 会话级完整模型配置（四件套之④，②+③ 组合）：全部会话感知消费点的统一入口。
+ * - 绑定命中原档案 且 session.model ∈ 档案清单 → 用会话模型（对话自持）
+ * - 绑定失效/无绑定 → 回退默认档案链，raw session.model 一并失效（Invariant B/C，
+ *   不许旧档案的模型选择"串"进回退档案）
+ * - 一个档案都没有 → 返回 settings 原样（顶层镜像，保持旧行为）
+ */
+export function resolveSessionModelSettings(
+  settings: ModelSettings,
+  session: SessionModelBindingInput,
+): ModelSettings {
+  const binding = resolveSessionProfileBinding(settings, session);
+  if (!binding.profile) return settings;
+  // resolvedProfileId 一定命中有效档案（命中绑定或回退默认链），展开不会落空
+  const expanded = resolveModelSettingsProfile(settings, binding.resolvedProfileId);
+  const model = resolveEffectiveSessionModel(session, binding);
+  if (!model || model === expanded.model) return expanded;
+  const modelOption = binding.profile.modelOptions?.[model];
+  return {
+    ...expanded,
+    model,
+    contextWindowTokens: modelOption?.contextWindowTokens ?? binding.profile.contextWindowTokens ?? settings.contextWindowTokens,
+    multimodal: modelOption?.multimodal ?? binding.profile.multimodal ?? settings.multimodal,
+    manualReasoning: modelOption?.manualReasoning,
   };
 }
 
@@ -437,7 +541,20 @@ function loadModelSettings0(): ModelSettings {
     const filePath = getSettingsPath();
     if (!fs.existsSync(filePath)) return { ...DEFAULT_MODEL_SETTINGS };
     const raw = fs.readFileSync(filePath, "utf8");
-    return normalizeModelSettings(JSON.parse(raw) as Partial<ModelSettings>);
+    const parsed = JSON.parse(raw) as Partial<ModelSettings>;
+    const normalized = normalizeModelSettings(parsed);
+    // 一次性迁移落盘：旧文件（无 schemaVersion）迁移后立即写回 + 备份原文件，
+    // 下次加载看到 schemaVersion >= 2 就跳过全部旧判定，走干净路径。
+    if ((parsed?.schemaVersion ?? 1) < MODEL_SETTINGS_SCHEMA_VERSION) {
+      try {
+        fs.copyFileSync(filePath, `${filePath}.bak`);
+        fs.writeFileSync(filePath, JSON.stringify(normalized, null, 2), "utf8");
+      } catch (writeErr) {
+        // 写盘失败不阻塞启动：内存里已是迁移后的配置，下次启动会再试一次
+        console.error("[Cyrene] model settings migration persist failed:", writeErr);
+      }
+    }
+    return normalized;
   } catch (err) {
     console.error("[Cyrene] load settings failed:", err);
     return { ...DEFAULT_MODEL_SETTINGS };
@@ -447,36 +564,6 @@ function loadModelSettings0(): ModelSettings {
 export function loadModelSettings(): ModelSettings {
   if (modelSettingsCache !== null) return modelSettingsCache;
   return modelSettingsCache = loadModelSettings0();
-}
-
-/**
- * 运行时解析视觉配置。
- * multimodal=true：主模型本身支持视觉，返回主模型配置（让 read_image 等工具可用）。
- * multimodal=false：返回独立视觉模型配置（三字段齐全才有效），否则 null。
- *
- * 先展开默认档案再取顶层镜像（与 channel bot / 欢迎页同策略）：顶层镜像可能指向
- * 空壳 provider（真实配置在默认档案里），直接读会把多模态主模型误判为"未启用视觉"。
- */
-export function loadVisionConfig(from: ModelSettings = loadModelSettings()): VisionConfig | null {
-  const settings = resolveModelSettingsProfile(from);
-
-  if (settings.multimodal) {
-    // 主模型走 Anthropic 协议时，视觉链路（永远按 OpenAI 兼容拼 /chat/completions）
-    // 复用主模型 baseUrl 必然 404；已配好独立视觉模型则优先用，避免发图即失败
-    if (settings.explicitTransport === "anthropic") {
-      const v = settings.vision;
-      if (v?.baseUrl && v.apiKey && v.model) {
-        return { baseUrl: v.baseUrl, apiKey: v.apiKey, model: v.model };
-      }
-    }
-    if (!settings.apiKey || !settings.model) return null;
-    return { baseUrl: settings.baseUrl, apiKey: settings.apiKey, model: settings.model };
-  }
-
-  const v = settings.vision;
-  if (!v) return null;
-  if (!v.baseUrl || !v.apiKey || !v.model) return null;
-  return { baseUrl: v.baseUrl, apiKey: v.apiKey, model: v.model };
 }
 
 /**
@@ -551,18 +638,6 @@ export function saveModelSettings(settings: Partial<ModelSettings>): ModelSettin
   return final;
 }
 
-// 厂商短名映射（与 settings.ts 的 MODEL_PRESETS.shortName 镜像，需手动同步）。
-// 状态栏"正在喂养"在用户没填昵称时用这个兜底。
-const PROVIDER_SHORT_NAMES: Record<string, string> = {
-  "MiniMax（稀宇科技）": "MiniMax",
-  "DeepSeek（深度求索）": "DeepSeek",
-  "豆包（火山方舟）": "豆包",
-  "GLM（智谱）": "GLM",
-  "Kimi（月之暗面）": "Kimi",
-  "Qwen（通义千问）": "Qwen",
-  "ChatGPT（OpenAI）": "ChatGPT",
-  "Claude（Anthropic）": "Claude",
-};
 
 export function getPublicModelConfig(settings = loadModelSettings()): PublicModelConfig {
   // 状态面板表达“是否已有可用的已保存模型”，不能只看顶层默认镜像。
@@ -574,7 +649,7 @@ export function getPublicModelConfig(settings = loadModelSettings()): PublicMode
     mode: settings.mode,
     provider: settings.provider,
     displayName: settings.displayName,
-    shortName: PROVIDER_SHORT_NAMES[settings.provider] ?? settings.provider,
+    shortName: getVendorShortName(settings.provider) ?? settings.provider,
     model: settings.model,
     connected: hasSavedModel,
     runtimeSync: settings.runtimeSync,

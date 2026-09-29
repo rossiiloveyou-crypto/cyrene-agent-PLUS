@@ -1,34 +1,42 @@
 import React from "react";
+import { Search } from "lucide-react";
 import type { ChatSessionMeta, ConversationMode } from "../../../../../shared/chat-types";
+import type { SidebarOrganizationDraft, SidebarOrganizationSnapshot } from "../../../../../shared/sidebar-organization";
+import { useTranslation } from "../../../i18n";
 import { ModeSwitch } from "../../../components/ui/ModeSwitch";
-import { ModelModeButton } from "../../../components/ui/ModelModeButton";
 import { MomentsModeButton } from "../../../components/ui/MomentsModeButton";
 import { NewTaskButton } from "../../../components/ui/NewTaskButton";
-import { PluginModeButton } from "../../../components/ui/PluginModeButton";
+import { ScheduledTasksModeButton } from "../../../components/ui/ScheduledTasksModeButton";
 import { SettingsButton } from "../../../components/ui/SettingsButton";
 import { SidebarToggle } from "../../../components/ui/SidebarToggle";
-import { SkillModeButton } from "../../../components/ui/SkillModeButton";
-import { ToolConsoleButton } from "../../../components/ui/ToolConsoleButton";
-import { ToolModeButton } from "../../../components/ui/ToolModeButton";
 import { UserAvatar } from "../../../components/ui/UserAvatar";
 import { WindowControls } from "../../../components/ui/WindowControls";
+import { CharacterInfoPopover } from "../../character/CharacterInfoPopover";
 import { AppUpdateEntry } from "./AppUpdateEntry";
 import { ConversationSidebar } from "./ConversationSidebar";
 import { UsageBadge } from "./UsageBadge";
+import { SidebarSearchDialog } from "./SidebarSearchDialog";
+import { reportChatPerfRender } from "./chat-perf-probe";
 
-export type ChatPagePanel = "tool" | "skill" | "model" | "plugin" | "moments" | "console";
+// 面板 id：tool / skill / model 三个入口已随其宿主面板（ToolModePanel / SkillModePanel /
+// ModelModePanel）一起被 P4 删除 —— 官方把这三者迁进了 React 设置页
+// （features/settings/{ToolToggle,Skill}SettingsPanel），聊天侧栏不再暴露它们。
+// 保留 "plugin"（PluginModePanel 仍在）与其余官方面板。
+export type ChatPagePanel = "plugin" | "moments" | "console" | "scheduledTasks";
 
 export interface ChatPageNavigationProps {
-  collapsed: boolean;
   activePanel: ChatPagePanel | null;
   mode: ConversationMode;
   sessions: ChatSessionMeta[];
+  sidebarSessions: ChatSessionMeta[];
+  sidebarOrganization: SidebarOrganizationSnapshot | null;
   activeSessionId?: string;
   onToggleCollapsed: () => void;
   onModeChange: (mode: string) => void;
   onNewTask: () => void;
   onTogglePanel: (panel: ChatPagePanel) => void;
-  onSelectSession: (sessionId: string) => void;
+  onSelectSession: (sessionId: string, mode?: ConversationMode) => void;
+  onSaveSidebarOrganization: (draft: SidebarOrganizationDraft) => Promise<boolean>;
   onOpenProject: (workspaceRoot: string) => void;
   onRenameSession: (sessionId: string, newTitle: string) => void;
   onDeleteSession: (sessionId: string) => void;
@@ -39,17 +47,21 @@ export interface ChatPageNavigationProps {
   onOpenSettings: () => void;
 }
 
-export function ChatPageNavigation({
-  collapsed,
+// 阶段 1A：memo 隔离——ChatPage 流式重渲染时，只要 props 引用稳定（sessions/回调由父级保证），
+// 导航子树（含内嵌的 ConversationSidebar）整体跳过执行，流式期间执行次数应为 0（探针验收）。
+export const ChatPageNavigation = React.memo(function ChatPageNavigation({
   activePanel,
   mode,
   sessions,
+  sidebarSessions,
+  sidebarOrganization,
   activeSessionId,
   onToggleCollapsed,
   onModeChange,
   onNewTask,
   onTogglePanel,
   onSelectSession,
+  onSaveSidebarOrganization,
   onOpenProject,
   onRenameSession,
   onDeleteSession,
@@ -59,35 +71,73 @@ export function ChatPageNavigation({
   onCloseWindow,
   onOpenSettings,
 }: ChatPageNavigationProps) {
+  // 性能探针：perf harness 注册后统计导航子树执行次数（阶段 1A 验收：流式期间应为 0）
+  reportChatPerfRender("navigationRenders");
   const hasOpenPanel = activePanel !== null;
+  const { t } = useTranslation();
+  const [searchOpen, setSearchOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    function onSearchShortcut(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLocaleLowerCase() !== "k") return;
+      event.preventDefault();
+      setSearchOpen(true);
+    }
+    window.addEventListener("keydown", onSearchShortcut);
+    return () => window.removeEventListener("keydown", onSearchShortcut);
+  }, []);
+
+  function selectSearchSession(session: ChatSessionMeta) {
+    setSearchOpen(false);
+    const normalizeRoot = (root: string) => root.replace(/[\\/]+$/, "").toLocaleLowerCase();
+    const hiddenProject = session.workspaceRoot && sidebarOrganization?.projects.find((project) =>
+      project.hidden && normalizeRoot(project.workspaceRoot) === normalizeRoot(session.workspaceRoot!),
+    );
+    if (hiddenProject && sidebarOrganization) {
+      void onSaveSidebarOrganization({
+        ...sidebarOrganization,
+        projects: sidebarOrganization.projects.map((project) => project.id === hiddenProject.id ? { ...project, hidden: false } : project),
+      }).then(() => onSelectSession(session.id, session.mode));
+      return;
+    }
+    onSelectSession(session.id, session.mode);
+  }
 
   return (
     <>
-      <div className="cy-page-toggle">
-        <SidebarToggle collapsed={collapsed} onToggle={onToggleCollapsed} />
-      </div>
-      <div className="cy-page-top-center">
-        {!hasOpenPanel && <ModeSwitch value={mode} onChange={onModeChange} />}
-      </div>
-      {/* 右上角：用量徽章与窗口控件同属一个 flex 组，永远并排不重叠 */}
-      <div className="cy-page-top-right">
-        <UsageBadge sessionId={activeSessionId} />
-        <WindowControls onMinimize={onMinimize} onMaximize={onMaximize} onClose={onCloseWindow} />
-      </div>
+      <header className="cy-page-titlebar">
+        <div className="cy-page-toggle">
+          {/* SidebarToggle 无 collapsed 属性：收起态由根节点 .cy-page.is-collapsed 走 CSS 控制 */}
+          <SidebarToggle onToggle={onToggleCollapsed} />
+          <CharacterInfoPopover />
+        </div>
+        <div className="cy-page-top-center">
+          {!hasOpenPanel && <ModeSwitch value={mode} onChange={onModeChange} />}
+        </div>
+        {/* 右上角：用量徽章与窗口控件同属一个 flex 组，永远并排不重叠（本分支修复，面板布局测试锁死） */}
+        <div className="cy-page-top-right">
+          <UsageBadge sessionId={activeSessionId} />
+          <WindowControls onMinimize={onMinimize} onMaximize={onMaximize} onClose={onCloseWindow} />
+        </div>
+      </header>
       <div className="cy-page-sidebar">
         <div className="cy-page-newtask">
           <NewTaskButton onClick={onNewTask} />
-          <ToolModeButton active={activePanel === "tool"} onClick={() => onTogglePanel("tool")} />
-          <SkillModeButton active={activePanel === "skill"} onClick={() => onTogglePanel("skill")} />
-          <ModelModeButton active={activePanel === "model"} onClick={() => onTogglePanel("model")} />
-          <PluginModeButton active={activePanel === "plugin"} onClick={() => onTogglePanel("plugin")} />
-          <ToolConsoleButton active={activePanel === "console"} onClick={() => onTogglePanel("console")} />
+          <button className="cy-side-action cy-side-action--search" onClick={() => setSearchOpen(true)} type="button">
+            <span className="cy-side-action-icon"><Search size={18} strokeWidth={1.8} /></span>
+            <span className="cy-side-action-label">{t("sidebar.searchAction")}</span>
+            <kbd>Ctrl+K</kbd>
+          </button>
+          <ScheduledTasksModeButton active={activePanel === "scheduledTasks"} onClick={() => onTogglePanel("scheduledTasks")} />
           <MomentsModeButton active={activePanel === "moments"} onClick={() => onTogglePanel("moments")} />
         </div>
         <div className="cy-page-conversations">
           <ConversationSidebar
             mode={mode}
             sessions={sessions}
+            sidebarSessions={sidebarSessions}
+            organization={sidebarOrganization}
+            onSaveOrganization={onSaveSidebarOrganization}
             activeSessionId={activeSessionId}
             onSelect={onSelectSession}
             onOpenProject={onOpenProject}
@@ -102,6 +152,13 @@ export function ChatPageNavigation({
           <SettingsButton onClick={onOpenSettings} />
         </div>
       </div>
+      <SidebarSearchDialog
+        open={searchOpen}
+        sessions={sidebarSessions}
+        activeSessionId={activeSessionId}
+        onClose={() => setSearchOpen(false)}
+        onSelect={selectSearchSession}
+      />
     </>
   );
-}
+});

@@ -5,7 +5,6 @@
 
 import type { ApiTransport } from "../../../shared/api-endpoint";
 import type { ReasoningPreference } from "../../../shared/reasoning";
-import type { ChatAppearanceSettings } from "../../../shared/chat-appearance";
 import type { UiTheme } from "../../../shared/ui-theme";
 import type { UiFont } from "../../../shared/ui-font";
 import type { UiIcon } from "../../../shared/ui-icon";
@@ -16,9 +15,19 @@ import type {
   ProactiveDeliveryTarget,
   SegmentedOutputMode,
 } from "../../../shared/preferences";
+import type { QqListenAuthRequirement } from "../../../shared/qq-listen";
 import type { CustomStyleConfig } from "../../../shared/style-sampling";
+import type { BuiltinProviderId } from "../../../shared/vendor-registry";
 import type { CustomEndpointMode } from "../custom-endpoint-state";
 import type { TimeoutSettings } from "../../../shared/timeout-types";
+
+/**
+ * 预设与厂商注册表的静态关联键：真实厂商用注册表推导的 BuiltinProviderId
+ * （写错编译期即报），自定义端点伪条目用 custom 两 id。
+ * import type 纯类型引入，零运行时开销。过渡态：用户已保存配置的存储键
+ * 仍是 displayName（providerName），本类型只用于 presets 静态数据关联。
+ */
+export type ModelPresetProviderId = BuiltinProviderId | "custom-cloud" | "custom-local";
 
 export interface ProviderProfile {
   baseUrl: string;
@@ -74,6 +83,9 @@ export interface ModelSettings {
 
 export interface ModelPreset {
   providerName: string;
+  // 与厂商注册表的静态关联键：真实厂商 = BuiltinProviderId，伪条目 = custom 两 id。
+  // 存储查找暂仍走 providerName（displayName 过渡态），本字段只做静态对齐与一致性校验。
+  providerId: ModelPresetProviderId;
   // 厂商短名（去括号后缀），用于状态栏"正在喂养"显示和昵称默认值。
   // 如 "MiniMax（稀宇科技）" → shortName "MiniMax"。
   shortName: string;
@@ -100,7 +112,7 @@ export interface ModelPreset {
   hiddenInPresetList?: boolean;
 }
 
-export interface GeneralSettings extends ChatAppearanceSettings {
+export interface GeneralSettings {
   maxParallelToolCalls: number;
   citaEnabled: boolean;
   citaSemanticEngine: "remote" | "local";
@@ -113,11 +125,10 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   /** 朋友圈热闹程度：抽签人数分布与角色日调用上限联动档位 */
   momentsLiveliness: "quiet" | "natural" | "lively";
   petAlwaysOnTop: boolean;
+  rememberWindowState: boolean;
   petVisible: boolean;
   petZoom: number;
   disableGpuElectron?: boolean;
-  sidebarVisible: boolean;
-  tasksVisible: boolean;
   /** 提醒中心音效总开关：关闭后所有 toast 静音 */
   toastSoundEnabled: boolean;
   launchAtLogin: boolean;
@@ -327,13 +338,31 @@ export interface DeleteAllMemoryResult {
   restartRequired: boolean;
 }
 
+/**
+ * renderer 侧的 MCP server 配置视图。
+ * 与主进程 McpServerConfig 对应（effectKindOverrides 等高级字段对 UI 不可见）。
+ */
+export interface McpServerConfigView {
+  id: string;
+  name: string;
+  transport: "stdio" | "sse" | "http";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
 export interface SettingsApi {
   minimize: () => void;
   close: () => void;
   getConfig: () => Promise<ModelSettings>;
   saveConfig: (config: Partial<ModelSettings>) => Promise<ModelSettings>;
-  listModelProfiles?: () => Promise<{ profiles: Array<{ id: string; provider: string; displayName?: string; baseUrl: string; model: string; apiKey: string; explicitTransport?: ApiTransport; reasoning?: ReasoningPreference; contextWindowTokens?: number; multimodal?: boolean }>; defaultModelProfileId?: string }>;
-  saveModelProfile?: (profile: { id?: string; provider: string; displayName?: string; baseUrl: string; model: string; apiKey: string; explicitTransport?: ApiTransport; reasoning?: ReasoningPreference; contextWindowTokens?: number; multimodal?: boolean }) => Promise<{ added: boolean; profiles: unknown[]; defaultModelProfileId?: string }>;
+  listModelProfiles?: () => Promise<{ profiles: Array<{ id: string; provider: string; displayName?: string; baseUrl: string; model: string; apiKey: string; explicitTransport?: ApiTransport; reasoning?: ReasoningPreference; contextWindowTokens?: number; multimodal?: boolean;
+    modelOptions?: Record<string, { contextWindowTokens?: number; multimodal?: boolean }>; models?: string[] }>; defaultModelProfileId?: string }>;
+  saveModelProfile?: (profile: { id?: string; provider: string; displayName?: string; baseUrl: string; model: string; apiKey: string; explicitTransport?: ApiTransport; reasoning?: ReasoningPreference; contextWindowTokens?: number; multimodal?: boolean;
+    modelOptions?: Record<string, { contextWindowTokens?: number; multimodal?: boolean }>; models?: string[] }) => Promise<{ added: boolean; profiles: unknown[]; defaultModelProfileId?: string }>;
   deleteModelProfile?: (id: string) => Promise<unknown>;
   setDefaultModelProfile?: (id: string) => Promise<unknown>;
   getGeneral: () => Promise<GeneralSettings>;
@@ -356,9 +385,6 @@ export interface SettingsApi {
   openStickerManager: () => Promise<{ ok: boolean; error?: string }>;
   stickerPickFile?: () => Promise<string | null>;
   stickerAdd?: (payload: { sourcePath: string; id: string; description: string; phrases: string[] }) => Promise<unknown>;
-  getEmbeddingStatus?: () => Promise<Record<string, { installed: boolean; sizeBytes: number }>>;
-  downloadEmbeddingModel?: (model: string, mirror: string) => Promise<{ ok: boolean; error?: string }>;
-  deleteEmbeddingModel?: (model: string) => Promise<{ ok: boolean; error?: string }>;
   embeddingSetModel?: (model: string) => Promise<{ ok: boolean; clearedEntries?: number; error?: string }>;
   rerankerSetMode?: (mode: string) => Promise<boolean>;
   setToolEnabled?: (id: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
@@ -390,9 +416,10 @@ export interface SettingsApi {
   getSkillModeOverrides?: () => Promise<Record<string, Partial<Record<"work" | "code" | "learn", boolean>>>>;
   setSkillModeOverride?: (skillId: string, mode: "work" | "code" | "learn", enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
   clearSkillModeOverride?: (skillId: string, mode?: "work" | "code" | "learn") => Promise<{ ok: boolean; error?: string }>;
-  addMcpServer?: (config: unknown) => Promise<{ ok: boolean; toolIds?: string[]; error?: string }>;
+  addMcpServer?: (config: McpServerConfigView) => Promise<{ ok: boolean; toolIds?: string[]; error?: string }>;
   removeMcpServer?: (serverId: string) => Promise<{ ok: boolean; error?: string }>;
   listMcpServers?: () => Promise<Array<{ id: string; name: string; connected: boolean; toolCount: number; toolIds: string[] }>>;
+  listMcpServerConfigs?: () => Promise<McpServerConfigView[]>;
   getPermissionLevel?: () => Promise<{ level: "read-only" | "scoped" | "per-action" | "full" }>;
   setPermissionLevel?: (level: string) => Promise<{ ok: boolean; level?: string; error?: string }>;
   // 计划模式开关（renderer → main）：显式设置 on/off
@@ -403,7 +430,8 @@ export interface SettingsApi {
   onPlanStateChanged?: (
     callback: (payload: { conversationId: string; state: string }) => void,
   ) => (() => void) | void;
-  testConnection?: (config: { provider: string; baseUrl: string; model: string; apiKey: string; explicitTransport?: ApiTransport; reasoning?: ReasoningPreference }) => Promise<{ ok: boolean; latency: number; sample?: string; error?: string }>;
+  testConnection?: (config: { provider: string; baseUrl: string; model: string; apiKey: string; explicitTransport?: ApiTransport; reasoning?: ReasoningPreference; manualReasoning?: import("../../../shared/manual-reasoning").ManualReasoningConfig }) => Promise<{ ok: boolean; latency: number; sample?: string; error?: string }>;
+  previewReasoning?: (config: { provider: string; baseUrl: string; model: string; apiKey: string; explicitTransport?: ApiTransport; reasoning?: ReasoningPreference; manualReasoning?: import("../../../shared/manual-reasoning").ManualReasoningConfig }) => Promise<Record<string, unknown>>;
   testVision?: (config: { baseUrl: string; apiKey: string; model: string }) => Promise<{ ok: boolean; latency: number; sample?: string; error?: string }>;
   // main → settings：要求切到指定标签（窗口已打开时由 main 发这个事件）
   onSwitchSection?: (callback: (section: string) => void) => (() => void) | void;
@@ -415,6 +443,11 @@ export interface SettingsApi {
   >;
   channelsRestart: () => Promise<{ ok: boolean }>;
   channelsQqTestConnection: () => Promise<{ ok: boolean; error?: string; detail?: Record<string, unknown> }>;
+  /**
+   * QQ 监听鉴权预检（renderer → main）：主进程按参数解析真实监听地址并判定是否
+   * 必须配置 Access Token。渲染端看不到网络接口，因此不得自行复制该判定。
+   */
+  channelsQqResolveAuthRequirement: (input: { listenMode: string; customHost?: string }) => Promise<QqListenAuthRequirement>;
   channelsQqBotTestConnection: () => Promise<{ ok: boolean; error?: string; detail?: Record<string, unknown> }>;
   channelsLogGet: (limit?: number) => Promise<unknown[]>;
   channelsLogClear: () => Promise<{ ok: boolean }>;

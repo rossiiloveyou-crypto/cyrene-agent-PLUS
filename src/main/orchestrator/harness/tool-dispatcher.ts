@@ -15,7 +15,7 @@ import type { AgentState, HarnessEvent, ToolObservation } from "./types";
 import { parseToolCallArgs, toolCallFingerprint } from "./types";
 import { isHarnessBuiltin, isInteractiveHarnessBuiltin, TASK_TOOL_ID } from "./builtin-tools";
 import { executeUpdateTodo, executeAskUser, executeTask } from "./builtin-tools";
-import { ENTER_PLAN_MODE_TOOL_ID, WRITE_PLAN_TOOL_ID, executeEnterPlanMode, executeWritePlan } from "./plan-tools";
+import { ENTER_PLAN_MODE_TOOL_ID, WRITE_PLAN_TOOL_ID, SUBMIT_PLAN_TOOL_ID, executeEnterPlanMode, executeWritePlan, executeSubmitPlan } from "./plan-tools";
 import { executeReadToolResult, READ_TOOL_RESULT_TOOL_ID } from "./tool-output/read-tool-result";
 import { resolveSideEffect } from "./side-effect-resolver";
 import { extractFileChangesFromOutput } from "../tools/registry/tool-evidence";
@@ -162,6 +162,7 @@ export async function dispatchToolCall(
     toolCallId: call.id,
     toolName: call.name,
     args,
+    displayName: tool.name,
   });
 
   let result: ToolCallResult;
@@ -171,7 +172,17 @@ export async function dispatchToolCall(
     : args.url !== undefined ? [String(args.url)]
     : [];
 
-  const run = async (): Promise<ToolExecutionOutcome> => executeToolDefinition(tool, args, ctx.toolContext);
+  const shellContext = call.name === "run_shell" && ctx.onEvent
+    ? {
+        ...ctx.toolContext,
+        userQuery: ctx.toolContext?.userQuery ?? "",
+        onShellOutput: (update: import("../tools/registry/tool-context").ShellOutputUpdate) => {
+          try { ctx.toolContext?.onShellOutput?.(update); } catch { /* 观察者不能中断命令 */ }
+          try { ctx.onEvent?.({ type: "tool_output", toolCallId: call.id, ...update }); } catch { /* UI 事件不能中断命令 */ }
+        },
+      }
+    : ctx.toolContext;
+  const run = async (): Promise<ToolExecutionOutcome> => executeToolDefinition(tool, args, shellContext);
   if (ctx.executionLedger) {
     const ledgerResult = await ctx.executionLedger.execute(
       { logicalInvocationId: `${ctx.toolContext?.runId ?? "unknown"}:${call.id}`, capability: tool.id, targetRefs, args },
@@ -309,6 +320,8 @@ async function executeHarnessBuiltin(
       return executeEnterPlanMode(call, ctx.toolContext, ctx.onEvent);
     case WRITE_PLAN_TOOL_ID:
       return executeWritePlan(call, ctx.toolContext, ctx.onEvent);
+    case SUBMIT_PLAN_TOOL_ID:
+      return executeSubmitPlan(call, ctx.toolContext, ctx.requestUserClarification, ctx.onEvent);
     case "task":
       return executeTask(call, ctx.taskExecutor);
     case READ_TOOL_RESULT_TOOL_ID:

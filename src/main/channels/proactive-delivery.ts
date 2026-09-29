@@ -11,6 +11,9 @@ import type { ChannelId, IncomingMessage, OutgoingMessage } from "./types";
 
 export type ProactiveMobileChannel = Extract<ChannelId, "wechat" | "feishu">;
 
+// External channel delivery remains legacy until Task 11; CTA local intent
+// persistence must not be presented as channel exactly-once delivery.
+
 export interface RecentProactiveChannelRecipient {
   targetId: string;
   threadId?: string;

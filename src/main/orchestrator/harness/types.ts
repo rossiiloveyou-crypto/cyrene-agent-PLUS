@@ -156,18 +156,22 @@ export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
 export type HarnessEvent =
   | { type: "round_start"; roundId: string }
   | { type: "round_end"; roundId: string }
+  | { type: "candidate_text_delta"; roundId: string; delta: string }
+  | { type: "candidate_text_discard"; roundId: string }
   | { type: "progress_text"; content: string }
   | { type: "final_answer"; content: string }
   | { type: "reasoning_start"; messageId: string }
   | { type: "reasoning_delta"; messageId: string; delta: string }
   | { type: "reasoning_end"; messageId: string }
-  | { type: "tool_start"; toolCallId: string; toolName: string; args: Record<string, unknown> }
+  | { type: "tool_start"; toolCallId: string; toolName: string; args: Record<string, unknown>; displayName?: string }
+  | ({ type: "tool_output"; toolCallId: string } & import("../tools/registry/tool-context").ShellOutputUpdate)
   | { type: "tool_end"; toolCallId: string; outcome: ToolCallOutcome; preview: string; changes?: ToolFileChange[] }
   | { type: "todo_update"; items: TodoItem[] }
   | { type: "context_usage"; snapshot: ContextUsageSnapshot }
   | { type: "ask_user"; card: unknown }
   | { type: "plan_mode_changed"; state: import("../plan-mode").PlanStateName }
   | { type: "plan_written"; planPath: string }
+  | { type: "plan_submitted"; conversationId: string; planPath: string; planContent: string }
   | { type: "runtime_feedback"; message: string }
   | { type: "error"; message: string };
 
@@ -214,6 +218,14 @@ export interface HarnessCheckpoint {
 }
 
 // ── Harness 输入与输出 ───────────────────────────────────
+
+/** 插入当前运行的用户调整消息（宿主已提交为正式用户消息，harness 只负责进上下文）。 */
+export interface RunAdjustmentMessage {
+  /** 队列条目稳定标识（与正式用户消息 id 一致）。 */
+  id: string;
+  /** 模型可见的原始文字。 */
+  rawContent: string;
+}
 
 export interface HarnessToolSpec extends ToolSpec {
   /** Harness 内置工具标记（不进 registry） */
@@ -274,6 +286,14 @@ export interface HarnessInput {
   onCompactionLifecycle?: (event: HarnessCompactionLifecycleEvent) => void;
   /** 每次模型请求前的非敏感缓存结构诊断。 */
   onCacheDiagnostic?: (diagnostic: HarnessCacheDiagnostic) => void;
+  /**
+   * 插话轮询：返回 undefined 表示当前没有标记插入本运行的消息（同步快速路径，
+   * 不产生 await 挂起点）；返回 Promise 表示有待提交的插话，resolve 值为
+   * 已提交消息（提交失败的条目由宿主保留标记，不在返回值中）。
+   * harness 在（a）每轮模型请求前、（b）模型准备结束运行的最终结算前调用；
+   * 结束路径拿到非空数组时不得结算，须把本轮回复转为中间过程并继续循环。
+   */
+  pollRunAdjustments?: () => Promise<RunAdjustmentMessage[]> | undefined;
   /** 用户澄清函数（ask_user 内置工具使用） */
   requestUserClarification?: (card: unknown) => Promise<unknown>;
   /** 是否向模型公布并允许 Ask/不确定副作用确认工具；默认 true。 */
@@ -288,6 +308,12 @@ export interface HarnessInput {
   executionLedger?: import("../execution-ledger").ExecutionLedger;
   /** ToolOutputStore：生产 Harness 注入的完整工具结果存储。 */
   toolOutputStore?: ToolOutputStore;
+  /**
+   * Run 级轨迹提交端（CTA Phase 1）：canonical 消息权威落盘。
+   * assistant 先于工具 dispatch、tool_result 先于生命周期 committed 写入；
+   * 写失败 fail-closed（终态 error），缺省不写轨迹。
+   */
+  transcriptSink?: import("../transcript-sink").TranscriptSink;
   /** 父会话注入的前台子任务执行器；子 Harness 不会继续注入它。 */
   taskExecutor?: (request: import("../task-runtime").TaskExecuteRequest) => Promise<import("../task-runtime").TaskExecuteResult>;
 }

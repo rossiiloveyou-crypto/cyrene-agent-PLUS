@@ -100,7 +100,6 @@ describe("渠道上下文", () => {
   it("记录会话时迁移旧发送者键并支持反查", () => {
     const migrateHistory = vi.fn();
     const context = createChannelContext({
-      appendChannelHistory: vi.fn(),
       migrateHistory,
     });
     const msg = makeIncoming({

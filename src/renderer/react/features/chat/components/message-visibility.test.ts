@@ -40,6 +40,14 @@ describe("assistantRenderStages", () => {
     })).toEqual(["reasoning", "assistant"]);
   });
 
+  it("shows the assistant slot while only transient candidate text exists", () => {
+    expect(assistantRenderStages({
+      content: "",
+      transientText: "实时预览",
+      responseStarted: false,
+    })).toEqual(["assistant"]);
+  });
+
   it("keeps a user's collapsed choice while streaming content rerenders", () => {
     const collapsed = updateReasoningExpanded({}, "assistant-1", false);
     expect(resolveReasoningExpanded(collapsed, "assistant-1")).toBe(false);
@@ -71,16 +79,20 @@ describe("assistantRenderStages", () => {
     expect(source).not.toContain("destroyOnHidden={false}");
   });
 
-  it("keeps Markdown renderer options stable and leaves streaming state to AG-UI", () => {
-    const source = fs.readFileSync(
+  it("keeps the shared Streamdown configuration stable", () => {
+    const listSource = fs.readFileSync(
       fileURLToPath(new URL("./ChatMessageList.tsx", import.meta.url)),
       "utf8",
     );
-    expect(source).toContain("const markdownComponents = { code: MarkdownCode };");
-    expect(source).toContain("components={markdownComponents}");
-    expect(source).toContain("streaming={completedMarkdownOptions}");
-    expect(source).not.toContain("streaming={streaming ? streamingMarkdownOptions : completedMarkdownOptions}");
-    expect(source).not.toContain("componentDidUpdate(previousProps");
-    expect(source).toContain("prismLightMode={false}");
+    const rendererSource = fs.readFileSync(
+      fileURLToPath(new URL("./StreamdownMessageContent.tsx", import.meta.url)),
+      "utf8",
+    );
+    expect(listSource).toContain("<StreamdownMessageContent content={normalized} streaming={Boolean(streaming)} />");
+    expect(rendererSource).toContain("const messageComponents: Components");
+    expect(rendererSource).toContain("const rehypePlugins: PluggableList");
+    expect(rendererSource).toContain("singleDollarTextMath: true");
+    expect(rendererSource).not.toContain("componentDidUpdate(previousProps");
+    expect(rendererSource).toContain("prismLightMode={false}");
   });
 });

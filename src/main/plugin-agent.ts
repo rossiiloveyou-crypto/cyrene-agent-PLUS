@@ -176,7 +176,7 @@ export function createPluginAgentRunner(deps: PluginAgentRunnerDeps): NonNullabl
       mode: "work",
       promptSource: "plugin-agent",
       promptChannel: "minecraft",
-      messages: [{ role: "user", content: goal }],
+      currentUser: { turnId: `plugin:${runId}`, text: goal, visibleContent: goal },
     });
     const toolSystemContent = buildToolSystemPrompt("work", tools);
     const promptLayers = buildHarnessPromptLayers({
@@ -202,6 +202,7 @@ export function createPluginAgentRunner(deps: PluginAgentRunnerDeps): NonNullabl
         apiKey: built.options.settings.apiKey,
         explicitTransport: built.options.settings.explicitTransport,
         reasoning: built.options.settings.reasoning,
+        manualReasoning: built.options.settings.manualReasoning,
       },
       config: {
         maxRounds,

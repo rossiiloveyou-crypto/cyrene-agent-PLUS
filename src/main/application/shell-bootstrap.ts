@@ -88,15 +88,16 @@ export async function startShell(deps: ShellDependencies): Promise<ShellResult> 
       }
     },
     activate: async (request) => {
+      if (windowManager.hasCurrentDisclaimerConsent?.() === false) {
+        windowManager.showOnboardingWindow?.();
+        return;
+      }
       switch (request.kind) {
         case "chat":
           await windowManager.openReactChatWindow(request.sessionId);
           break;
-        case "sidebar":
-          windowManager.createSidebarWindow();
-          break;
         case "settings":
-          windowManager.createSettingsWindow(request.section);
+          await windowManager.openSettings(request.section);
           break;
         case "music":
           windowManager.createMusicPlayerWindow();

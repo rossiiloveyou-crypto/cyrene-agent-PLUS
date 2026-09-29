@@ -1,24 +1,24 @@
 .cy-sidebar-toggle {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
   background: transparent;
-  border-radius: 6px;
-  color: var(--cy-text-muted);
+  border-radius: 8px;
+  color: var(--rb-text-secondary);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 
 .cy-sidebar-toggle:hover {
-  background: var(--cy-bg-hover);
-  color: var(--cy-text);
+  background: var(--rb-surface-hover);
+  color: var(--rb-text-primary);
 }
 
 .cy-sidebar-toggle:active {
-  background: var(--cy-bg-active);
+  background: var(--rb-surface-active);
 }
 
 .cy-sidebar-toggle > svg {
@@ -45,6 +45,7 @@
   opacity: 1;
 }
 
-.cy-sidebar-toggle.is-collapsed.is-hovered .cy-sidebar-chevron {
+/* 收起方向由页面根节点的 class 决定（见 .cy-page.is-collapsed），组件自身无状态 */
+.cy-page.is-collapsed .cy-sidebar-toggle.is-hovered .cy-sidebar-chevron {
   transform: scaleX(-1);
 }

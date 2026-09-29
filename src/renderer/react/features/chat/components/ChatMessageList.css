@@ -11,6 +11,20 @@
   min-height: 100%;
 }
 
+/* 消息内容永远不参与原生窗口拖动区域计算，包括嵌套卡片、按钮与伪元素。
+   no-drag 的滚动矩形可能越过裁剪边界，扣掉上方标题栏；显式 none 在当前
+   Chromium 中也会变成 no-drag。initial 才恢复不提交区域的初始值。
+   important 保证消息内组件自己的区域声明也无法重新污染窗口标题栏。 */
+.cy-message-list,
+.cy-message-list *,
+.cy-message-list::before,
+.cy-message-list::after,
+.cy-message-list *::before,
+.cy-message-list *::after {
+  app-region: initial !important;
+  -webkit-app-region: initial !important;
+}
+
 .cy-message-list__channel-context {
   position: sticky;
   z-index: 2;
@@ -22,11 +36,11 @@
   gap: 8px;
   margin: 0 auto 16px;
   padding: 6px 12px;
-  border: 1px solid var(--cy-border);
+  border: 1px solid var(--rb-border-default);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--cy-bg-workspace) 88%, transparent);
+  background: color-mix(in srgb, var(--rb-surface-workspace) 88%, transparent);
   box-shadow: 0 4px 16px rgb(43 33 54 / 8%);
-  color: var(--cy-text-secondary);
+  color: var(--rb-text-secondary);
   font-size: 12px;
   line-height: 1.4;
   backdrop-filter: blur(12px);
@@ -43,7 +57,7 @@
   height: 6px;
   flex: 0 0 6px;
   border-radius: 50%;
-  background: var(--cy-accent);
+  background: var(--rb-accent);
 }
 
 .cy-message {
@@ -86,14 +100,14 @@
     radial-gradient(circle at 30% 28%, rgb(61 174 255 / 42%) 0%, transparent 55%),
     radial-gradient(circle at 70% 75%, rgb(236 72 153 / 46%) 0%, transparent 60%),
     rgb(255 255 255 / 80%);
-  border: 1px solid var(--cy-border);
+  border: 1px solid var(--rb-border-default);
 }
 
 .cy-message--user .ant-bubble-content {
   border-radius: 16px 16px 4px;
-  background: var(--cy-accent);
+  background: var(--rb-accent);
   color: #fff;
-  box-shadow: var(--cy-shadow-bubble-accent);
+  box-shadow: var(--rb-shadow-bubble-accent);
 }
 
 .cy-message--user:has(.cy-message__sticker:only-child) .ant-bubble-content {
@@ -123,7 +137,7 @@
 }
 
 .cy-message--assistant .cy-message__channel-source {
-  color: var(--cy-text-secondary);
+  color: var(--rb-text-secondary);
 }
 
 .cy-message__attachments {
@@ -180,19 +194,27 @@
   text-decoration: underline;
 }
 
+/* 昔涟正式回答固定为无边框文本（气泡开关已删除）；用户消息气泡始终保留 */
 .cy-message--assistant .ant-bubble-content {
   max-width: 100%;
-  padding: 12px 16px;
-  border-radius: 4px 16px 16px;
-  background: #f7f7f7;
-  color: var(--cy-text);
-  border: 1px solid rgba(31, 35, 48, 0.065);
-  box-shadow: var(--cy-shadow-bubble-neutral);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--rb-text-primary);
+  box-shadow: none;
 }
 
 .cy-message--assistant .ant-bubble-body {
   min-width: 0;
-  max-width: var(--cy-message-reading-width);
+  width: calc(100% - 54px);
+  max-width: calc(100% - 54px);
+}
+
+/* 运行块内的正文：头像已钉在活动卡头部，这里视觉隐藏但保留占位，
+   保证正文左边缘与活动卡时间线内容精确对齐、且流式过程中头像不反复出现 */
+.cy-message--assistant-run .ant-bubble-avatar {
+  visibility: hidden;
 }
 
 .cy-message--reasoning {
@@ -233,6 +255,17 @@
   box-shadow: none;
 }
 
+/* 运行块内的 Review 面板：头像占位隐藏（头像钉在活动卡头部），面板与正文/时间线内容左对齐 */
+.cy-message--review-run .ant-bubble-avatar {
+  display: block;
+  visibility: hidden;
+}
+
+.cy-message--review-run .ant-bubble-body {
+  width: calc(100% - 54px);
+  max-width: calc(100% - 54px);
+}
+
 .cy-message--waiting {
   width: var(--cy-message-reading-width);
   max-width: var(--cy-message-reading-width);
@@ -259,17 +292,15 @@
   max-width: var(--cy-message-reading-width);
 }
 
-.cy-message--activity .ant-bubble-avatar {
-  display: none;
+/* 头像钉在活动卡头部（状态行左侧）：一次运行只出现一次，时间线内容缩进到头像右侧 */
+.cy-message--activity .ant-bubble-body {
+  width: calc(100% - 54px);
+  max-width: calc(100% - 54px);
 }
 
-.cy-message--activity .ant-bubble-body,
 .cy-message--activity .ant-bubble-content {
   width: 100%;
   max-width: none;
-}
-
-.cy-message--activity .ant-bubble-content {
   padding: 0;
   background: transparent;
   border: 0;
@@ -290,7 +321,7 @@
   padding: 3px 2px;
   border: 0;
   background: transparent;
-  color: var(--cy-text);
+  color: var(--rb-text-primary);
   font: 600 13px/1.4 var(--rb-font-sans, sans-serif);
   text-align: start;
   cursor: pointer;
@@ -388,7 +419,7 @@
   padding: 5px 2px;
   border: 0;
   background: transparent;
-  color: var(--cy-text);
+  color: var(--rb-text-primary);
   font: 600 12px/1.4 var(--rb-font-sans, sans-serif);
   text-align: left;
   cursor: pointer;
@@ -432,7 +463,7 @@
 
 /* 完成态标题后的文件改动提示：项目主粉高亮 */
 .cy-agent-round__files {
-  color: var(--cy-accent, #ff5b8a);
+  color: var(--rb-accent, #ff5b8a);
   font-weight: 600;
 }
 
@@ -456,8 +487,22 @@
 .cy-run-activity__process {
   padding: 7px 9px;
   border-left: 2px solid rgb(209 144 173 / 45%);
-  color: var(--cy-text-secondary);
+  color: var(--rb-text-secondary);
   font-size: 12px;
+}
+
+/* 运行时间线过程正文：显式声明排版，不再依赖消息正文的基础字号 */
+.cy-run-activity__process .cy-message-markdown {
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 1.68;
+}
+
+.cy-run-activity__process-label {
+  margin-bottom: 4px;
+  color: var(--rb-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .cy-run-activity__divider {
@@ -467,7 +512,7 @@
 
 .cy-run-activity__empty {
   padding: 6px 2px;
-  color: var(--cy-text-muted);
+  color: var(--rb-text-secondary);
   font: 500 12px/1.45 var(--rb-font-sans, sans-serif);
 }
 
@@ -476,7 +521,7 @@
   align-items: center;
   gap: 8px;
   min-height: 52px;
-  color: var(--cy-text-muted);
+  color: var(--rb-text-secondary);
   font: 500 13px/1.4 var(--rb-font-sans, sans-serif);
 }
 
@@ -560,6 +605,8 @@
 
 .cy-tool-executions__description {
   display: flex;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   align-items: center;
   gap: 7px;
@@ -570,7 +617,9 @@
 }
 
 .cy-tool-executions__detail {
+  flex: 0 1 64ch;
   min-width: 0;
+  max-width: 64ch;
   overflow: hidden;
   padding: 2px 6px;
   border: 1px solid rgb(31 35 48 / 8%);
@@ -589,13 +638,45 @@
   padding: 8px;
   border-radius: 8px;
   background: #f4f4f5;
-  color: var(--cy-text-muted);
+  color: var(--rb-text-secondary);
   font: 12px/1.55 var(--rb-font-mono, monospace);
   white-space: pre-wrap;
 }
 
+/* ask_user 工具卡展开后的问答配对：问题弱化、回答强调 */
+.cy-ask-user-qa {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 7px 0 2px;
+  padding: 0;
+  list-style: none;
+}
+
+.cy-ask-user-qa__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #f4f4f5;
+}
+
+.cy-ask-user-qa__question {
+  color: var(--rb-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cy-ask-user-qa__answer {
+  color: var(--rb-text-primary);
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
 .cy-message-reasoning {
-  color: var(--cy-text-muted);
+  color: var(--rb-text-secondary);
 }
 
 .cy-message-reasoning .ant-think-status-icon {
@@ -634,11 +715,14 @@
 
 .cy-message-reasoning .ant-think-content {
   padding-block-start: 8px;
+  padding-inline-start: 46px;
 }
 
 .cy-message-reasoning .cy-message-markdown {
-  color: var(--cy-text-muted);
+  color: var(--rb-text-secondary);
+  font-weight: 400;
   font-size: 13px;
+  line-height: 1.68;
 }
 
 .cy-message--assistant:has(.cy-message__sticker:only-child) .ant-bubble-content {
@@ -687,22 +771,174 @@
 }
 
 .cy-message--system {
-  color: var(--cy-text-muted);
+  color: var(--rb-text-secondary);
 }
 
+/* 基础规则只保留跨场景共享的布局与全局字体；字号/行高/字重由各使用场景自己声明，
+   调整聊天消息排版时不再波及文件预览、运行时间线、交互面板等复用 MarkdownContent 的区域。 */
 .cy-message-markdown {
   min-width: 0;
   color: inherit;
-  font-weight: 400;
-  font-size: 14px;
-  line-height: var(--cy-chat-line-height, 1.75);
   font-family: var(--rb-font-sans, sans-serif);
   user-select: text;
+}
+
+/* 聊天消息正文（气泡内）的排版：用户消息与会话行高一致，
+   正式回答采用较紧凑的阅读节奏，避免 Markdown 默认标题压过正文。 */
+.cy-message__user-body .cy-message-markdown {
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+/* 排版数值由设置页"昔涟消息字体"控制：写入根节点 CSS 变量，未设置时回落这里的默认值 */
+.cy-message__assistant-body .cy-message-markdown {
+  font-weight: var(--cy-msg-weight, 400);
+  font-size: var(--cy-msg-size, 15px);
+  line-height: var(--cy-msg-line-height, 1.85);
+  letter-spacing: var(--cy-msg-spacing, 0.8px);
+}
+
+.cy-message--assistant .cy-message-markdown h1 {
+  margin: 26px 0 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.28;
+}
+
+.cy-message--assistant .cy-message-markdown h2 {
+  margin: 24px 0 10px;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.cy-message--assistant .cy-message-markdown h3 {
+  margin: 20px 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.cy-message--assistant .cy-message-markdown > :is(h1, h2, h3):first-child {
+  margin-top: 0;
 }
 
 .cy-message-markdown pre {
   max-width: 100%;
   overflow-x: auto;
+}
+
+/* 工作区文件引用保持为轻量行内链接：用品牌粉强调，不用 chip 底色打断正文。 */
+.cy-file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--rb-accent);
+  font-family: inherit;
+  font-size: 0.96em;
+  font-weight: 600;
+  line-height: 1.45;
+  cursor: pointer;
+  vertical-align: baseline;
+  text-decoration: none;
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+
+.cy-file-link:hover {
+  color: color-mix(in srgb, var(--rb-accent) 82%, #8f3657);
+  text-decoration: underline;
+}
+
+.cy-file-link__icon {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  opacity: 0.65;
+}
+
+.cy-file-link__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+/* 网站链接：淡底色 pill（favicon + 文本 + 域名），比文件链接突出半档但不打断正文 */
+.cy-web-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 1px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rb-accent) 9%, transparent);
+  color: var(--rb-accent);
+  font-family: inherit;
+  font-size: 0.94em;
+  font-weight: 600;
+  line-height: 1.45;
+  vertical-align: baseline;
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.cy-web-link:hover {
+  background: color-mix(in srgb, var(--rb-accent) 16%, transparent);
+  color: color-mix(in srgb, var(--rb-accent) 82%, #8f3657);
+}
+
+.cy-web-link__favicon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+
+.cy-web-link__icon {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  opacity: 0.65;
+}
+
+.cy-web-link__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.cy-web-link__domain {
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+  color: color-mix(in srgb, currentColor 52%, transparent);
+  font-weight: 400;
+  font-size: 0.86em;
+}
+
+.cy-file-link.is-plain {
+  display: inline;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-weight: inherit;
+  cursor: auto;
+  text-decoration: none;
 }
 
 /* Mermaid 图卡片：自适应宽度、横向滚动兜底 */
@@ -768,7 +1004,7 @@
   padding: 10px 12px;
   border-radius: 8px;
   background: #f7f2f4;
-  color: var(--cy-text);
+  color: var(--rb-text-primary);
   font: 12px/1.6 Consolas, "Cascadia Code", monospace;
   white-space: pre-wrap;
   word-break: break-word;
@@ -808,7 +1044,7 @@
   padding: 10px 12px;
   border-radius: 8px;
   background: #f7f2f4;
-  color: var(--cy-text);
+  color: var(--rb-text-primary);
   font: 12px/1.6 Consolas, "Cascadia Code", monospace;
   white-space: pre-wrap;
   word-break: break-word;
@@ -823,17 +1059,78 @@
   border: 1px solid rgb(31 35 48 / 10%);
   border-radius: 10px;
   background: #f2f2f3;
-  color: var(--cy-text);
+  color: var(--rb-text-primary);
   font: 12px/1.6 Consolas, "Cascadia Code", monospace;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.cy-message-markdown .katex-display {
+/* 独占一行的公式建立清晰的阅读层级；行内公式仍跟随正文尺寸。 */
+.cy-message-markdown .katex-display,
+.cy-message-markdown p:has(> .katex:only-child) {
+  display: block;
   max-width: 100%;
+  margin: 12px 0 18px;
+  padding: 3px 0 5px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding-block: 4px;
+  color: #33272d;
+  font-size: 1.16em;
+  line-height: 1.6;
+}
+
+/* Streamdown 默认把列表标记放在内容内部，中文正文会显得挤；改为常规外置缩进。 */
+.cy-message-markdown :is(
+  ul[data-streamdown="unordered-list"],
+  ol[data-streamdown="ordered-list"]
+) {
+  margin: 8px 0 12px;
+  padding-inline-start: 22px;
+  list-style-position: outside;
+}
+
+.cy-message-markdown li[data-streamdown="list-item"] {
+  margin: 4px 0;
+  padding-block: 0;
+}
+
+.cy-message-markdown li[data-streamdown="list-item"]::marker {
+  color: #bd6d8a;
+}
+
+/* GFM 任务列表使用产品色复选框，禁用态也保持清晰，不再回落成系统灰。 */
+.cy-message-markdown li[data-streamdown="list-item"]:has(input[type="checkbox"]) {
+  list-style-type: none;
+}
+
+.cy-message-markdown input[type="checkbox"] {
+  appearance: none;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin: 0 7px 0 0;
+  border: 1px solid #d7c8ce;
+  border-radius: 3px;
+  background: #fff;
+  opacity: 1;
+  vertical-align: -2px;
+}
+
+.cy-message-markdown input[type="checkbox"]:checked {
+  border-color: var(--rb-accent);
+  background: var(--rb-accent);
+}
+
+.cy-message-markdown input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  width: 4px;
+  height: 7px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
 }
 
 .cy-message-markdown > :first-child {
@@ -845,7 +1142,7 @@
 }
 
 .cy-message-markdown a {
-  color: var(--cy-accent);
+  color: var(--rb-accent);
 }
 
 .cy-message-markdown blockquote {
@@ -872,6 +1169,73 @@
 .cy-message-markdown td {
   padding: 7px 10px;
   border: 1px solid #e7e7e7;
+}
+
+/* 聊天表格只保留内容本身：无复制、下载、全屏工具栏，也不制造额外一行空白。 */
+.cy-message-markdown [data-streamdown="table-wrapper"] {
+  max-width: 100%;
+  margin: 16px 0;
+  gap: 0;
+  padding: 0;
+  border: 1px solid #eadde3;
+  border-radius: 10px;
+  background: #fffdfd;
+  overflow: hidden;
+}
+
+.cy-message-markdown [data-streamdown="table-wrapper"] > div:last-child {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.cy-message-markdown [data-streamdown="table"] {
+  min-width: 100%;
+  border: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.cy-message-markdown [data-streamdown="table"] th,
+.cy-message-markdown [data-streamdown="table"] td {
+  padding: 8px 12px;
+  border: 0;
+  color: var(--rb-text-primary);
+  font-size: 13px;
+  vertical-align: top;
+}
+
+.cy-message-markdown [data-streamdown="table"] th {
+  background: #fff5f8;
+  color: #5f4b54;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.cy-message-markdown [data-streamdown="table"] :is(th, td):not(:last-child) {
+  border-right: 1px solid #eee3e7;
+}
+
+.cy-message-markdown [data-streamdown="table"] tbody tr + tr > td {
+  border-top: 1px solid #f0e7ea;
+}
+
+.cy-message-markdown hr[data-streamdown="horizontal-rule"] {
+  height: 1px;
+  margin: 20px 0;
+  border: 0;
+  border-top: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(238 170 191 / 22%) 16%,
+    rgb(224 142 171 / 44%) 50%,
+    rgb(238 170 191 / 22%) 84%,
+    transparent 100%
+  );
 }
 
 .cy-copy-button {
@@ -916,7 +1280,7 @@
 }
 
 .cy-last-turn-action:hover {
-  color: var(--cy-accent);
+  color: var(--rb-accent);
   transform: scale(1.08);
 }
 
@@ -981,7 +1345,7 @@
 .cy-last-message-editor__actions button.is-primary {
   border-color: #fff;
   background: #fff;
-  color: var(--cy-accent);
+  color: var(--rb-accent);
   font-weight: 600;
 }
 
@@ -991,7 +1355,7 @@
 }
 
 .cy-tts-button:hover {
-  color: var(--cy-accent) !important;
+  color: var(--rb-accent) !important;
   transform: scale(1.08);
 }
 
@@ -1009,7 +1373,7 @@
 }
 
 .cy-tts-button.is-playing {
-  color: var(--cy-accent) !important;
+  color: var(--rb-accent) !important;
 }
 
 .cy-tts-button__wave {
@@ -1043,20 +1407,6 @@
 .cy-message--assistant .ant-bubble-footer {
   display: flex;
   justify-content: flex-start;
-}
-
-:root[data-assistant-bubble="off"] .cy-message--assistant .ant-bubble-content {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-/* 无气泡时不为可拖动的 Todo/Git 卡片预留阅读宽度；保留头像与固定右侧边距。 */
-:root[data-assistant-bubble="off"] .cy-message--assistant .ant-bubble-body {
-  width: calc(100% - 54px);
-  max-width: calc(100% - 54px);
 }
 
 .cy-message:hover .cy-copy-button,

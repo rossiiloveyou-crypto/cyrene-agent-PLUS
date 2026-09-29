@@ -46,6 +46,12 @@ vi.mock("../../../i18n", () => {
         "pluginPanel.market.loadFailed": "获取插件列表失败：{{error}}",
         "pluginPanel.market.installFailed": "安装失败：{{error}}",
         "pluginPanel.market.installSuccess": "{{name}} 安装成功",
+        "pluginPanel.market.sourceUsed": "数据源",
+        "pluginPanel.market.sourceStandby": "可用",
+        "pluginPanel.market.sourceDead": "已死",
+        "pluginPanel.market.sourceSection": "数据源",
+        "pluginPanel.market.sourceGitee": "Gitee",
+        "pluginPanel.market.sourceGithub": "GitHub",
       };
   const t = (key: string, values?: Record<string, string>) => {
       if (key === "pluginPanel.developer") return `开发者：${values?.author}`;
@@ -56,6 +62,17 @@ vi.mock("../../../i18n", () => {
   };
   return { useTranslation: () => ({ t }) };
 });
+
+// 统一反馈入口的稳定 spy：断言删除插件走危险确认而非浏览器默认弹窗
+const feedbackSpies = vi.hoisted(() => ({
+  notice: vi.fn(),
+  alert: vi.fn(() => Promise.resolve()),
+  confirm: vi.fn(() => Promise.resolve(true)),
+}));
+
+vi.mock("../../../components/feedback/FeedbackProvider", () => ({
+  useFeedback: () => feedbackSpies,
+}));
 
 import { PluginModePanel, pluginToggleTarget, resolveMarketAction } from "./PluginModePanel";
 
@@ -113,6 +130,9 @@ describe("PluginModePanel", () => {
   beforeEach(() => {
     vi.stubGlobal("React", React);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    feedbackSpies.notice.mockClear();
+    feedbackSpies.alert.mockClear().mockReturnValue(Promise.resolve());
+    feedbackSpies.confirm.mockClear().mockReturnValue(Promise.resolve(true));
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -179,6 +199,37 @@ describe("PluginModePanel", () => {
       .find((button) => button.textContent === "删除");
     expect(deleteButton?.disabled).toBe(true);
     expect(deleteButton?.title).toBe("内置插件不可删除");
+  });
+
+  it("删除插件先走危险确认，确认后才卸载", async () => {
+    const api = apiFor([plugin()]);
+    await renderPanel(api);
+
+    const deleteButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "删除");
+    expect(deleteButton?.disabled).toBe(false);
+
+    await act(async () => deleteButton?.click());
+
+    // 危险确认：标题为删除、dangerous 标记、默认聚焦取消
+    expect(feedbackSpies.confirm).toHaveBeenCalledWith(expect.objectContaining({
+      title: "删除",
+      dangerous: true,
+    }));
+    expect(api.uninstall).toHaveBeenCalledWith("system-status");
+  });
+
+  it("危险确认取消时不卸载插件", async () => {
+    feedbackSpies.confirm.mockReturnValue(Promise.resolve(false));
+    const api = apiFor([plugin()]);
+    await renderPanel(api);
+
+    const deleteButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "删除");
+    await act(async () => deleteButton?.click());
+
+    expect(feedbackSpies.confirm).toHaveBeenCalledTimes(1);
+    expect(api.uninstall).not.toHaveBeenCalled();
   });
 
   it("切换到市场视图拉取列表并渲染卡片，切回后恢复插件视图", async () => {
@@ -259,6 +310,34 @@ describe("PluginModePanel", () => {
     await clickMarketToggle();
 
     expect(container.textContent).toContain("获取插件列表失败：网络不可用");
+  });
+
+  it("点击数据源 chip 会以该源 url 重新拉取市场列表", async () => {
+    const gitee = "https://gitee.com/playa0/cyrene-plugins/raw/main/registry.json";
+    const github = "https://raw.githubusercontent.com/Playa-0v0/Cyrene-Plugins/main/registry.json";
+    const api = apiFor([]);
+    (api.marketList as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      plugins: [marketEntry()],
+      sources: [
+        { url: github, ok: true, used: true },
+        { url: gitee, ok: true, used: false },
+      ],
+    });
+    await renderPanel(api);
+    await clickMarketToggle();
+
+    // 首次进入自动拉取（无偏好源）
+    expect(api.marketList).toHaveBeenCalledWith(undefined);
+
+    const chips = [...container.querySelectorAll<HTMLButtonElement>(".plugin-panel__source-chip")];
+    expect(chips).toHaveLength(2);
+    const giteeChip = chips.find((chip) => chip.textContent === "Gitee");
+    expect(giteeChip).toBeDefined();
+    await act(async () => giteeChip?.click());
+
+    expect(api.marketList).toHaveBeenLastCalledWith(gitee);
+    expect(api.marketList).toHaveBeenCalledTimes(2);
   });
 
   it("安装成功后显示提示并刷新本地列表", async () => {

@@ -1,0 +1,233 @@
+/* ===== 工具开关设置面板：从聊天窗口 ToolModePanel.css 迁移，适配设置页卡片容器 ===== */
+
+/* 卡片容器：滚动交给设置页内容区，卡片自身不设固定高度。 */
+.cy-tool-toggle {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Chat 工具增强总开关行：标题 + 说明 + 复用卡片 pill 开关。 */
+.tool-panel__master {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 14px 16px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--rb-border-default, var(--rb-border-default, #f2f2f2));
+  border-radius: 12px;
+  background: var(--rb-surface-elevated, var(--rb-surface-page, #f8f7f6));
+}
+
+.tool-panel__master-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tool-panel__master-text strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rb-text-primary, #1d1d1f);
+}
+
+.tool-panel__master-text span {
+  font-size: 11px;
+  color: var(--rb-text-secondary, #8e8e93);
+}
+
+.tool-panel__master-pill {
+  flex: none;
+}
+
+/* 搜索工具行 */
+.tool-panel__toolbar {
+  padding: 12px 16px 0;
+}
+
+.tool-panel__search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 16px;
+  font-size: 13px;
+  color: var(--rb-text-primary, var(--rb-text-primary, #1d1d1f));
+  background: var(--rb-surface-elevated, var(--rb-surface-page, #f8f7f6));
+  border: 1px solid var(--rb-border-default, var(--rb-border-default, #f2f2f2));
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tool-panel__search:focus {
+  border-color: var(--rb-accent, var(--cy-pill-border, #ff9fbd));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rb-accent, #ff5b8a) 15%, transparent);
+}
+
+/* 模式标签（Work / Code / Learn / Chat）+ 右侧当前模式提示 */
+.tool-panel__tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px 10px;
+}
+
+.tool-panel__tab {
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--rb-text-secondary, #8e8e93);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.tool-panel__tab:hover {
+  color: var(--rb-text-primary, #1d1d1f);
+}
+
+.tool-panel__tab.is-active {
+  background: var(--rb-surface-active, #fde0ed);
+  color: var(--rb-accent, #ff5b8a);
+}
+
+.tool-panel__mode-hint {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--rb-text-secondary, #8e8e93);
+}
+
+/* 工具卡片网格：两列，窄屏退化为单列 */
+.tool-panel__grid {
+  min-width: 0;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  align-content: start;
+  padding: 6px 12px 16px;
+}
+
+@media (max-width: 760px) {
+  .tool-panel__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tool-panel__loading,
+.tool-panel__empty {
+  grid-column: 1 / -1;
+  padding: 40px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--rb-text-secondary, #8e8e93);
+}
+
+/* 工具卡片 */
+.tool-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: 12px;
+  transition: background 0.15s ease;
+}
+
+.tool-card:hover {
+  background: var(--rb-surface-page, #f8f7f6);
+}
+
+.tool-card.is-off .tool-card__name {
+  color: var(--rb-text-secondary, #8e8e93);
+}
+
+.tool-card__icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.tool-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-card__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rb-text-primary, #1d1d1f);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tool-card__badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--rb-text-secondary, #8e8e93);
+  background: var(--rb-surface-page, #f8f7f6);
+  border-radius: 999px;
+}
+
+.tool-card__desc {
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--rb-text-secondary, #8e8e93);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  word-break: break-word;
+}
+
+/* 胶囊开关 */
+.tool-card__pill {
+  flex-shrink: 0;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: #e4e4e8;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tool-card__pill:hover {
+  box-shadow: 0 0 0 3px rgba(255, 91, 138, 0.08);
+}
+
+.tool-card__pill.is-on {
+  background: var(--rb-accent, #ff5b8a);
+}
+
+.tool-card__pill-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform 0.2s ease;
+}
+
+.tool-card__pill.is-on .tool-card__pill-knob {
+  transform: translateX(16px);
+}

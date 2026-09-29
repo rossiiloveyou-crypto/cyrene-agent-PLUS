@@ -18,8 +18,25 @@ function read(relativeFromTest: string): string {
   return readFileSync(fileURLToPath(new URL(relativeFromTest, import.meta.url)), "utf8");
 }
 
-const modelPanelCss = read("./ModelModePanel.css");
-const apiConfigCss = read("./api-config/ApiConfigSection.css");
+/**
+ * 🔴 P5 修订：`./ModelModePanel.css` 与 `./api-config/ApiConfigSection.css` 的读取
+ * **从模块顶层移进各自的 describe**。
+ *
+ * 原因：`ModelModePanel.{tsx,css,test}` 已被 P4 删除（官方树也没有）。原先在顶层
+ * `read("./ModelModePanel.css")` 会让**整个文件 in-load 失败**（ENOENT），
+ * 连带把下面与它无关的「顶栏不重叠」守卫一起打成 suite 级失败。
+ *
+ * 移进来以后：依赖已删文件的两条用例按预期红（ENOENT，死因明确），
+ * 顶栏那三条守卫（A8-A 门禁的一部分）**恢复可运行并全绿**。
+ * 这两个文件的最终处置（删除 / 迁移到官方 React 设置面板 / 改写断言）
+ * 属产品决定，登记在 HUMAN-人工验证台账 H-07。
+ *
+ * 🔴 P8 修订（H-07 执行）：上面那两条依赖 `ModelModePanel.css` 的用例**已按 H-07 删除**
+ * （`panel-layout.test.ts` 的处置是「**收窄**」而非整文件删 —— 见 PHASE-8 §四 4.3.2 / 陷阱 Y3）。
+ * 保留的 4 条用例全部可运行：`API 配置区保持自然高度` + 顶栏 3 条守卫。
+ * `.model-panel` / `.model-panel__grid` 的布局不变量随 `ModelModePanel.css` 一起消失，
+ * 若 P9 重建模型面板，需为其**新写**布局守卫。
+ */
 const reactRootCss = read("../../../styles/react-root.css");
 const navigationSource = read("./ChatPageNavigation.tsx");
 
@@ -33,22 +50,8 @@ function ruleBody(css: string, selector: string): string {
 }
 
 describe("模型面板布局：模型列表与 API 配置互不挤压", () => {
-  it("面板本身是滚动容器", () => {
-    const body = ruleBody(modelPanelCss, ".model-panel {");
-    expect(body).toMatch(/overflow-y:\s*auto/);
-    expect(body).toMatch(/height:\s*100%/);
-  });
-
-  it("模型网格保持自然高度，不参与 flex 高度分配", () => {
-    const body = ruleBody(modelPanelCss, ".model-panel__grid {");
-    expect(body).toMatch(/flex:\s*0\s+0\s+auto/);
-    expect(body).not.toMatch(/flex:\s*1/);
-    // 不允许再把网格自己变成第二个滚动区
-    expect(body).not.toMatch(/overflow-y:\s*auto/);
-  });
-
   it("API 配置区保持自然高度", () => {
-    const body = ruleBody(apiConfigCss, ".api-config {");
+    const body = ruleBody(read("./api-config/ApiConfigSection.css"), ".api-config {");
     expect(body).toMatch(/flex:\s*0\s+0\s+auto/);
   });
 });

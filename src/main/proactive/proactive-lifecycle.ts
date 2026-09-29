@@ -1,7 +1,7 @@
-import { randomUUID } from "crypto";
 import { powerMonitor } from "electron";
 import * as chatsStore from "../chats/chats-store";
 import { broadcastChatsChanged } from "../chats/chats-ipc";
+import type { ConversationJournalService } from "../orchestrator/conversation-journal-service";
 import { setChannelsConversationLifecycle } from "../channels/init";
 import { channelManager } from "../channels/manager";
 import {
@@ -30,6 +30,7 @@ import type { ProactiveCandidate, ProactiveRuntimeSnapshot } from "./proactive-t
 
 export interface ProactiveLifecycleOptions {
   loadGeneralSettings: () => GeneralSettings;
+  conversationJournal: ConversationJournalService;
 }
 
 export interface ProactiveLifecycle {
@@ -48,6 +49,7 @@ export function createProactiveLifecycle(options: ProactiveLifecycleOptions): Pr
   let proactiveChatService: ProactiveChatService | null = null;
   let proactiveTrigger: ProactiveTriggerController | null = null;
   const proactiveBackoffMap = new Map<string, number>();
+  const conversationJournal = options.conversationJournal;
   let normalConversationBusyCount = 0;
   let proactiveScreenLocked = false;
 
@@ -76,13 +78,17 @@ export function createProactiveLifecycle(options: ProactiveLifecycleOptions): Pr
       .map((message) => ({ role: message.role, content: message.content, at: message.at }));
   }
 
-  function getProactiveHistories(): { ordinary: ProactiveHistoryTurn[]; proactive: ProactiveHistoryTurn[] } {
+  async function getProactiveHistories(): Promise<{ ordinary: ProactiveHistoryTurn[]; proactive: ProactiveHistoryTurn[] }> {
     const ordinaryMeta = chatsStore.listSessions().find((session) => session.purpose !== "proactive-chat");
-    const ordinarySession = ordinaryMeta ? chatsStore.getSession(ordinaryMeta.id) : null;
-    const proactiveSession = chatsStore.getSessionByPurpose("proactive-chat");
+    const [ordinaryProjection, proactiveProjection] = await Promise.all([
+      ordinaryMeta ? conversationJournal.readProjection(ordinaryMeta.id) : Promise.resolve(null),
+      (chatsStore.listSessions().find((session) => session.purpose === "proactive-chat")
+        ? conversationJournal.readProjection(chatsStore.listSessions().find((session) => session.purpose === "proactive-chat")!.id)
+        : Promise.resolve(null)),
+    ]);
     return {
-      ordinary: toProactiveHistory(ordinarySession?.messages ?? []),
-      proactive: toProactiveHistory(proactiveSession?.messages ?? []),
+      ordinary: toProactiveHistory(ordinaryProjection?.messages ?? []),
+      proactive: toProactiveHistory(proactiveProjection?.messages ?? []),
     };
   }
 
@@ -102,7 +108,7 @@ export function createProactiveLifecycle(options: ProactiveLifecycleOptions): Pr
   }
 
   async function buildProactiveAgentMessages(candidate: ProactiveCandidate) {
-    const histories = getProactiveHistories();
+    const histories = await getProactiveHistories();
     const recentTopic = histories.ordinary.slice(-4).map((turn) => turn.content).join("\n");
     const retrievalQuery = `${candidate.sceneId}\n${recentTopic}`.trim();
     const [profileContext, memoryContext] = await Promise.all([
@@ -132,15 +138,27 @@ export function createProactiveLifecycle(options: ProactiveLifecycleOptions): Pr
     normalConversationBusyCount = Math.max(0, normalConversationBusyCount + delta);
   }
 
+  function bestEffortConversationStateUpdate(label: string, update: () => void): void {
+    try {
+      update();
+    } catch (error) {
+      // Conversation delivery remains authoritative; a telemetry/cooldown state
+      // write failure must not replace the original AG-UI or channel error.
+      console.warn(`[Proactive] ${label} state update failed`, error);
+    }
+  }
+
   const proactiveConversationLifecycle = {
-    onUserMessage: () => proactiveChatService?.invalidateForUserMessage(),
+    onUserMessage: () => bestEffortConversationStateUpdate("user_message", () => proactiveChatService?.invalidateForUserMessage()),
     onConversationStarted: () => {
       updateNormalConversationBusy(1);
-      proactiveChatService?.normalConversationStarted();
+      bestEffortConversationStateUpdate("conversation_started", () => proactiveChatService?.normalConversationStarted());
     },
     onConversationEnded: () => {
       updateNormalConversationBusy(-1);
-      if (normalConversationBusyCount === 0) proactiveChatService?.normalConversationEnded();
+      if (normalConversationBusyCount === 0) {
+        bestEffortConversationStateUpdate("conversation_ended", () => proactiveChatService?.normalConversationEnded());
+      }
     },
   };
 
@@ -162,33 +180,47 @@ export function createProactiveLifecycle(options: ProactiveLifecycleOptions): Pr
   async function commitLocalProactiveMessage(input: ProactiveCommitInput): Promise<ProactiveCommitResult> {
     const initialDecision = getProactiveCommitDecision(input.candidate, input.generationEpoch);
     if (!initialDecision.allowed) return { kind: "cancelled", reason: initialDecision.reason };
+    if (!input.intentId) return { kind: "cancelled", reason: "durable_intent_required" };
 
     const session = chatsStore.getOrCreateSessionByPurpose("proactive-chat", {
       title: "昔涟的主动消息",
       identityId: null,
     });
-    const at = Date.now();
-    const appended = chatsStore.appendMessage(session.id, {
-      id: randomUUID(),
-      role: "model",
-      content: input.text,
-      at,
-    });
-    if (!appended) throw new Error("主动聊天会话写入失败");
+    // Stable business identity makes a retry after a derived snapshot failure
+    // resolve the same canonical assistant entry instead of duplicating it.
+    const commitKey = input.intentId;
+    const runId = commitKey;
+    const intentAt = input.intentAt ?? 0;
+    const sink = conversationJournal.createRunSink({ conversationId: session.id, runId });
+    try {
+      const assistantEntryId = await sink.appendAssistant({
+        message: { role: "assistant", content: input.text },
+        roundId: "proactive",
+      });
+      await conversationJournal.appendPresentationNext(
+        session.id,
+        assistantEntryId,
+        `${commitKey}:presentation`,
+        { content: input.text, runSnapshot: { runId, status: "terminal", updatedAt: intentAt } },
+      );
+      await sink.checkpoint();
+    } catch (error) {
+      throw error;
+    }
     broadcastChatsChanged();
 
     // 文本已落库；上次落库后没有 panel/show 步骤要做（opener 气泡已被移除，fallback 路径没有了）。
     void input;
-    void at;
     return { kind: "committed" };
   }
 
   async function commitSelectedProactiveMessage(input: ProactiveCommitInput): Promise<ProactiveCommitResult> {
     const settings = options.loadGeneralSettings();
-    const target = settings.proactiveDeliveryTarget;
+    const target = input.deliveryTarget ?? settings.proactiveDeliveryTarget;
     const result = await routeProactiveDelivery(target, {
       commitLocal: () => commitLocalProactiveMessage(input),
       commitChannel: async (channel) => {
+        // External channel delivery remains the legacy direct path until Task 11.
         const channelResult = await sendProactiveChannelMessage({
           channel,
           text: input.text,
@@ -228,6 +260,7 @@ export function createProactiveLifecycle(options: ProactiveLifecycleOptions): Pr
             apiKey: settings.apiKey,
             explicitTransport: settings.explicitTransport,
             reasoning: settings.reasoning,
+            manualReasoning: settings.manualReasoning,
           },
           messages,
           timeoutMs: 45_000,
@@ -239,6 +272,8 @@ export function createProactiveLifecycle(options: ProactiveLifecycleOptions): Pr
         const target = options.loadGeneralSettings().proactiveDeliveryTarget;
         return target === "local" || canStartProactiveChannelDelivery(target, channelManager);
       },
+      requiresDurableIntent: () => options.loadGeneralSettings().proactiveDeliveryTarget === "local",
+      getDeliveryTarget: () => options.loadGeneralSettings().proactiveDeliveryTarget,
       commitMessage: commitSelectedProactiveMessage,
       log: (event, detail) => console.log(`[Proactive] ${event}`, detail ?? ""),
     });

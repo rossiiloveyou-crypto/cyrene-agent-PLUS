@@ -1,0 +1,98 @@
+// chatgpt（OpenAI）的注册表条目 —— 推理规则自 shared/reasoning.ts、能力自 capabilities.ts 原样迁入。
+import { defineVendor } from "../types";
+import { UNKNOWN_REASONING_CAPABILITY } from "../fallback";
+
+export const CHATGPT_REGISTRY = defineVendor({
+  capability: {
+    id: "chatgpt",
+    displayName: "ChatGPT（OpenAI）",
+    // 官方主推 Responses（o 系列完整思考摘要仅此协议有）——默认切换（施工文档关键决策）。
+    // 旧档案已固化 explicitTransport，不受默认值影响；仅新建档案/无显式值时生效。
+    transport: "responses",
+    baseUrl: "https://api.openai.com/v1",
+    authStyle: "bearer",
+    defaultModel: "",
+    supportsTools: true,
+    supportsThinking: true,
+    thinkingField: "reasoning_content",
+    cacheStrategy: "auto",
+    testStrategy: "text",
+    // model 由用户填，保守 false；门控会按 supportsVision 拦截
+    supportsVision: false,
+    // 双协议：Chat Completions + Responses（Responses 为官方主推）
+    supportedTransports: ["openai", "responses"],
+    // 端点级标记：仅 OpenAI 官方端点支持 encrypted reasoning 回放
+    responsesEncryptedReasoning: true,
+  },
+  // 状态栏短名，与 presets 的 shortName "GPT" 对齐（一致性测试校验两侧相等）
+  shortName: "GPT",
+  reasoningRules: [
+    // ── chatgpt（OpenAI）──
+    // 按具体型号拆分。
+    // GPT-6 Sol / Luna（2026-09-22 发布）：Astra 能力下放的日常工作款。官方模型页
+    // effort 支持 none/low/medium(默认)/high/xhigh/max —— 与 Astra 不同，可关闭
+    // 思考（off → reasoning_effort:"none"）；pro mode 与 GPT-6 系一致支持。
+    // 官方限制：Chat Completions 下函数调用仅 effort=none 可用，走 Responses
+    // transport 不受限（capability 默认 transport 已是 responses）。
+    { providerId: "chatgpt", modelPattern: /^gpt-6-(?:sol|luna)/i, capability: {
+      control: "effort",
+      supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+      defaultEffort: "medium",
+      requestStyle: "openai-effort",
+      supportsDisable: true,
+      supportsProMode: true,
+    } },
+    // GPT-6 Astra（2026-09-03 发布）：effort 五档与 5.6 相同，
+    // 官方迁移说明明确不支持 none 档 → supportsDisable=false，off 折叠为 on 落
+    // defaultEffort；pro mode 与 5.6 一致继续支持（官方迁移指南）。
+    // defaultEffort 是 Cyrene 的产品默认档（质量/延迟/成本的平衡点），非官方 API 默认。
+    { providerId: "chatgpt", modelPattern: /^gpt-6/i, capability: {
+      control: "effort",
+      supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+      defaultEffort: "medium",
+      requestStyle: "openai-effort",
+      supportsDisable: false,
+      supportsProMode: true,
+    } },
+    // GPT-5.6 当前 Chat Completions 接受 low/medium/high/xhigh/max
+    // （不含 minimal）；supportsDisable=true，off → reasoning_effort:"none"。
+    // supportsProMode=true：Responses API 支持 reasoning.mode:"pro"（与 effort 正交）。
+    { providerId: "chatgpt", modelPattern: /^gpt-5\.6/i, capability: {
+      control: "effort",
+      supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+      defaultEffort: "medium",
+      requestStyle: "openai-effort",
+      supportsDisable: true,
+      supportsProMode: true,
+    } },
+    { providerId: "chatgpt", modelPattern: /^gpt-5/i, capability: {
+      control: "effort",
+      supportedEfforts: ["minimal", "low", "medium", "high"],
+      defaultEffort: "medium",
+      requestStyle: "openai-effort",
+      supportsDisable: true,
+    } },
+    { providerId: "chatgpt", modelPattern: /^o1/i, capability: {
+      control: "effort",
+      supportedEfforts: ["low", "medium", "high"],
+      defaultEffort: "medium",
+      requestStyle: "openai-effort",
+      supportsDisable: true,
+    } },
+    { providerId: "chatgpt", modelPattern: /^o3/i, capability: {
+      control: "effort",
+      supportedEfforts: ["low", "medium", "high"],
+      defaultEffort: "medium",
+      requestStyle: "openai-effort",
+      supportsDisable: true,
+    } },
+    { providerId: "chatgpt", modelPattern: /^o4/i, capability: {
+      control: "effort",
+      supportedEfforts: ["medium", "high"],
+      defaultEffort: "medium",
+      requestStyle: "openai-effort",
+      supportsDisable: true,
+    } },
+    { providerId: "chatgpt", modelPattern: /.*/, capability: UNKNOWN_REASONING_CAPABILITY },
+  ],
+});

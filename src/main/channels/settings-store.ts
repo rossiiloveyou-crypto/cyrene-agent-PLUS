@@ -24,6 +24,7 @@ import type { ChannelId } from "./types";
 import { DEFAULT_TOOL_ACCESS, normalizeToolAccessConfig, type ChannelToolAccessConfig } from "./tool-access";
 import { DEFAULT_KEYWORDS, normalizeKeywordConfig, type ChannelKeywordsConfig } from "./keyword-policy";
 import { DEFAULT_AUDIT_CONFIG, normalizeAuditConfig, type ChannelAuditConfig } from "./audit-log";
+import { normalizeQqListenMode, type QqListenMode } from "../../shared/qq-listen";
 
 /** safeStorage 加密后的前缀。读取时遇到这个前缀就解密 */
 const ENC_PREFIX = "enc:";
@@ -155,7 +156,11 @@ export interface FeishuChannelConfig extends ChannelRuntimeConfig {
   appSecret?: string;
 }
 
-export type QqListenMode = "auto" | "loopback" | "wsl" | "custom";
+/**
+ * 监听模式的唯一声明位于 shared（主进程与渲染端共用），从本模块再导出，
+ * 保持既有引用方（如 adapters/qq/onebot-reverse-ws.ts）不变。
+ */
+export type { QqListenMode };
 
 export interface QqChannelConfig extends ChannelRuntimeConfig {
   listenMode: QqListenMode;
@@ -312,8 +317,8 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
       .map((item) => String(item).trim())
       .filter((item) => /^[A-Za-z0-9_-]{8,64}$/.test(item))));
   };
-  const normalizeListenMode = (value: unknown): QqListenMode =>
-    value === "loopback" || value === "wsl" || value === "custom" ? value : "auto";
+  // 收敛规则与渲染端共用同一份实现（shared/qq-listen），不再各写一遍枚举判定
+  const normalizeListenMode = normalizeQqListenMode;
 
   // schemaVersion 缺失（老配置文件）按 v1 处理：v1 的两层名单一次性清空，不做迁移。
   const schemaVersion = safeNum(input?.schemaVersion, 1, 0, 1_000_000);

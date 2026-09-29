@@ -1,14 +1,13 @@
-import { BrowserWindow, screen, type NativeImage } from "electron";
+import { app, BrowserWindow, screen, type NativeImage } from "electron";
 import { IPC } from "../../shared/ipc-channels";
 import { createPetWindow, PET_WINDOW_BASE_HEIGHT, PET_WINDOW_BASE_WIDTH, type PetWindowSettingsSlice } from "../startup/create-pet-window";
 import {
   createCallWindow,
   createReactChatWindowShell,
-  createSettingsWindow,
-  createSidebarWindow,
   createStickerManagerWindow,
-  createTasksWindow,
   loadReactChatWindowPage,
+  loadOnboardingWindowPage,
+  createOnboardingBrowserWindow,
   type ReactChatWindowHandle,
   showReactChatWindow,
 } from "./create-aux-windows";
@@ -16,6 +15,7 @@ import { CHAT_READY_TIMEOUT_MS, loadWindowForStartup } from "./startup-window-lo
 import { createMusicPlayerWindow } from "./create-music-player-window";
 import { broadcastToAllWindows } from "./broadcast";
 import { PetWindowMoveController } from "../pet-window-movement";
+import { CURRENT_DISCLAIMER_VERSION } from "../../shared/disclaimer";
 
 export interface WindowManagerOptions {
   getCurrentAppIconPath: () => string;
@@ -25,14 +25,17 @@ export interface WindowManagerOptions {
 }
 
 export interface WindowManager {
+  hasCurrentDisclaimerConsent?(): boolean;
+  createOnboardingWindow?(): Promise<BrowserWindow>;
+  showOnboardingWindow?(): void;
+  closeOnboardingWindow?(): void;
   createPetWindow(showOnReady?: boolean): BrowserWindow;
   /** 创建（或复用）未加载页面的聊天窗口壳；页面加载由显式 load() 驱动。 */
   createReactChatWindowShell(): ReactChatWindowHandle;
   /** 打开聊天窗口：必要时创建壳并加载页面，然后显示并分发会话。 */
   openReactChatWindow(sessionId?: string): Promise<BrowserWindow>;
-  createSidebarWindow(): void;
-  createSettingsWindow(section?: string): void;
-  createTasksWindow(): void;
+  openSettings(section?: string): Promise<void>;
+  openScheduledTasks(): Promise<void>;
   createStickerManagerWindow(): void;
   createCallWindow(): void;
   createMusicPlayerWindow(): void;
@@ -63,6 +66,7 @@ export interface WindowManager {
 
 export function createWindowManager(options: WindowManagerOptions): WindowManager {
   let petWindow: BrowserWindow | null = null;
+  let onboardingWindow: BrowserWindow | null = null;
   let chatShell: ReactChatWindowHandle | null = null;
   let chatLoadPromise: Promise<void> | null = null;
   const readyHandlers: Array<(win: BrowserWindow) => void> = [];
@@ -79,6 +83,50 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
   function getUsablePetWindow(): BrowserWindow | null {
     if (!petWindow || petWindow.isDestroyed()) return null;
     return petWindow;
+  }
+
+  function hasCurrentDisclaimerConsent(): boolean {
+    const version = options.loadPetWindowSettingsSlice().disclaimerAcceptedVersion;
+    return version === undefined || version === CURRENT_DISCLAIMER_VERSION;
+  }
+
+  async function createOnboardingWindow(): Promise<BrowserWindow> {
+    if (onboardingWindow && !onboardingWindow.isDestroyed()) return onboardingWindow;
+    const window = createOnboardingBrowserWindow();
+    onboardingWindow = window;
+    let appIsQuitting = false;
+    app.once("before-quit", () => { appIsQuitting = true; });
+    window.on("close", (event) => {
+      if (!hasCurrentDisclaimerConsent() && !appIsQuitting) {
+        event.preventDefault();
+        app.quit();
+      }
+    });
+    window.on("closed", () => {
+      if (onboardingWindow === window) onboardingWindow = null;
+    });
+    try {
+      await loadOnboardingWindowPage(window);
+      return window;
+    } catch (error) {
+      if (!window.isDestroyed()) window.destroy();
+      throw error;
+    }
+  }
+
+  function showOnboardingWindow(): void {
+    const existing = onboardingWindow;
+    if (existing && !existing.isDestroyed()) {
+      existing.show();
+      existing.focus();
+      return;
+    }
+    void createOnboardingWindow()
+      .then((window) => { window.show(); window.focus(); })
+      .catch((error) => {
+        console.error("[WindowManager] onboarding window failed to load:", error);
+        app.quit();
+      });
   }
 
   function setPetWindow(window: BrowserWindow, showOnReady = true): void {
@@ -114,17 +162,24 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
   }
 
   return {
+    hasCurrentDisclaimerConsent,
+    createOnboardingWindow,
+    showOnboardingWindow,
+    closeOnboardingWindow(): void {
+      onboardingWindow?.close();
+    },
     createPetWindow(showOnReady = true): BrowserWindow {
       if (petWindow && !petWindow.isDestroyed()) return petWindow;
+      const shouldShowOnReady = showOnReady && hasCurrentDisclaimerConsent();
       const win = createPetWindow(
         {
           getCurrentAppIconPath: options.getCurrentAppIconPath,
           isDev: options.isDev,
           loadGeneralSettings: options.loadPetWindowSettingsSlice,
         },
-        { showOnReady },
+        { showOnReady: shouldShowOnReady },
       );
-      setPetWindow(win, showOnReady);
+      setPetWindow(win, shouldShowOnReady);
       return win;
     },
 
@@ -149,6 +204,10 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
           return chatLoadPromise;
         },
         show(sessionId?: string): void {
+          if (!hasCurrentDisclaimerConsent()) {
+            showOnboardingWindow();
+            return;
+          }
           showReactChatWindow(sessionId);
         },
       };
@@ -159,19 +218,32 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
 
     async openReactChatWindow(sessionId?: string): Promise<BrowserWindow> {
       const handle = this.createReactChatWindowShell();
+      if (!hasCurrentDisclaimerConsent()) {
+        showOnboardingWindow();
+        return handle.window;
+      }
       await handle.load(sessionId);
       handle.show(sessionId);
       return handle.window;
     },
 
-    createSidebarWindow,
-    createSettingsWindow,
-    createTasksWindow,
+    async openSettings(section = "appearance"): Promise<void> {
+      const window = await this.openReactChatWindow();
+      window.webContents.send(IPC.SETTINGS_SWITCH_SECTION, section);
+    },
+    async openScheduledTasks(): Promise<void> {
+      const window = await this.openReactChatWindow();
+      window.webContents.send(IPC.SETTINGS_SWITCH_SECTION, "tasks");
+    },
     createStickerManagerWindow,
     createCallWindow,
     createMusicPlayerWindow,
 
     showPetWindow(): void {
+      if (!hasCurrentDisclaimerConsent()) {
+        this.hidePetWindow();
+        return;
+      }
       const win = getUsablePetWindow();
       if (win) {
         win.show();
@@ -184,6 +256,10 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
       getUsablePetWindow()?.hide();
     },
     togglePetWindow(): void {
+      if (!hasCurrentDisclaimerConsent()) {
+        this.hidePetWindow();
+        return;
+      }
       const win = getUsablePetWindow();
       if (!win) {
         this.createPetWindow(true);

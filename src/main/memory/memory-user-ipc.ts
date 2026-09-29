@@ -17,7 +17,7 @@ import {
 import { executePersonErase, previewPersonErase } from "./person-erasure";
 import { deleteImportedDoc } from "../rag";
 import { loadUserProfile, saveUserProfile, getAvatarPath } from "../settings-store";
-import { addMcpServer, removeMcpServer, listMcpServers } from "../orchestrator/mcp-manager";
+import { addMcpServer, removeMcpServer, listMcpServers, listMcpServerConfigs } from "../orchestrator/mcp-manager";
 import { toolRegistry } from "../orchestrator/tools/registry/tool-registry";
 import type { ConversationMode } from "../../shared/chat-types";
 import { loadGeneralSettings, saveGeneralSettings } from "../settings/settings-facade";
@@ -26,9 +26,6 @@ import type { SkillMode } from "../skills/types";
 import type { WindowManager } from "../windows/window-manager";
 import {
   reactChatWindow,
-  sidebarWindow,
-  tasksWindow,
-  settingsWindow,
   stickerManagerWindow,
 } from "../windows/window-state";
 import type { EmbeddingIndexService } from "../services/embedding/embedding-index-service";
@@ -45,10 +42,9 @@ export interface MemoryUserToolIpcDependencies {
 }
 
 function broadcastToAuxWindows(channel: string, payload: unknown): void {
-  for (const win of [reactChatWindow, sidebarWindow, tasksWindow, settingsWindow]) {
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(channel, payload);
-    }
+  const win = reactChatWindow;
+  if (win && !win.isDestroyed()) {
+    win.webContents.send(channel, payload);
   }
 }
 
@@ -357,6 +353,11 @@ export function registerMemoryUserToolIpc(deps: MemoryUserToolIpcDependencies): 
     const servers = listMcpServers();
     console.log("[MCP IPC] list-servers:", servers.length + " servers");
     return servers;
+  });
+
+  // 持久化配置（含连接失败的），设置页列表以此为准
+  ipc.handle(IPC.MCP_LIST_SERVER_CONFIGS, () => {
+    return listMcpServerConfigs();
   });
 
   // Tool toggles

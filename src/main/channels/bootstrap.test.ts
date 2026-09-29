@@ -45,8 +45,16 @@ vi.mock("./dispatcher", () => ({
       channelMocks.buildAndRunAgent = deps.buildAndRunAgent;
     }
 
+    // 🔴 X2/B-3：harness 必须传对象形态（官方 2 参签名）。
+    //    官方源码里的 `typeof input === "string"` 兼容分支会静默吞掉 userMessageId，
+    //    本分支已删除该分支，所以这里必须把 P2 归属起点显式挂进对象。
     handleIncoming = async (msg: Record<string, unknown>, userMessageId?: string) => (
-      this.deps.buildAndRunAgent(msg, `channel:${String(msg.channel)}:test`, [], userMessageId)
+      this.deps.buildAndRunAgent(msg, {
+        sessionId: `channel:${String(msg.channel)}:test`,
+        target: { conversationId: `channel:${String(msg.channel)}:test` },
+        runId: "test-run-id",
+        ...(userMessageId ? { userMessageId } : {}),
+      })
     );
 
     reloadSettings = vi.fn();
@@ -101,11 +109,7 @@ vi.mock("../settings/settings-facade", () => ({
 }));
 vi.mock("../settings/model-settings", () => ({
   loadModelSettings: () => ({}),
-  loadVisionConfig: () => undefined,
   resolveModelSettingsProfile: () => ({ multimodal: false }),
-}));
-vi.mock("../chat/image-send-strategy", () => ({
-  decideImageSendStrategy: () => ({ mode: "none" }),
 }));
 vi.mock("./agent-input", () => ({
   buildChannelAttachmentInputs: async () => ({ attachments: [], imageAttachments: [] }),
@@ -340,7 +344,7 @@ describe("createChannelsSubsystem lifecycle", () => {
       chatType: "direct",
       senderId: "user-1",
       at: new Date("2026-09-02T00:00:00Z"),
-    }, "channel-session", []);
+    }, { sessionId: "channel-session", target: { conversationId: "channel-session" }, runId: "test-run-id" });
 
     expect(onRunFinished).toHaveBeenCalledWith(
       { reply: "渠道回复", toolResults: [] },
@@ -408,7 +412,7 @@ describe("createChannelsSubsystem lifecycle", () => {
       chatType: "direct",
       senderId: "user-1",
       at: new Date("2026-09-02T00:00:00Z"),
-    }, "channel-session", []) as { text: string };
+    }, { sessionId: "channel-session", target: { conversationId: "channel-session" } }) as { text: string };
 
     expect(result.text).toBe("超时前的部分回复");
     expect(onRunFinished).not.toHaveBeenCalled();
@@ -441,7 +445,7 @@ describe("createChannelsSubsystem lifecycle", () => {
       chatType: "direct",
       senderId: "user-1",
       at: new Date("2026-09-02T00:00:00Z"),
-    }, "channel-session", [])).rejects.toThrow("渠道执行失败");
+    }, { sessionId: "channel-session", target: { conversationId: "channel-session" } })).rejects.toThrow("渠道执行失败");
 
     expect(onRunFinished).not.toHaveBeenCalled();
 
@@ -472,7 +476,11 @@ describe("createChannelsSubsystem lifecycle", () => {
       senderId: "10001",
       senderName: "小明",
       at: new Date("2026-09-02T00:00:00Z"),
-    }, "channel-session", [], "msg_1758681234567_a3f9k2");
+    }, {
+      sessionId: "channel-session",
+      target: { conversationId: "channel-session" },
+      userMessageId: "msg_1758681234567_a3f9k2",
+    });
 
     // personKey 在 bootstrap 层组合（唯一同时持有 channel 与 senderId 的一层）
     expect(onRunFinished).toHaveBeenCalledWith(
@@ -500,11 +508,11 @@ describe("createChannelsSubsystem lifecycle", () => {
       channel: "qq",
       senderId: "10001",
       at: new Date("2026-09-02T00:00:00Z"),
-    }, "channel-session", []);
+    }, { sessionId: "channel-session", target: { conversationId: "channel-session" } });
 
     const context = onRunFinished.mock.calls[0][2] as Record<string, unknown>;
     expect(context.chatType).toBe("private");
-    // 第 4 参数缺失（落盘失败 / 老调用方）时不落 userMessageId 字段
+    // userMessageId 缺失（落盘失败 / 老调用方）时不落该字段
     expect("userMessageId" in context).toBe(false);
   });
 
@@ -523,7 +531,7 @@ describe("createChannelsSubsystem lifecycle", () => {
       senderId: "10001",
       senderName: "小明",
       at: new Date("2026-09-02T00:00:00Z"),
-    }, "channel-session", [], undefined) as { text: string };
+    }, { sessionId: "channel-session", target: { conversationId: "channel-session" } }) as { text: string };
 
     expect(result.text).toBe("渠道回复");
     expect(onRunFinished).toHaveBeenCalledOnce();

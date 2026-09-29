@@ -9,22 +9,20 @@
   place-items: center;
   width: 30px;
   height: 30px;
-  border-radius: 50%;
-  border: 1px solid var(--cy-border);
-  background: var(--cy-bg-workspace);
-  color: var(--cy-text-muted);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rb-text-secondary);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .cy-winbtn:hover {
-  background: var(--cy-bg-hover);
-  border-color: var(--cy-border);
-  color: var(--cy-text);
+  background: var(--rb-surface-hover);
+  color: var(--rb-text-primary);
 }
 
 .cy-winbtn--close:hover {
   background: #ff5f57;
-  border-color: #ff5f57;
   color: #fff;
 }

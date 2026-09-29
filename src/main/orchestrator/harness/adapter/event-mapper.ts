@@ -30,6 +30,19 @@ export function sendHarnessEventAsAgui(
       } as BaseEvent);
       break;
     }
+    case "candidate_text_delta":
+    case "candidate_text_discard": {
+      send({
+        type: EventType.CUSTOM,
+        name: "cyrene.candidate_text",
+        value: event.type === "candidate_text_delta"
+          ? { action: "delta", roundId: event.roundId, delta: event.delta }
+          : { action: "discard", roundId: event.roundId },
+        threadId,
+        runId,
+      } as BaseEvent);
+      break;
+    }
     case "progress_text": {
       send({
         type: EventType.CUSTOM,
@@ -48,7 +61,8 @@ export function sendHarnessEventAsAgui(
       break;
     }
     case "reasoning_start": {
-      send({ type: EventType.REASONING_MESSAGE_START, messageId: event.messageId, role: "assistant", threadId, runId } as BaseEvent);
+      // AG-UI 规范：REASONING_MESSAGE_START 的 role 固定为 "reasoning"。
+      send({ type: EventType.REASONING_MESSAGE_START, messageId: event.messageId, role: "reasoning", threadId, runId } as BaseEvent);
       break;
     }
     case "reasoning_delta": {
@@ -64,6 +78,7 @@ export function sendHarnessEventAsAgui(
         type: EventType.TOOL_CALL_START,
         toolCallId: event.toolCallId,
         toolCallName: event.toolName,
+        toolCallDisplayName: event.displayName,
         threadId,
         runId,
       } as BaseEvent);
@@ -92,6 +107,21 @@ export function sendHarnessEventAsAgui(
       send({
         type: EventType.TOOL_CALL_END,
         toolCallId: event.toolCallId,
+        threadId,
+        runId,
+      } as BaseEvent);
+      break;
+    }
+    case "tool_output": {
+      send({
+        type: EventType.CUSTOM,
+        name: "cyrene.tool_output",
+        value: {
+          toolCallId: event.toolCallId,
+          action: event.action,
+          text: event.text,
+          ...(event.truncated ? { truncated: true } : {}),
+        },
         threadId,
         runId,
       } as BaseEvent);
@@ -138,6 +168,18 @@ export function sendHarnessEventAsAgui(
         type: EventType.CUSTOM,
         name: "cyrene.plan",
         value: { action: "written", planPath: event.planPath },
+        threadId,
+        runId,
+      } as BaseEvent);
+      break;
+    }
+    case "plan_submitted": {
+      // 计划提交审批（submit_plan 在 run 内发出）：计划全文走独立事件供渲染端打开计划面板。
+      // 事件名沿用 cyrene.plan.review，渲染端现有监听分支原样工作。
+      send({
+        type: EventType.CUSTOM,
+        name: "cyrene.plan.review",
+        value: { planPath: event.planPath, planContent: event.planContent, sessionId: event.conversationId },
         threadId,
         runId,
       } as BaseEvent);

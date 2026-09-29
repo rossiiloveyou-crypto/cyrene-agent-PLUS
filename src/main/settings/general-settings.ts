@@ -1,7 +1,7 @@
-import type { ChatAppearanceSettings } from "../../shared/chat-appearance";
 import type { UiTheme } from "../../shared/ui-theme";
 import type { UiFont } from "../../shared/ui-font";
 import type { UiIcon } from "../../shared/ui-icon";
+import type { MessageTypography } from "../../shared/message-typography";
 import type {
   DefaultChatMode,
   MobileMessageSegmentationMode,
@@ -16,9 +16,9 @@ import type { LspServerOverride } from "../lsp/types";
 
 /**
  * 通用设置（GeneralSettings）：与模型配置无关的 UI、TTS、工具开关、快捷键等。
- * 与 ChatAppearanceSettings 组合，统一保存到 general-settings.json。
+ * 统一保存到 general-settings.json。
  */
-export interface GeneralSettings extends ChatAppearanceSettings {
+export interface GeneralSettings {
   /** 功能插件开关表：pluginId -> enabled */
   plugins: Record<string, boolean>;
   /** Harness 同时执行已明确安全工具的上限；1 表示完全串行。 */
@@ -41,6 +41,8 @@ export interface GeneralSettings extends ChatAppearanceSettings {
    *  quiet=现状（冷场常见），natural=冷场减半，lively=上限 5 人冷场罕见。 */
   momentsLiveliness: "quiet" | "natural" | "lively";
   petAlwaysOnTop: boolean;
+  /** 记住设置与音乐窗口的位置和大小。 */
+  rememberWindowState: boolean;
   petVisible: boolean;
   /** 桌宠缩放因子：1.0=默认，0.5~2.0，窗口与模型同步等比缩放。 */
   petZoom: number;
@@ -49,18 +51,19 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   /** 桌宠窗口 Y 坐标，未保存时为 undefined */
   petWindowY?: number;
   disableGpuElectron?: boolean;
-  sidebarVisible: boolean;
-  tasksVisible: boolean;
   /** 提醒中心音效总开关：关闭后所有 toast 静音，弹窗行为不受影响。 */
   toastSoundEnabled: boolean;
   launchAtLogin: boolean;
-  language: "zh-CN";
+  /** 界面语言：目前支持中文与英文，其余语言待翻译补齐后开放。 */
+  language: "zh-CN" | "en";
   uiTheme: UiTheme;
   windowCornerRadius: number;
   /** @deprecated 旧版透明窗口开关，仅保留用于配置兼容。 */
   uiThemeRadius: boolean;
   uiFont: UiFont;
   uiIcon: UiIcon;
+  /** 昔涟回复正文的排版（字号/行距/字距/字重），只作用于 AI 回复气泡。 */
+  messageTypography: MessageTypography;
   /** 聊天窗口打开时默认选中的模式。 */
   defaultChatMode: DefaultChatMode;
   /** 聊天窗口当前风格，启动时恢复；本轮请求仍以 renderer 显式 styleId 为准。 */
@@ -126,6 +129,8 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   travelEnabled: boolean;
   /** 🖥️ 浏览器自动化（Playwright MCP）是否启用。默认 false，需用户手动开启。 */
   playwrightMcpEnabled: boolean;
+  /** 📁 文件系统 MCP（官方 server-filesystem，允许目录为下载文件夹）是否启用。默认 false。 */
+  filesystemMcpEnabled: boolean;
   // 联网搜索：选哪个搜索源 + 对应 key
   searchEngine: "off" | "bocha" | "tavily" | "minimax" | "anySearch";
   searchBochaKey: string;
@@ -182,6 +187,10 @@ export interface GeneralSettings extends ChatAppearanceSettings {
    * 取值 3~50，默认 10。由设置-记忆面板写入，经 ChannelTraceContext 注入 orchestrator。
    */
   groupContextLimit: number;
+  /** 最近绑定的项目文件夹（绝对路径），按最近使用时间倒序，最多保留 10 个。 */
+  recentProjects: string[];
+  /** 用户明确接受的免责声明版本；空字符串表示尚未接受当前条款。 */
+  disclaimerAcceptedVersion?: string;
 }
 
 /** 群上下文条数默认值。 */

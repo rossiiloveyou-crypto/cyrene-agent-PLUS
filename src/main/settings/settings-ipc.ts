@@ -11,23 +11,19 @@ import { ensureCustomStylePrompt } from "../style-prompt";
 import type { WindowManager } from "../windows/window-manager";
 import {
   reactChatWindow,
-  sidebarWindow,
-  tasksWindow,
-  settingsWindow,
 } from "../windows/window-state";
 import type { RuntimeStateService } from "../orchestrator/runtime-state-service";
 import type { EmbeddingIndexService } from "../services/embedding/embedding-index-service";
 import { initReranker, getRerankerInstallStatus } from "../rag/reranker";
 import { switchEmbeddingModel } from "../rag";
-import { downloadEmbeddingModel, deleteEmbeddingModel } from "../embedding-manager";
-import * as os from "os";
 import { testVendorConnection } from "../orchestrator/vendors/test-connection";
+import { getAdapterForConfig } from "../orchestrator/vendors";
 import type { VendorConfig } from "../orchestrator/vendors";
 import { normalizeModelSettings, getPublicModelConfig, listSavedModelProfiles, saveModelProfile, setDefaultModelProfile, saveModelSettings } from "./model-settings";
 import type { ModelSettings } from "./model-settings";
 import { getTimeoutSettings, saveTimeoutSettings } from "../timeout-manager";
 import type { syncVolcanoSearchMcp } from "./general-settings-lifecycle";
-import type { syncPlaywrightMcp } from "../sync-mcp-builtin";
+import type { syncPlaywrightMcp, syncFilesystemMcp } from "../sync-mcp-builtin";
 
 export interface SettingsIpcDependencies {
   get windowManager(): WindowManager | null;
@@ -41,6 +37,7 @@ export interface SettingsIpcDependencies {
   embeddingIndexService: EmbeddingIndexService;
   syncVolcanoSearchMcp: typeof syncVolcanoSearchMcp;
   syncPlaywrightMcp: typeof syncPlaywrightMcp;
+  syncFilesystemMcp: typeof syncFilesystemMcp;
   /** 传入共享 scope 以便退出时统一注销；缺省时使用独立 scope。 */
   ipc?: IpcScope;
 }
@@ -71,16 +68,16 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
     embeddingIndexService,
     syncVolcanoSearchMcp,
     syncPlaywrightMcp,
+    syncFilesystemMcp,
   } = deps;
   // 注意：windowManager 不解构，统一用 deps.windowManager 实时读取 getter。
   // registerSettingsIpc 在模块加载阶段调用，那时 windowManager 仍为 null，
   // 解构会捕获 null 并导致后续 ?. 永远短路（设置里的打开侧边栏/日程等会失效）。
 
   function broadcastToAuxWindows(channel: string, payload: unknown): void {
-    for (const win of [reactChatWindow, sidebarWindow, tasksWindow, settingsWindow]) {
-      if (win && !win.isDestroyed()) {
-        win.webContents.send(channel, payload);
-      }
+    const win = reactChatWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, payload);
     }
   }
 
@@ -204,6 +201,14 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
       await syncPlaywrightMcp(saved);
     }
 
+    // Filesystem MCP：按 settings 字段自动连接/断开（允许目录固定为下载文件夹）
+    if ("filesystemMcpEnabled" in tts) {
+      await syncFilesystemMcp({
+        filesystemMcpEnabled: saved.filesystemMcpEnabled,
+        allowedDir: app.getPath("downloads"),
+      });
+    }
+
     // 主动聊天总开关变化时使现有评估失效（频率档位由 ProactiveChat 内部判定，无需重启）。
     if ("proactiveChatMode" in tts) {
       proactiveLifecycle.getProactiveChatService()?.invalidate();
@@ -217,22 +222,6 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
     const filePath = ensureCustomStylePrompt();
     await shell.showItemInFolder(filePath);
     return { ok: true, filePath };
-  });
-
-  ipc.on(IPC.SETTINGS_OPEN_SIDEBAR, () => {
-    deps.windowManager?.createSidebarWindow();
-  });
-
-  ipc.on(IPC.SETTINGS_CLOSE_SIDEBAR, async () => {
-    sidebarWindow?.close();
-  });
-
-  ipc.on(IPC.SETTINGS_OPEN_TASKS, () => {
-    deps.windowManager?.createTasksWindow();
-  });
-
-  ipc.on(IPC.SETTINGS_CLOSE_TASKS, async () => {
-    tasksWindow?.close();
   });
 
   ipc.on(IPC.SETTINGS_SET_PET_ALWAYS_ON_TOP, (_event, value: boolean) => {
@@ -260,6 +249,15 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
   });
 
   ipc.handle(IPC.SETTINGS_TEST_CONNECTION, async (_event, cfg: VendorConfig) => testVendorConnection(cfg));
+  ipc.handle(IPC.SETTINGS_PREVIEW_REASONING, (_event, cfg: VendorConfig) => {
+    const request = getAdapterForConfig(cfg).buildRequest({
+      model: cfg.model,
+      messages: [{ role: "user", content: "Hello" }],
+      stream: false,
+    }, cfg);
+    // 仅返回请求正文，不将认证头或 API 密钥暴露给设置页。
+    return JSON.parse(request.body) as Record<string, unknown>;
+  });
 
   /**
    * 测试视觉模型连通性。
@@ -344,51 +342,5 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
       runtimeSync: value === "llm" ? "llm" : value === "local" ? "local" : "off",
     });
     broadcastModelConfigChanged(preview);
-  });
-
-  ipc.handle(IPC.EMBEDDING_GET_STATUS, async () => {
-    const cacheDir = path.join(os.homedir(), ".cache", "huggingface");
-    const models = {
-      bgem3: { dir: "Xenova\\bge-m3", onnx: "onnx\\model_quantized.onnx", name: "BGE-M3" },
-    };
-    const result: Record<string, { installed: boolean; sizeBytes: number }> = {};
-    for (const [key, m] of Object.entries(models)) {
-      const onnxPath = path.join(cacheDir, m.dir, m.onnx);
-      const installed = fs.existsSync(onnxPath);
-      let sizeBytes = 0;
-      if (installed) {
-        try { sizeBytes = fs.statSync(onnxPath).size; } catch {}
-      }
-      result[key] = { installed, sizeBytes };
-    }
-    return result;
-  });
-
-  ipc.handle(IPC.EMBEDDING_DOWNLOAD, async (_event, payload: unknown) => {
-    const p = payload as { model?: string; mirror?: string };
-    const model = p.model || "bgem3";
-    const mirror = p.mirror || "official";
-    try {
-      const win = BrowserWindow.getFocusedWindow();
-      await downloadEmbeddingModel(model, mirror, (info) => {
-        win?.webContents.send(IPC.EMBEDDING_PROGRESS, info);
-      });
-      return { ok: true };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: message };
-    }
-  });
-
-  ipc.handle(IPC.EMBEDDING_DELETE, async (_event, payload: unknown) => {
-    const p = payload as { model?: string };
-    const model = p.model || "bgem3";
-    try {
-      deleteEmbeddingModel(model);
-      return { ok: true };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: message };
-    }
   });
 }

@@ -1,5 +1,5 @@
 import { t } from "../../../i18n";
-import type { AskCardSubmission } from "../../../../../shared/ask-clarification";
+import type { AskCardMode, AskCardSubmission } from "../../../../../shared/ask-clarification";
 
 export type AgentRunStageKind =
   | "understanding"
@@ -35,6 +35,8 @@ export interface AskUserInteraction {
   source?: "agent";
   runId?: string;
   revision?: number;
+  /** 卡片模式沿用主进程下发的 AskCardPayload.mode；plan_approval 走专属三按钮审批面板。 */
+  cardMode?: AskCardMode;
   intro?: string;
   question: string;
   options: Array<{
@@ -254,6 +256,15 @@ function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+/** 抽查题型白名单校验：合法值收敛为字面量联合（string 的负向 !== 检查不产生收窄） */
+function asPopQuizQuestionType(
+  value: unknown,
+): PopQuizInteraction["questions"][number]["type"] | undefined {
+  return value === "choice" || value === "multi" || value === "true_false" || value === "short_answer"
+    ? value
+    : undefined;
+}
+
 function normalizeOptions(value: unknown): AskUserQuestion["options"] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -276,12 +287,19 @@ function normalizePublicOptions(value: unknown): AskUserQuestion["options"] {
   });
 }
 
+function asAskCardMode(value: unknown): AskCardMode | undefined {
+  return value === "plan_approval" || value === "semantic_clarification" || value === "action_parameters"
+    ? value
+    : undefined;
+}
+
 /**
  * Accepts the two card payloads already emitted by main. Keeping this at the
  * renderer boundary makes malformed CUSTOM events inert instead of interactive.
  */
 export function normalizeChoiceInteraction(value: unknown): AskUserInteraction | undefined {
   const card = asRecord(value);
+  if (!card) return undefined;
   const interactionId = asNonEmptyString(card?.interactionId);
   const runId = asNonEmptyString(card?.runId);
   const revision = typeof card?.revision === "number" && Number.isInteger(card.revision)
@@ -290,6 +308,7 @@ export function normalizeChoiceInteraction(value: unknown): AskUserInteraction |
   if (interactionId && runId && revision !== undefined && Array.isArray(card.questions)) {
     const questions = card.questions.flatMap((item) => {
       const question = asRecord(item);
+      if (!question) return [];
       const customInput = asRecord(question?.customInput);
       const id = asNonEmptyString(question?.id);
       const prompt = asNonEmptyString(question?.prompt);
@@ -313,6 +332,7 @@ export function normalizeChoiceInteraction(value: unknown): AskUserInteraction |
       id: interactionId,
       runId,
       revision,
+      cardMode: asAskCardMode(card.mode),
       intro: asNonEmptyString(card.intro),
       responseKind: "submission",
       question: questions[0].question,
@@ -326,6 +346,7 @@ export function normalizeChoiceInteraction(value: unknown): AskUserInteraction |
 
   const structuredQuestions = Array.isArray(card.questions) ? card.questions.flatMap((item) => {
     const question = asRecord(item);
+    if (!question) return [];
     const field = asNonEmptyString(question?.field);
     const text = asNonEmptyString(question?.question);
     if (!field || !text) return [];
@@ -363,32 +384,23 @@ export function normalizeChoiceInteraction(value: unknown): AskUserInteraction |
   };
 }
 
-/** Routes a post-run plan approval card only to the conversation that owns it. */
-export function normalizeDeferredPlanChoice(
-  value: unknown,
-  activeSessionId: string,
-): AskUserInteraction | undefined {
-  const card = asRecord(value);
-  if (asNonEmptyString(card?.sessionId) !== activeSessionId) return undefined;
-  return normalizeChoiceInteraction(value);
-}
-
 /**
  * 边界校验主进程推来的抽查卡片。畸形 payload 直接判失效（不渲染），
  * 与 ask 卡片同款防线；主进程 10s 幂等重播，短暂畸形不会卡住用户。
  */
 export function normalizePopQuizCard(value: unknown): PopQuizInteraction | undefined {
   const card = asRecord(value);
+  if (!card) return undefined;
   const quizId = asNonEmptyString(card?.quizId);
   const runId = asNonEmptyString(card?.runId);
   if (!quizId || !runId || !Array.isArray(card.questions)) return undefined;
   const questions = (card.questions as unknown[]).flatMap((item) => {
     const question = asRecord(item);
+    if (!question) return [];
     const id = asNonEmptyString(question?.id);
-    const type = asNonEmptyString(question?.type);
+    const type = asPopQuizQuestionType(question?.type);
     const prompt = asNonEmptyString(question?.question);
-    if (!id || !prompt) return [];
-    if (type !== "choice" && type !== "multi" && type !== "true_false" && type !== "short_answer") return [];
+    if (!id || !prompt || !type) return [];
     const options = Array.isArray(question.options)
       ? question.options.flatMap((option) => {
           const record = asRecord(option);
@@ -494,6 +506,38 @@ export function buildAskSubmission(
   };
 }
 
+/**
+ * 构造计划审批卡的提交：批准 / 不批准直接回传档位；需要修改把意见原文随档位同卡附上。
+ * 选项顺序是位置契约（第 1 个=批准、第 2 个=需要修改、第 3 个=不批准），与主进程建卡端约定一致。
+ */
+export function buildPlanApprovalSubmission(
+  interaction: AskUserInteraction,
+  decision: "approve" | "revise" | "reject",
+  reviseText?: string,
+): AskCardSubmission {
+  if (interaction.responseKind !== "submission"
+    || interaction.cardMode !== "plan_approval"
+    || !interaction.runId
+    || interaction.revision === undefined) {
+    throw new Error("E_ASK_SUBMISSION_INCOMPLETE");
+  }
+  const question = interaction.questions?.[0];
+  // 空意见的"需要修改"没有信息量，提交前必须已填写
+  const text = reviseText?.trim();
+  if (decision === "revise" && !text) throw new Error("E_ASK_SUBMISSION_INCOMPLETE");
+  const optionIndex = decision === "approve" ? 0 : decision === "revise" ? 1 : 2;
+  const optionId = question?.options[optionIndex]?.id;
+  if (!question || !optionId) throw new Error("E_ASK_SUBMISSION_INCOMPLETE");
+  return {
+    interactionId: interaction.id,
+    runId: interaction.runId,
+    revision: interaction.revision,
+    answers: [decision === "revise"
+      ? { questionId: question.id, source: "option_with_text" as const, optionId, text: text! }
+      : { questionId: question.id, source: "option" as const, optionId }],
+  };
+}
+
 export function shouldDismissAsk(interaction: AskUserInteraction, value: unknown): boolean {
   const settlement = asRecord(value);
   if (asNonEmptyString(settlement?.id) !== interaction.id) return false;
@@ -507,6 +551,7 @@ export function normalizeTaskPlanPresentation(value: unknown): TaskPlanPresentat
   const snapshot = asRecord(value);
   const steps = Array.isArray(snapshot?.steps) ? snapshot.steps.flatMap((item) => {
     const step = asRecord(item);
+    if (!step) return [];
     const id = asNonEmptyString(step?.stepId);
     const title = asNonEmptyString(step?.objective);
     if (!id || !title) return [];

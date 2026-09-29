@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getAsrConfig: vi.fn(),
   createAsrStream: vi.fn(),
+  synthesizeByEngine: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -18,8 +19,13 @@ vi.mock("../asr/asr-dispatcher", () => ({
   createAsrStream: mocks.createAsrStream,
 }));
 
+vi.mock("../tts/tts-dispatcher", () => ({
+  synthesizeByEngine: mocks.synthesizeByEngine,
+}));
+
 vi.mock("../orchestrator/vendors", () => ({
   buildVendorUrl: () => "https://example.invalid/chat",
+  resolveTransport: () => "openai",
   getAdapterForConfig: () => ({
     transport: "openai",
     buildRequest: () => ({ headers: {}, body: "{}" }),
@@ -49,19 +55,23 @@ import {
 describe("call turn submission", () => {
   const sentStates: string[] = [];
   const sentErrors: string[] = [];
+  const sentAudio: Array<{ base64?: string; text?: string }> = [];
 
   beforeEach(() => {
     sentStates.length = 0;
     sentErrors.length = 0;
+    sentAudio.length = 0;
     mocks.getAsrConfig.mockReset();
     mocks.createAsrStream.mockReset();
+    mocks.synthesizeByEngine.mockReset();
     mocks.getAsrConfig.mockReturnValue({ engine: "mossland", apiKey: "test-key" });
     setCallWindow({
       isDestroyed: () => false,
       webContents: {
-        send: (_channel: string, payload: { state?: string; message?: string }) => {
+        send: (channel: string, payload: { state?: string; message?: string; base64?: string; text?: string }) => {
           if (payload.state) sentStates.push(payload.state);
           if (payload.message) sentErrors.push(payload.message);
+          if (channel === "call:tts-audio") sentAudio.push(payload);
         },
       },
     } as never);
@@ -111,6 +121,35 @@ describe("call turn submission", () => {
 
     expect(sentStates).toContain("THINKING");
     expect(sentStates.at(-1)).toBe("LISTENING");
+  });
+
+  it("sends the assistant text with synthesized audio for the React conversation bubbles", async () => {
+    let pushFinal!: (text: string) => void;
+    mocks.createAsrStream.mockImplementation((_config, _partial, onFinal) => {
+      pushFinal = onFinal;
+      return {
+        start: vi.fn(async () => undefined),
+        sendAudio: vi.fn(),
+        stop: vi.fn(async () => ""),
+      };
+    });
+    mocks.synthesizeByEngine.mockResolvedValue({ audio: Buffer.from("spoken reply") });
+    setCallSettings(
+      () => ({ provider: "openai", baseUrl: "", model: "test", apiKey: "test-key" }),
+      () => ({ ttsEngine: "minimax", ttsMinimaxKey: "key", ttsMinimaxVoiceId: "voice" } as never),
+      async () => "",
+      async () => null,
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({}), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })));
+
+    startCall();
+    pushFinal("你好，昔涟。");
+    await endTurn();
+
+    expect(sentAudio).toEqual([{ base64: Buffer.from("spoken reply").toString("base64"), text: "模型回复" }]);
   });
 
   it("returns to LISTENING when batch transcription fails", async () => {

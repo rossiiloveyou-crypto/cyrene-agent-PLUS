@@ -6,7 +6,7 @@
 }
 
 .cy-composer-stack.is-centered {
-  transform: translateY(45px);
+  transform: none;
 }
 
 .cy-composer-stack.is-docked {
@@ -15,11 +15,32 @@
 
 .cy-composer-welcome {
   display: block;
-  width: min(100%, 520px);
+  width: min(100%, 240px, 28vh);
   height: auto;
   align-self: center;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   object-fit: contain;
+}
+
+.cy-composer-greeting {
+  position: relative;
+  isolation: isolate;
+  align-self: center;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0 0 32px;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.cy-composer-greeting__text {
+  margin: 0;
+  color: #000;
+  font: 500 28px/1.3 "Noto Sans SC", var(--rb-font-ui, sans-serif);
+  letter-spacing: 0.015em;
+  text-wrap: balance;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 10%, rgb(0 0 0 / 30%) 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 10%, rgb(0 0 0 / 30%) 100%);
 }
 
 .cy-composer-shell {
@@ -30,11 +51,25 @@
   overflow: hidden;
   border-radius: 22px;
   background: #f4f4f4;
-  box-shadow: var(--cy-shadow-bubble-neutral);
+  box-shadow: var(--rb-shadow-bubble-neutral);
 }
 
 .cy-composer-stack.is-centered .cy-composer-shell {
-  transform: translateY(-15px);
+  transform: none;
+}
+
+@media (max-width: 760px), (max-height: 700px) {
+  .cy-composer-welcome {
+    width: min(100%, 200px, 28vh);
+  }
+
+  .cy-composer-greeting {
+    margin-bottom: 24px;
+  }
+
+  .cy-composer-greeting__text {
+    font-size: 24px;
+  }
 }
 
 .cy-composer.ant-sender {
@@ -42,8 +77,8 @@
   z-index: 1;
   border: 1px solid rgba(31, 35, 48, 0.07);
   border-radius: 22px;
-  background: #fff;
-  box-shadow: var(--cy-shadow-bubble-neutral);
+  background: var(--rb-surface-elevated);
+  box-shadow: var(--rb-shadow-bubble-neutral);
   transition:
     border-color 160ms ease,
     box-shadow 160ms ease;
@@ -51,12 +86,12 @@
 
 .cy-composer.ant-sender:hover {
   border-color: rgba(31, 35, 48, 0.11);
-  box-shadow: var(--cy-shadow-control-hover);
+  box-shadow: var(--rb-shadow-control-hover);
 }
 
 .cy-composer.ant-sender:focus-within {
   border-color: rgba(255, 91, 138, 0.32);
-  box-shadow: var(--cy-shadow-control-focus);
+  box-shadow: var(--rb-shadow-control-focus);
 }
 
 .cy-composer .ant-sender-content {
@@ -67,7 +102,7 @@
 
 .cy-composer .ant-sender-input {
   min-height: 70px;
-  color: var(--cy-text);
+  color: var(--rb-text-primary);
   font: 400 15px/1.6 var(--rb-font-sans, sans-serif);
   resize: none;
 }
@@ -85,7 +120,7 @@
   height: 38px;
   border-radius: 50%;
   color: #fff;
-  background: var(--cy-accent);
+  background: var(--rb-accent);
 }
 
 .cy-composer .ant-sender-actions-btn:disabled {
@@ -93,52 +128,148 @@
   background: #e7e7e7;
 }
 
-.cy-composer__queue {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+.cy-queue-dock {
+  position: relative;
+  z-index: 0;
+  box-sizing: border-box;
+  width: calc(100% - 28px);
+  margin: 0 auto -5px;
+  padding: 3px 6px 8px;
+  overflow: hidden;
+  border: 1px solid #f3d9e2;
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  background: #fff4f7;
+  color: #604c54;
 }
 
-.cy-composer__queue-item {
+.cy-queue-dock__header,
+.cy-queue-dock__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.65);
-  background: rgba(0, 0, 0, 0.03);
-  border-radius: 8px;
-  padding: 6px 8px;
+  width: 100%;
+  min-height: 34px;
 }
 
-.cy-composer__queue-text {
+.cy-queue-dock__header {
+  gap: 9px;
+  padding: 4px 7px;
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: 500 13px/1.4 var(--rb-font-sans, sans-serif);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cy-queue-dock__header span:nth-child(2) {
   flex: 1;
-  white-space: nowrap;
+}
+
+.cy-queue-dock__header:hover {
+  background: #fbe5ed;
+  color: #d84f7d;
+}
+
+.cy-queue-dock__list {
+  max-height: 154px;
+  overflow-y: auto;
+}
+
+.cy-queue-dock__row {
+  gap: 7px;
+  padding: 3px 4px 3px 7px;
+  border-radius: 8px;
+}
+
+.cy-queue-dock__row + .cy-queue-dock__row {
+  border-top: 1px solid rgba(31, 35, 48, 0.07);
+}
+
+.cy-queue-dock__lead {
+  flex: none;
+  color: #9b7281;
+}
+
+.cy-queue-dock__content {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 2px;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: 500 13px/1.45 var(--rb-font-sans, sans-serif);
+  text-align: left;
+  cursor: text;
+}
+
+.cy-queue-dock__content > span {
+  min-width: 0;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.cy-composer__queue-item button {
+.cy-queue-dock__content small {
+  display: inline-flex;
   flex: none;
-  width: 20px;
-  height: 20px;
+  align-items: center;
+  gap: 3px;
+  color: rgba(31, 35, 48, 0.44);
+  font-size: 11px;
+}
+
+.cy-queue-dock__editor {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 91, 138, 0.38);
+  border-radius: 7px;
+  outline: none;
+  background: var(--rb-surface-elevated);
+  color: var(--rb-text-primary);
+  font: 400 13px/1.4 var(--rb-font-sans, sans-serif);
+  box-shadow: 0 0 0 2px rgba(255, 91, 138, 0.08);
+}
+
+.cy-queue-dock__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.cy-queue-dock__actions button {
+  flex: none;
+  width: 27px;
+  height: 27px;
   display: grid;
   place-items: center;
   appearance: none;
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 0;
   background: transparent;
-  color: rgba(0, 0, 0, 0.45);
+  color: #9b7281;
   cursor: pointer;
 }
 
-.cy-composer__queue-item button:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(0, 0, 0, 0.75);
+.cy-queue-dock__actions button:hover:not(:disabled) {
+  background: #fbe5ed;
+  color: #d84f7d;
+}
+
+.cy-queue-dock__actions button:disabled,
+.cy-queue-dock__content:disabled {
+  cursor: default;
+  opacity: 0.38;
 }
 
 .cy-composer__icon-button,
@@ -213,10 +344,10 @@
   align-items: center;
   gap: 7px;
   padding: 5px 8px;
-  border: 1px solid var(--cy-border);
+  border: 1px solid var(--rb-border-default);
   border-radius: 10px;
-  background: #f7f7f7;
-  color: var(--cy-text);
+  background: var(--rb-surface-hover);
+  color: var(--rb-text-primary);
   font: 500 12px/1.2 var(--rb-font-sans, sans-serif);
 }
 
@@ -298,12 +429,12 @@
 }
 
 .cy-composer__attachment button:hover {
-  color: var(--cy-accent);
+  color: var(--rb-accent);
 }
 
 .cy-sticker-popover .ant-popover-inner {
   padding: 10px;
-  border: 1px solid var(--cy-border);
+  border: 1px solid var(--rb-border-default);
   border-radius: 16px;
 }
 
@@ -342,7 +473,7 @@
 .cy-sticker-picker__empty {
   grid-column: 1 / -1;
   padding: 24px;
-  color: var(--cy-text-muted);
+  color: var(--rb-text-secondary);
   text-align: center;
 }
 
@@ -370,7 +501,7 @@
 .cy-composer__footer-button:hover,
 .cy-composer__agent-button:hover,
 .cy-composer__icon-button:hover {
-  color: var(--cy-accent);
+  color: var(--rb-accent);
 }
 
 .cy-composer__footer-button:disabled {
@@ -395,15 +526,6 @@
   fill: none;
   stroke: currentColor;
   stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.cy-composer__footer .cy-composer__code-folder-icon,
-.cy-composer__footer .cy-composer__terminal-folder-icon {
-  fill: none;
-  stroke: #333;
-  stroke-width: 4;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -436,3 +558,50 @@
 .cy-model-selector__menu button { border: 0; background: transparent; text-align: left; padding: 8px; border-radius: 8px; cursor: pointer; display: grid; gap: 2px; }
 .cy-model-selector__menu button:hover { background: #fff0f5; }
 .cy-model-selector__menu small { color: #8d7c83; }
+/* 模型子下拉：档案下拉旁的会话级当前模型；单模型档案不渲染（外观零变化） */
+.cy-model-selector--model code { font-size: 12px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cy-model-selector__models { min-width: 180px; }
+.cy-model-selector__models button code { font-size: 12.5px; }
+.cy-model-selector__models button[data-current] { background: #fff0f5; font-weight: 600; }
+
+/* 最近项目下拉：工作文件夹按钮的历史项目复选菜单（外观与模型下拉一致） */
+.cy-recent-projects-popover .ant-popover-inner {
+  padding: 6px;
+  border: 1px solid rgba(31, 35, 48, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(29, 29, 31, 0.12);
+}
+.cy-recent-projects__menu { min-width: 260px; max-width: 360px; display: grid; gap: 4px; }
+.cy-recent-projects__item { border: 0; background: transparent; text-align: left; padding: 8px; border-radius: 8px; cursor: pointer; display: grid; gap: 2px; }
+.cy-recent-projects__item:hover { background: #fff0f5; }
+.cy-recent-projects__item small { color: #8d7c83; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cy-recent-projects__item--choose-other { margin-top: 2px; border-top: 1px solid #f0e3e8; border-radius: 0; padding-top: 10px; color: #0d0d0d; font-size: 13px; font-weight: 500; }
+
+/* 聊天功能栏沿用设置页的界面字体与文字对比；消息 Markdown 保持独立排版。 */
+.cy-composer-shell .cy-composer__footer-button,
+.cy-composer-shell .cy-composer__agent-button,
+.cy-composer-shell .cy-composer__icon-button {
+  color: #0d0d0d;
+  font-family: var(--rb-font-ui, ui-sans-serif, system-ui, sans-serif);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.cy-composer-shell .cy-composer__footer-button:hover,
+.cy-composer-shell .cy-composer__agent-button:hover,
+.cy-composer-shell .cy-composer__icon-button:hover {
+  color: var(--rb-accent);
+}
+
+.cy-composer-shell .cy-composer__footer-button:disabled,
+.cy-composer-shell .cy-composer__icon-button:disabled {
+  color: #828282;
+}
+
+.cy-queue-dock__header,
+.cy-queue-dock__content {
+  color: #0d0d0d;
+  font-family: var(--rb-font-ui, ui-sans-serif, system-ui, sans-serif);
+}

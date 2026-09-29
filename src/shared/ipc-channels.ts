@@ -73,7 +73,6 @@ export const IPC = {
   AGUI_CANCEL: "agui:cancel",
   // 渲染端→主进程单向通知：本轮 run 的终态消息已写入会话存储（插件轮次事件的落盘确认）
   AGUI_RUN_PERSISTED: "agui:run-persisted",
-  HARNESS_GET_INTERRUPTED_RUN: "harness:get-interrupted-run",
   SCHEDULER_EVENT: "scheduler:event",
 
   // 注意力 Toast 中心（右下角提醒弹窗；main 为生命周期唯一权威，渲染页纯表现层）
@@ -96,18 +95,6 @@ export const IPC = {
   CODE_GIT_COMMIT: "code-git:commit",
   CODE_GIT_PUSH: "code-git:push",
 
-  // sidebar window (status / schedule / settings entry)
-  SIDEBAR_MINIMIZE: "sidebar:minimize",
-  SIDEBAR_CLOSE: "sidebar:close",
-  SIDEBAR_TOGGLE_ALWAYS_ON_TOP: "sidebar:toggle-always-on-top",
-  SIDEBAR_OPEN_SETTINGS: "sidebar:open-settings",
-  SIDEBAR_OPEN_TASKS: "sidebar:open-tasks",
-  SIDEBAR_OPEN_CALL: "sidebar:open-call",
-
-  // tasks window (read-only display, no per-element interactions)
-  TASKS_CLOSE: "tasks:close",
-  TASKS_MINIMIZE: "tasks:minimize",
-
   // Moments（动态 / 朋友圈）
   MOMENTS_LIST: "moments:list",
   MOMENTS_GET_POST: "moments:get-post",
@@ -120,8 +107,6 @@ export const IPC = {
   MOMENTS_LIST_CHARACTERS: "moments:list-characters",
 
   // settings window
-  SETTINGS_MINIMIZE: "settings:minimize",
-  SETTINGS_CLOSE: "settings:close",
   // main → settings 窗口：要求切到指定标签（已打开时用）
   SETTINGS_SWITCH_SECTION: "settings:switch-section",
   SETTINGS_GET_CONFIG: "settings:get-config",
@@ -131,6 +116,7 @@ export const IPC = {
   SETTINGS_MODEL_PROFILE_DELETE: "settings:model-profiles:delete",
   SETTINGS_MODEL_PROFILE_SET_DEFAULT: "settings:model-profiles:set-default",
   SETTINGS_TEST_CONNECTION: "settings:test-connection",
+  SETTINGS_PREVIEW_REASONING: "settings:preview-reasoning",
   SETTINGS_TEST_VISION: "settings:test-vision",
   SETTINGS_GET_GENERAL: "settings:get-general",
   SETTINGS_SAVE_GENERAL: "settings:save-general",
@@ -147,14 +133,9 @@ export const IPC = {
   // 对话用量徽章：按会话查询 + 变化推送（main → renderer）
   CHAT_SESSION_USAGE_GET: "chat:session-usage:get",
   CHAT_SESSION_USAGE_CHANGED: "chat:session-usage:changed",
-  CHAT_TYPOGRAPHY_CHANGED: "chat-typography:changed",
   SETTINGS_PICK_UI_FONT: "settings:pick-ui-font",
   SETTINGS_IMPORT_UI_FONT: "settings:import-ui-font",
   SETTINGS_RESET_UI_FONT: "settings:reset-ui-font",
-  SETTINGS_OPEN_SIDEBAR: "settings:open-sidebar",
-  SETTINGS_CLOSE_SIDEBAR: "settings:close-sidebar",
-  SETTINGS_OPEN_TASKS: "settings:open-tasks",
-  SETTINGS_CLOSE_TASKS: "settings:close-tasks",
   SETTINGS_SET_PET_ALWAYS_ON_TOP: "settings:set-pet-always-on-top",
   SETTINGS_SET_PET_VISIBLE: "settings:set-pet-visible",
   SETTINGS_SET_PET_ZOOM: "settings:set-pet-zoom",
@@ -171,22 +152,37 @@ export const IPC = {
   CHATS_GET: "chats:get",
   CHATS_GET_PAGE: "chats:get-page",
   CHATS_CREATE: "chats:create",
-  CHATS_APPEND: "chats:append",
-  CHATS_UPSERT: "chats:upsert",
-  CHATS_SET_MESSAGE_TTS_CACHE: "chats:set-message-tts-cache",
-  CHATS_REPLACE_MESSAGES: "chats:replace-messages",
-  CHATS_REPLACE_TAIL: "chats:replace-tail",
+  CTA_PRESENTATION_CHECKPOINT: "cta:presentation-checkpoint",
   // renderer → main：主动压缩会话上下文（模型窗口内旧消息摘要成一条记忆）
   CHATS_COMPACT: "chats:compact",
   CHATS_RENAME: "chats:rename",
   CHATS_DELETE: "chats:delete",
+  // 会话级待发队列（运行中排队、未派发；独立于正式 messages 历史）
+  CHATS_PENDING_ENQUEUE: "chats:pending-enqueue",
+  CHATS_PENDING_LIST: "chats:pending-list",
+  CHATS_PENDING_REMOVE: "chats:pending-remove",
+  // 认领队首（单次写入：待发条目 → 正式用户消息 + 派发状态）与派发确认
+  CHATS_PENDING_CLAIM: "chats:pending-claim",
+  CHATS_PENDING_COMPLETE_DISPATCH: "chats:pending-complete-dispatch",
+  // 修改未认领的待发条目文字（按会话 + 条目稳定标识；复用页面解析结果）
+  CHATS_PENDING_EDIT: "chats:pending-edit",
+  // 调整：把待发条目插入当前运行的下一步（绑定 active run，由 agui-bridge 处理）
+  CHATS_PENDING_ADJUST: "chats:pending-adjust",
   CHATS_SET_PINNED: "chats:set-pinned",
   CHATS_SET_MODEL_PROFILE: "chats:set-model-profile",
+  // 会话级当前模型窄 IPC：只写会话单字段组（绑定+模型），不碰档案
+  CHATS_SET_SESSION_MODEL: "chats:set-session-model",
   CHATS_OPEN_FOLDER: "chats:open-folder",
   CHATS_OPEN_WORKSPACE: "chats:open-workspace",
+  // renderer → main：用本机默认方式打开 / 在资源管理器中定位会话工作区内的文件
+  // （FileChangeCard 右键菜单；主进程校验拼出的绝对路径必须仍在该会话绑定的工作区内）
+  CHATS_SHELL_FILE: "chats:shell-file",
   CHATS_MIGRATE_LEGACY: "chats:migrate-legacy",
   // 任意会话变动后 main → 所有渲染窗口 broadcast，触发列表/标题刷新
   CHATS_CHANGED: "chats:changed",
+  CHATS_SIDEBAR_ORGANIZATION_GET: "chats:sidebar-organization:get",
+  CHATS_SIDEBAR_ORGANIZATION_APPLY: "chats:sidebar-organization:apply",
+  CHATS_SIDEBAR_ORGANIZATION_CHANGED: "chats:sidebar-organization:changed",
   // 状态栏 → main：要求打开/复用 reactChatWindow 并加载指定 sessionId
   CHATS_OPEN_IN_REACT_WINDOW: "chats:open-in-react-window",
   // main → reactChatWindow：要求切到指定 sessionId（窗口已存在时用）
@@ -217,6 +213,10 @@ export const IPC = {
   CHATS_CLEAR_WORKSPACE: "chats:clear-workspace",
   // renderer → main：打开文件夹选择器
   CHATS_PICK_WORKSPACE_FOLDER: "chats:pick-workspace-folder",
+  // renderer → main：获取最近绑定的项目文件夹列表（已过滤失效目录）
+  CHATS_RECENT_PROJECTS: "chats:recent-projects",
+  // renderer → main：验证工作区目录当前是否可用（存在且为目录）
+  CHATS_VALIDATE_WORKSPACE: "chats:validate-workspace",
   // renderer → main：为 Learn 模式初始化工作区结构（只创建缺失文件）
   CHATS_INIT_LEARN_WORKSPACE: "chats:init-learn-workspace",
   // main → 所有窗口：工作区绑定变更广播
@@ -227,6 +227,18 @@ export const IPC = {
   REVIEW_GET: "review:get",
   // renderer → main：把指定 Run 修改过的文件恢复到运行前状态（基于 before/ 基线）
   REVIEW_RESTORE: "review:restore",
+
+  // 会话工作区只读文件（右侧面板文件树 / 文件预览）
+  // renderer → main：列出工作区内某目录的条目（懒加载用）
+  WORKSPACE_FILES_LIST: "workspace-files:list",
+  // renderer → main：读取工作区内某文件的内容（预览用，带大小/二进制限制）
+  WORKSPACE_FILES_READ: "workspace-files:read",
+
+  // 工作区右上角"打开"菜单（用本机应用打开工作区根目录）
+  // renderer → main：探测本机可打开工作区的应用（VSCode / Cursor 等，进程内缓存）
+  WORKSPACE_OPEN_IN_LIST_APPS: "workspace-open-in:list-apps",
+  // renderer → main：执行打开动作（explorer 走 shell.openPath，其余走 detached spawn）
+  WORKSPACE_OPEN_IN: "workspace-open-in:open",
 
 // sticker manager window
 	  STICKERS_MINIMIZE: "stickers:minimize",
@@ -253,10 +265,6 @@ export const IPC = {
   LIVE2D_PLAY_ACTION: "live2d:play-action",        // 主进程 → 桌宠窗口：执行动作（motion 或 expression）
   LIVE2D_GET_MAIN_DIAGNOSTICS: "live2d:get-main-diagnostics",
   // embedding model status
-  EMBEDDING_GET_STATUS: "embedding:get-status",
-  EMBEDDING_DOWNLOAD: "embedding:download",
-  EMBEDDING_DELETE: "embedding:delete",
-  EMBEDDING_PROGRESS: "embedding:progress",
   EMBEDDING_SET_MODEL: "embedding:set-model",
   RERANKER_SET_MODE: "reranker:set-mode",
   RERANKER_GET_STATUS: "reranker:get-status",
@@ -318,6 +326,7 @@ export const IPC = {
   MCP_ADD_SERVER: "mcp:add-server",
   MCP_REMOVE_SERVER: "mcp:remove-server",
   MCP_LIST_SERVERS: "mcp:list-servers",
+  MCP_LIST_SERVER_CONFIGS: "mcp:list-server-configs",
 
   // tool (plugin) toggle
   TOOL_SET_ENABLED: "tool:set-enabled",
@@ -416,7 +425,7 @@ export const IPC = {
   POP_QUIZ_SETTLED: "pop-quiz:settled",
 
   // call window (voice call)
-  CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口
+  CALL_OPEN: "call:open",                 // 角色信息浮层 → main：打开通话窗口
   CALL_START: "call:start",               // renderer → main：开始通话（初始化 ASR）
   CALL_AUDIO_FRAME: "call:audio-frame",    // renderer → main：PCM 音频帧
   CALL_ASR_RESULT: "call:asr-result",     // main → renderer：ASR 识别结果
@@ -452,6 +461,11 @@ export const IPC = {
   CHANNELS_FEISHU_TEST_CONNECTION: "channels:feishu:test-connection",
   CHANNELS_FEISHU_TEST_WEBHOOK_REACHABLE: "channels:feishu:test-webhook-reachable",
   CHANNELS_QQ_TEST_CONNECTION: "channels:qq:test-connection",
+  /**
+   * QQ 监听鉴权预检：主进程按 listenMode/customHost 解析真实监听地址，并判定是否
+   * 必须配置 Access Token。渲染进程看不到网络接口，因此该判定只能由主进程给出。
+   */
+  CHANNELS_QQ_RESOLVE_AUTH_REQUIREMENT: "channels:qq:resolve-auth-requirement",
   // QQ 官方机器人（QQ 开放平台）专属
   CHANNELS_QQBOT_TEST_CONNECTION: "channels:qqbot:test-connection",
   // 消息日志
@@ -534,4 +548,3 @@ export const IPC = {
   PLUGINS_MARKET_INSTALL: "plugins:market:install",
 
 } as const;
-

@@ -34,6 +34,7 @@ import type {
   HarnessConfig,
   HarnessInput,
   HarnessResult,
+  RunAdjustmentMessage,
 } from "./types";
 import type { ToolOutputRef } from "./tool-output/tool-output-store";
 import { INITIAL_HARNESS_CACHE_STATE, DEFAULT_HARNESS_CONFIG } from "./types";
@@ -46,6 +47,7 @@ import { TimeoutClock } from "./timeout-clock";
 import { buildCurrentTodoNotebookContext } from "./todo-working-notebook";
 import { appendInternalTranscriptMessage, createInternalTranscriptMessage } from "./internal-transcript";
 import { callLLM, summarizeHistory } from "./harness-llm";
+import { ChatTimeStreamPrefixFilter } from "../../chat-time-stream-filter";
 import { runToolRound, type ToolRoundOutcome } from "./tool-round";
 import {
   buildStableSystemPrefix,
@@ -80,6 +82,8 @@ export interface HarnessRun {
   toolDispatchContext: ToolDispatchContext;
   /** 工具调用开始时刻（toolCallId → epoch ms），供完成事件计算耗时；提交后即移除。 */
   toolCallStartedAt: Map<string, number>;
+  /** 当前轮 assistant 的轨迹条目 ID（appendAssistant 返回；工具结果提交的锚点）。 */
+  currentAssistantEntryId?: string;
 }
 
 // ═══ 主入口 ═══════════════════════════════════════════════
@@ -107,6 +111,30 @@ export async function runCyreneHarness(input: HarnessInput): Promise<HarnessResu
       return finishRun(run, finalAnswer, true, "max_rounds");
     }
 
+    // ── 插话注入（下一次模型请求前）──
+    // 工具批次或上一轮模型请求已结束：把标记插入当前运行的待发消息双写
+    // （权威轨迹 → 聊天历史）后按入队顺序追加进上下文。无标记时保持同步直达，
+    // 不引入 await 挂起点（与压缩的门控方式一致）。
+    const adjustmentPoll = input.pollRunAdjustments?.();
+    if (adjustmentPoll) {
+      let adjustments: RunAdjustmentMessage[];
+      try {
+        adjustments = await adjustmentPoll;
+      } catch (error) {
+        // 双写任一步失败（fail-closed）：pending 保留，终止运行，不假装注入成功
+        return finishRun(run, `插话提交失败：${errorMessage(error)}`, true, "error");
+      }
+      if (adjustments.length > 0) {
+        for (const adjustment of adjustments) {
+          run.messages.push({ role: "user", content: adjustment.rawContent });
+        }
+        checkpoint(run);
+        if (run.checkpointFailure) {
+          return finishRun(run, `执行状态保存失败：${run.checkpointFailure}`, true, "error");
+        }
+      }
+    }
+
     const promptLayers = buildRoundPromptLayers(input);
     const roundId = `round-${run.rounds}`;
     input.onEvent?.({ type: "round_start", roundId });
@@ -131,17 +159,36 @@ export async function runCyreneHarness(input: HarnessInput): Promise<HarnessResu
     // ── callLLM ──
     let response: ChatResponse;
     try {
-      response = await callRoundLLM(run, promptLayers);
+      response = await callRoundLLM(run, promptLayers, roundId);
     } catch (err) {
       // signal abort 属于用户取消：按 cancelled 结算，不归类为 error。
       if (input.signal?.aborted) return cancelledResult(run);
-      console.error(`${LOG_PREFIX} LLM call failed:`, err);
+      // 失败摘要：模型名 / 请求地址 / 错误码置顶，堆栈跟在后面，定位不用翻设置。
       const errorMsg = err instanceof Error ? err.message : String(err);
+      const errCode = (err as { code?: string }).code ?? "无错误码";
+      console.error(
+        `${LOG_PREFIX} LLM call failed:`,
+        `\n  model id: ${input.vendorConfig.model}`,
+        `\n  baseUrl: ${input.vendorConfig.baseUrl}`,
+        `\n  error: ${errCode} ${errorMsg}`,
+        err,
+      );
       return finishRun(run, `抱歉，模型调用失败：${errorMsg}`, true, "error");
     }
 
     // ── Assistant response 必须写回 transcript（否则模型下一轮看不到自己上一轮的回复）──
-    run.messages.push(toAssistantMessage(response));
+    const assistantMessage = toAssistantMessage(response);
+    run.messages.push(assistantMessage);
+    try {
+      // canonical assistant 先于任何工具 dispatch 落盘（fail-closed）：
+      // 写失败 = 本轮协议断裂，直接终态 error，不得带着缺失的声明继续执行。
+      run.currentAssistantEntryId = await input.transcriptSink?.appendAssistant({
+        message: assistantMessage,
+        roundId,
+      });
+    } catch (error) {
+      return finishRun(run, `会话轨迹保存失败：${errorMessage(error)}`, true, "error");
+    }
     if (response.text) {
       run.streamController.bufferProgressContent(response.text);
     }
@@ -181,6 +228,35 @@ export async function runCyreneHarness(input: HarnessInput): Promise<HarnessResu
     const truncatedSuffix = response.finishReason === "length"
       ? "\n\n⚠️ 模型输出达到长度上限，以上回复可能不完整。"
       : "";
+    // ── 最终结算前的插话检查 ──
+    // 模型准备结束当前运行：若仍有待插入的调整消息，本轮回复转为中间过程
+    // （progress_text），插话双写（权威轨迹 → 聊天历史）进入上下文后继续循环处理，
+    // 不在结算前丢弃插话。
+    let endAdjustments: RunAdjustmentMessage[];
+    try {
+      endAdjustments = await input.pollRunAdjustments?.() ?? [];
+    } catch (error) {
+      // 双写任一步失败（fail-closed）：pending 保留，终止运行，不假装注入成功
+      return finishRun(run, `插话提交失败：${errorMessage(error)}`, true, "error");
+    }
+    if (endAdjustments.length > 0) {
+      const intermediate = run.streamController.commitProgressBuffer() + truncatedSuffix;
+      input.onEvent?.({ type: "round_end", roundId });
+      if (intermediate) {
+        input.onEvent?.({ type: "progress_text", content: intermediate });
+      }
+      for (const adjustment of endAdjustments) {
+        run.messages.push({ role: "user", content: adjustment.rawContent });
+      }
+      // 本轮模型已产出回复且运行未结束：按工具轮口径推进轮次，
+      // 让下一轮拿到新 roundId，轮次上限也能正确计数
+      run.rounds++;
+      checkpoint(run);
+      if (run.checkpointFailure) {
+        return finishRun(run, `执行状态保存失败：${run.checkpointFailure}`, true, "error");
+      }
+      continue;
+    }
     const finalAnswer = run.streamController.commitProgressBuffer() + truncatedSuffix;
     input.onEvent?.({ type: "round_end", roundId });
     input.onEvent?.({ type: "final_answer", content: finalAnswer });
@@ -221,6 +297,8 @@ function createRun(input: HarnessInput): HarnessRun {
     }),
   ];
 
+  // 排他轮（ask_user / submit_plan）分发上下文：submit_plan 交卷需要会话身份
+  // （conversationId / runId）驱动状态机与注意力提醒，因此 toolContext 必须在此就位
   const askDispatchContext: ToolDispatchContext = {
     state,
     tools: input.tools,
@@ -228,6 +306,7 @@ function createRun(input: HarnessInput): HarnessRun {
     requestUserClarification: input.requestUserClarification,
     includeInteractiveTools: input.includeInteractiveTools,
     toolOutputStore: input.toolOutputStore,
+    toolContext: input.toolContext,
   };
 
   return {
@@ -346,9 +425,10 @@ async function runCompaction(run: HarnessRun, roundSystemPrompt: string, budget:
 }
 
 /** 发起一轮 LLM 调用，并桥接 reasoning 流式事件（start/delta/end 配对）。 */
-async function callRoundLLM(run: HarnessRun, promptLayers: PromptLayers): Promise<ChatResponse> {
+async function callRoundLLM(run: HarnessRun, promptLayers: PromptLayers, roundId: string): Promise<ChatResponse> {
   const reasoningMessageId = `reasoning-${run.rounds}`;
   let reasoningStarted = false;
+  const candidateFilter = new ChatTimeStreamPrefixFilter();
   try {
     return await callLLM(
       run.input.vendorConfig,
@@ -364,8 +444,14 @@ async function callRoundLLM(run: HarnessRun, promptLayers: PromptLayers): Promis
         }
         run.input.onEvent?.({ type: "reasoning_delta", messageId: reasoningMessageId, delta });
       },
+      (delta) => {
+        const visibleDelta = candidateFilter.push(delta);
+        if (visibleDelta) run.input.onEvent?.({ type: "candidate_text_delta", roundId, delta: visibleDelta });
+      },
     );
   } finally {
+    const tail = candidateFilter.finish();
+    if (tail) run.input.onEvent?.({ type: "candidate_text_delta", roundId, delta: tail });
     if (reasoningStarted) {
       run.input.onEvent?.({ type: "reasoning_end", messageId: reasoningMessageId });
     }
@@ -507,6 +593,11 @@ function toAssistantMessage(response: ChatResponse): ChatMessage {
     content: response.text,
     ...(response.toolCalls?.length ? { toolCalls: response.toolCalls } : {}),
   };
+}
+
+/** 统一错误消息提取（轨迹/工具失败文案用）。 */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** 防御外部共享引用：initialState 的调用方在 run 期间可能复用/修改原对象。 */

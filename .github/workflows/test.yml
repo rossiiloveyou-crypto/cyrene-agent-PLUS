@@ -12,10 +12,10 @@ jobs:
     env:
       NODE_OPTIONS: --max-old-space-size=4096
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js 24 LTS
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
 
@@ -25,70 +25,49 @@ jobs:
       - name: Verify Electron installation
         run: npx electron --version
 
+      # 生产依赖审计：高危基线清零或限期登记前仅留存报告，不阻断合入。
+      # 处置清单见 docs/refactor/2026-09-14-dependency-audit-baseline.md；
+      # 基线清零后把本步骤改为 npm audit --omit=dev --audit-level=high 并移除 continue-on-error。
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --json > npm-audit-prod.json
+        continue-on-error: true
+
+      - name: Upload production dependency audit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-audit-prod
+          path: npm-audit-prod.json
+
       - name: Build
         run: npm run build
 
-      - name: Test src/main/orchestrator/vendors
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/main/orchestrator/vendors
+      # 插件清单契约检查：源码类型与 manifest.schema.json 保持一致
+      - name: Check plugin schema contract
+        run: npm run check:plugin-schema
 
-      - name: Test src/main/orchestrator/structured-output
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/main/orchestrator/structured-output
-
-      - name: Test src/main/orchestrator/tools
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/main/orchestrator/tools
-
-      - name: Test src/main/orchestrator root files
-        if: success() || failure()
-        shell: pwsh
-        run: |
-          $files = Get-ChildItem -Path "src/main/orchestrator" -Filter "*.test.ts" | Select-Object -ExpandProperty FullName
-          if (-not $files) { Write-Host "No root test files found"; exit 0 }
-          npx vitest run --reporter=verbose --maxWorkers=1 $files
-
-      - name: Test src/main/music
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/main/music
-
-      - name: Test src/main/memory
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/main/memory
-
-      - name: Test src/main/channels+chats+chat+cita
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/main/channels src/main/chats src/main/chat src/main/cita
-
-      - name: Test src/main/screenshot+rag+scheduler+proactive
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/main/screenshot src/main/rag src/main/scheduler src/main/proactive
-
-      - name: Test src/main/skills+social+relationship+runtime-policy+game-bot
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/main/skills src/main/social-context src/main/relationship src/main/runtime-policy src/main/game-bot
-
-      - name: Test src/main root files
-        if: success() || failure()
-        shell: pwsh
-        run: |
-          $files = Get-ChildItem -Path "src/main" -Filter "*.test.ts" | Select-Object -ExpandProperty FullName
-          if (-not $files) { Write-Host "No root test files found"; exit 0 }
-          npx vitest run --reporter=verbose --maxWorkers=1 $files
-
-      - name: Test src/plugins
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/plugins
-
-      - name: Test src/renderer
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/renderer
-
-      - name: Test src/shared + src/cli
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 src/shared src/cli
-
-      - name: Test skills
-        if: success() || failure()
-        run: npx vitest run --reporter=verbose --maxWorkers=1 skills
-
+      # 分块测试：与 vitest.config.ts 的 include 对应，各步骤之和不重不漏覆盖全部测试文件
+      # （已用 vitest list 逐一核对；filter 带尾斜杠、exclude 用根相对路径避免前缀误匹配）。
+      # 拆成多个独立步骤是为了 CI 上出现 fork worker 崩溃时能一眼定位目录
+      # （此前单步骤只有 “Worker exited unexpectedly”，无法判断死在哪）。
+      - name: Test · src / plugins + shared + cli
+        run: npx vitest run src/plugins src/shared src/cli
+      - name: Test · src / renderer
+        run: npx vitest run src/renderer
+      - name: Test · main / orchestrator
+        run: npx vitest run src/main/orchestrator
+      - name: Test · main / moments + music
+        run: npx vitest run src/main/moments src/main/music
+      - name: Test · main / memory + rag
+        run: npx vitest run src/main/memory src/main/rag
+      - name: Test · main / channels
+        run: npx vitest run src/main/channels
+      - name: Test · main / platform（app / plugins / tts / cita / skills / scheduler / proactive / chats）
+        run: npx vitest run src/main/tts/ src/main/plugin-host/ src/main/application/ src/main/cita/ src/main/skills/ src/main/scheduler/ src/main/proactive/ src/main/chats/
+      - name: Test · main / core（其余）
+        run: npx vitest run src/main --exclude "src/main/orchestrator/**" --exclude "src/main/moments/**" --exclude "src/main/music/**" --exclude "src/main/memory/**" --exclude "src/main/rag/**" --exclude "src/main/channels/**" --exclude "src/main/tts/**" --exclude "src/main/plugin-host/**" --exclude "src/main/application/**" --exclude "src/main/cita/**" --exclude "src/main/skills/**" --exclude "src/main/scheduler/**" --exclude "src/main/proactive/**" --exclude "src/main/chats/**"
+      - name: Test · packages + skills + poc
+        # packages 的 include 目前在 vitest.config.ts 中临时禁用（windows-2025 镜像下
+        # fork worker 静默崩溃，改由 plugin-sdk workflow 单独验证），skills / cline-poc
+        # 暂无测试文件，因此允许空跑；packages 恢复或新增测试后本步骤自动生效。
+        run: npx vitest run --exclude "src/**" --passWithNoTests

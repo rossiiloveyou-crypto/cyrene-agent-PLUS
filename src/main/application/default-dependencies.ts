@@ -7,6 +7,7 @@
  */
 
 import { app, BrowserWindow, dialog, screen } from "electron";
+import * as fs from "fs";
 import * as path from "path";
 import { autoUpdater } from "electron-updater";
 
@@ -27,11 +28,13 @@ import {
   markStartupPhaseReady,
   reactChatWindow,
   setGetCurrentAppIconPath,
-  sidebarWindow,
-  settingsWindow,
-  tasksWindow,
 } from "../windows/window-state";
-import { loadModelSettings, saveModelSettings } from "../settings/model-settings";
+import { loadModelSettings, resolveModelSettingsProfile, saveModelSettings } from "../settings/model-settings";
+import { getConversationTranscriptStore } from "../orchestrator/conversation-transcript-store";
+import { getHarnessRunStore } from "../orchestrator/harness/run-store";
+import { createModelBackedConversationTranscriptCompactor } from "../orchestrator/conversation-transcript-compactor";
+import { ConversationJournalService } from "../orchestrator/conversation-journal-service";
+import { activeConversationRegistry } from "../chats/active-conversation-registry";
 import { registerSettingsIpc } from "../settings/settings-ipc";
 import {
   applyGeneralSettings,
@@ -50,11 +53,13 @@ import { momentsService, registerMomentsMediaMatcher } from "../moments/moments-
 import {
   addL2MemoryVector,
   deleteUserMemoryVectors,
+  flushRAGStore,
+  flushRAGStoreSync,
   getEntriesBySource,
   initRAG,
   isUserMemoryVectorStoreReady,
 } from "../rag";
-import { getEmbeddingProvider, getSceneEmbeddingProvider } from "../rag/embedding";
+import { getEmbeddingProvider } from "../rag/embedding";
 import { toolRegistry } from "../orchestrator/tools/registry/tool-registry";
 import { pluginPromptRegistry } from "../../plugins/prompts";
 import type { PluginManager } from "../../plugins/manager";
@@ -63,14 +68,18 @@ import { registerAllTools } from "../orchestrator/tools/registry/tool-registrati
 import { LspManager } from "../lsp/manager";
 import { initSandbox } from "../orchestrator/sandbox/sandbox-exec";
 import {
+  encodePlanSessionKey,
   enterPlanDiscussing,
   exitPlanMode,
   getPlanState,
   initPlanPaths,
   initPlanStateBroadcaster,
+  initPlanStatePersister,
+  restorePlanSession,
+  type PlanStateSnapshot,
 } from "../orchestrator/plan-mode";
 import { initMcpManager, pruneMcpServersByIds } from "../orchestrator/mcp-manager";
-import { syncPlaywrightMcp, REMOVED_BUILTIN_MCP_IDS } from "../sync-mcp-builtin";
+import { syncPlaywrightMcp, syncFilesystemMcp, REMOVED_BUILTIN_MCP_IDS } from "../sync-mcp-builtin";
 import { registerAppUpdateIpc } from "../updater/app-update-ipc";
 import { createGitHubAppUpdateService, scheduleStartupUpdateCheck } from "../updater/github-app-updater";
 import { registerWindowSystemIpc } from "../windows/window-system-ipc";
@@ -82,6 +91,8 @@ import {
 import { memoryStore } from "../memory/memory-store";
 import { backupMemoryRagFiles, reconcileMemoryRag } from "../memory/memory-rag-reconciliation";
 import { registerChatsIpc } from "../chats/chats-ipc";
+import { registerWorkspaceFilesIpc } from "../chats/workspace-files-ipc";
+import { registerOpenInAppIpc } from "../chats/open-in-app";
 import { registerMomentsIpc } from "../moments/moments-ipc";
 import { registerChatUiIpc, getActiveChatSessionId } from "../chats/chat-ui-ipc";
 import { createToastWindowController } from "../toast/toast-window";
@@ -94,7 +105,7 @@ import { TtsSessionService } from "../tts/tts-session-service";
 import { registerTtsIpc } from "../tts/tts-ipc";
 import { loadUserProfile } from "../settings-store";
 import { getAppIconPath } from "../app-icon";
-import { registerAgUiIpc } from "../agui-bridge";
+import { hasActiveConversationRun, registerAgUiIpc } from "../agui-bridge";
 import { updateLocaleContext } from "../locale-context";
 import { registerCallIpc } from "../call/call-manager";
 import { initSkills, skillRegistry } from "../skills";
@@ -104,7 +115,9 @@ import { createLifecyclePublisher } from "../plugin-host/lifecycle-publisher";
 import { createPendingTurnLifecycle } from "../plugin-host/pending-turn-lifecycle";
 import { startPluginRuntime } from "../plugin-runtime";
 import { createAgentRuntime } from "../orchestrator/agent-runtime";
+import { reconcileCrashedInterruptions } from "../orchestrator/conversation-interruption-reconciliation";
 import { createRuntimeStateService } from "../orchestrator/runtime-state-service";
+import { createTranscriptCompactorGetter } from "./transcript-compaction-wiring";
 import { createProactiveLifecycle } from "../proactive/proactive-lifecycle";
 import { createCitaService } from "../services/cita/cita-service";
 import { createSocialContextService } from "../services/social-context/social-context-service";
@@ -140,10 +153,9 @@ const SPLASH_MIN_MS = 2500;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 function broadcastToAuxWindows(channel: string, payload: unknown): void {
-  for (const win of [reactChatWindow, sidebarWindow, tasksWindow, settingsWindow]) {
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(channel, payload);
-    }
+  const win = reactChatWindow;
+  if (win && !win.isDestroyed()) {
+    win.webContents.send(channel, payload);
   }
 }
 
@@ -165,9 +177,48 @@ async function reconcileUserMemoryIndex(): Promise<void> {
   logger.info(LogTag.RAG, "reconciliation:", report);
 }
 
+/**
+ * 启动崩溃恢复：扫描 userData/plans/各会话目录/state.json，把中断的非 NORMAL 会话还原。
+ * 只恢复事实不恢复执行权——统一降级 PLAN_DISCUSSING，REVIEW/EXECUTING 来源
+ * 由 [PLAN_RECOVERY] 注入中断事实，模型先查证工作区再修订计划重新审批。
+ * 快照的会话键取自文件内容（原始 conversationId），目录名只是物理位置；
+ * 单个快照损坏只跳过该会话，不阻塞其他恢复。
+ */
+function recoverInterruptedPlanSessions(plansRoot: string): void {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(plansRoot);
+  } catch {
+    return; // plans 目录不存在 = 从未用过计划模式
+  }
+  for (const entry of entries) {
+    const stateFile = path.join(plansRoot, entry, "state.json");
+    try {
+      if (!fs.existsSync(stateFile)) continue;
+      const snapshot = JSON.parse(fs.readFileSync(stateFile, "utf8")) as PlanStateSnapshot;
+      const conversationId = typeof snapshot.conversationId === "string" ? snapshot.conversationId : entry;
+      const result = restorePlanSession(conversationId, snapshot);
+      if (result.ok) {
+        console.log(`[PlanMode] 恢复中断会话 ${conversationId}: ${snapshot.state} → PLAN_DISCUSSING`);
+      } else {
+        console.warn(`[PlanMode] 跳过非法快照 ${entry}: ${result.reason}`);
+      }
+    } catch (err) {
+      console.warn(`[PlanMode] 读取快照失败 ${stateFile}:`, err);
+    }
+  }
+}
+
 export function createDefaultApplicationDependencies(): ApplicationDependencies {
   // Agent Runtime 早于插件管理器构造；通过窄闭包在运行期转发宿主事件，避免反转启动顺序。
   let pluginManager: PluginManager | undefined;
+  // 自动压缩与 CHATS_COMPACT 必须共享同一个会话级压缩器，避免两条路径各自组装 provider。
+  const getTranscriptCompactor = createTranscriptCompactorGetter(() =>
+    createModelBackedConversationTranscriptCompactor({
+      store: getConversationTranscriptStore(app.getPath("userData")),
+      runReader: getHarnessRunStore(app.getPath("userData")),
+      loadModelSettings: () => resolveModelSettingsProfile(loadModelSettings()),
+    }));
   // 生命周期事件发布器：插件系统就绪前发布的事件没有监听器，直接丢弃
   const lifecyclePublisher = createLifecyclePublisher({
     publish: (event, payload) => pluginManager
@@ -240,7 +291,8 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
       createChatShell: (windowManager) => windowManager.createReactChatWindowShell(),
       registerProtocolHandlers,
       registerShellIpc: ({ ipc, windowManager, live2dWindowLifecycle }) => {
-        registerWindowSystemIpc({ ipc, windowManager });
+        // quit 由组合根注入：窗口系统 IPC 不直接依赖 electron app，且退出仍走受控链路。
+        registerWindowSystemIpc({ ipc, windowManager, quit: () => app.quit() });
         registerChatUiIpc({ ipc, live2dWindowLifecycle, windowManager });
       },
       createTray: (input) => createTray({
@@ -287,9 +339,30 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
         });
         const citaService = createCitaService({ llmClient });
         const socialContextService = createSocialContextService({ llmClient, enqueueLLMTask });
-        const proactiveLifecycle = createProactiveLifecycle({ loadGeneralSettings });
+        const proactiveLifecycle = createProactiveLifecycle({
+          loadGeneralSettings,
+          // runReader 接入 harness 运行存储：孤儿工具按运行状态归类，避免误判 not_executed
+          conversationJournal: new ConversationJournalService({
+            store: getConversationTranscriptStore(app.getPath("userData")),
+            runReader: getHarnessRunStore(app.getPath("userData")),
+          }),
+        });
         // 主动聊天服务初始化是纯装配；触发器由 background 阶段启动
         proactiveLifecycle.initializeProactiveChatService();
+
+        // 崩溃对账：启动时对进程崩溃遗留的 interrupted run 幂等补写 crashed 中断边界。
+        // 异步、失败仅日志，不阻塞启动关键路径；两 store 单例在此刻均已就绪。
+        void reconcileCrashedInterruptions({
+          runStore: getHarnessRunStore(app.getPath("userData")),
+          transcriptStore: getConversationTranscriptStore(app.getPath("userData")),
+          now: Date.now,
+        }).then((result) => {
+          if (result.written > 0) {
+            console.log(`[CrashReconcile] 补写 ${result.written} 条崩溃边界，跳过 ${result.skipped} 个已有边界的中断 run`);
+          }
+        }).catch((error) => {
+          console.error("[CrashReconcile] 崩溃对账失败（仅日志，不阻塞启动）:", error);
+        });
 
         const ttsSessionService = new TtsSessionService((request, signal, emit) =>
           ttsSynthesisService.synthesizeSession(request, signal, emit),
@@ -297,10 +370,9 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
 
         // 应用图标 getter 已在工厂体开头注入（早于 shell 阶段的窗口壳/托盘创建）。
 
-        // 内置工具配置 getter（场景向量索引等）
+        // 内置工具配置 getter
         bootstrapConfigGetters({
           loadGeneralSettings,
-          getSceneEmbeddingIndex: () => embeddingIndexService.getSceneEmbeddingIndex(),
         });
 
         // Locale Context（从 GeneralSettings 的语言配置同步）
@@ -377,8 +449,20 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
       initSandbox: () => initSandbox(),
 
       initPlanMode: () => {
-        // 计划模式路径根注入：write_plan / plan.md 读写基于 userData/plans/<conversationId>/
+        const plansRoot = path.join(app.getPath("userData"), "plans");
+        // 计划模式路径根注入：write_plan / plan.md 读写基于 userData/plans/<会话键>/
         initPlanPaths(app.getPath("userData"));
+        // 状态持久化（durable transition）：同步写盘，approvePlan 返回时 state.json 已落盘，
+        // 崩溃恢复不丢"执行正在进行"的事实；null = 回 NORMAL，删除 state.json 清尸
+        initPlanStatePersister((conversationId, snapshot) => {
+          const stateFile = path.join(plansRoot, encodePlanSessionKey(conversationId), "state.json");
+          if (!snapshot) {
+            fs.rmSync(stateFile, { force: true });
+            return;
+          }
+          fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+          fs.writeFileSync(stateFile, JSON.stringify(snapshot, null, 2), "utf8");
+        });
         // 计划模式状态广播：所有状态切换都广播到所有窗口
         initPlanStateBroadcaster((conversationId, state) => {
           const payload = { conversationId, state };
@@ -386,6 +470,8 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
             win.webContents.send(IPC.PLAN_STATE_CHANGED, payload);
           }
         });
+        // 启动崩溃恢复：非 NORMAL 快照统一降级 PLAN_DISCUSSING，不自动恢复执行权
+        recoverInterruptedPlanSessions(plansRoot);
       },
 
       // 工具注册：集中到一个显式入口（依赖沙箱/Git/LSP 就绪）
@@ -394,35 +480,45 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
       initRag: async () => {
         const modelSettings = loadModelSettings();
         await initRAG("auto", undefined, undefined, modelSettings.embeddingModel, modelSettings.embeddingDimensions);
+        // 注册 RAG 落盘：受控退出在 flushPersistence 阶段刷盘；
+        // Windows 会话结束（断电/强制关机）走同步紧急落盘兜底
+        shutdown.register({
+          id: "rag-store",
+          phase: "flushPersistence",
+          dispose: async () => { await flushRAGStore(); },
+        });
+        shutdown.registerEmergencyFlush("rag-store", () => flushRAGStoreSync());
         logger.info(LogTag.RAG, "RAG initialized OK");
       },
 
-      createRuntime: (services) => createAgentRuntime({
-        runtimeStateService: services.runtimeState,
-        llmClient: services.llm,
-        enqueueLLMTask,
-        loadModelSettings,
-        loadGeneralSettings,
-        loadUserProfile,
-        toolRegistry,
-        skillRegistry,
-        getSceneEmbeddingIndex: () => services.embedding.getSceneEmbeddingIndex(),
-        getStickerEmbeddingIndex: () => services.embedding.getStickerEmbeddingIndex(),
-        getEmbeddingProvider,
-        getSceneEmbeddingProvider,
-        broadcastRuntimeStateChanged: () => {
-          broadcastToAuxWindows(IPC.RUNTIME_STATE_CHANGED, services.runtimeState.getState());
-        },
-        citaService: services.cita,
-        socialContextScheduler: services.social.scheduler,
-        chatsStore,
-        socialAtomStore: services.social.store,
-        buildPluginPromptContext: (input) => pluginPromptRegistry.build(input),
-        publishPluginHostEvent: (event, payload) => pluginManager
-          ? pluginManager.publishHostEvent(event, payload)
-          : Promise.resolve(),
-        publishToolFinished: (event) => lifecyclePublisher.publishToolFinished(event),
-      }),
+      createRuntime: (services) => {
+        const transcriptCompactor = getTranscriptCompactor();
+        return createAgentRuntime({
+          runtimeStateService: services.runtimeState,
+          llmClient: services.llm,
+          enqueueLLMTask,
+          loadModelSettings,
+          loadGeneralSettings,
+          loadUserProfile,
+          toolRegistry,
+          skillRegistry,
+          getStickerEmbeddingIndex: () => services.embedding.getStickerEmbeddingIndex(),
+          getEmbeddingProvider,
+          broadcastRuntimeStateChanged: () => {
+            broadcastToAuxWindows(IPC.RUNTIME_STATE_CHANGED, services.runtimeState.getState());
+          },
+          citaService: services.cita,
+          socialContextScheduler: services.social.scheduler,
+          chatsStore,
+          socialAtomStore: services.social.store,
+          buildPluginPromptContext: (input) => pluginPromptRegistry.build(input),
+          publishPluginHostEvent: (event, payload) => pluginManager
+            ? pluginManager.publishHostEvent(event, payload)
+            : Promise.resolve(),
+          publishToolFinished: (event) => lifecyclePublisher.publishToolFinished(event),
+          transcriptCompactor,
+        });
+      },
 
       createChannels: (runtime, services) => createChannelsSubsystem({
         agentRuntime: runtime,
@@ -440,9 +536,10 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
           agentRuntime: runtime,
           // 插件启停后让调度引擎重新归一化逾期任务并重排计时器（不补跑）。
           onPluginRunningStateChange: () => scheduler.engine.refreshPluginTasks(),
-          // 面板宿主窗口（首版=设置窗口）：settingsWindow 为 CJS live-binding，
-          // 必须在请求时刻读取
-          getPanelHostWebContents: () => settingsWindow?.webContents ?? null,
+          // 插件面板仅由工作区设置页承载。
+          getPanelHostWebContents: () => [reactChatWindow]
+            .filter((window) => window && !window.isDestroyed())
+            .map((window) => window!.webContents),
         });
         return pluginManager;
       },
@@ -452,12 +549,19 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
         getReactChatWindow: () => reactChatWindow,
         ipc: shell.ipc,
         publishLifecycle: lifecyclePublisher,
+        // runReader 接入 harness 运行存储：孤儿工具按运行状态归类，避免误判 not_executed
+        conversationJournal: new ConversationJournalService({
+          store: getConversationTranscriptStore(app.getPath("userData")),
+          runReader: getHarnessRunStore(app.getPath("userData")),
+        }),
+        getActiveConversation: () => activeConversationRegistry.getMostRecent(),
         // 插件任务只有在所属插件运行中才允许触发；用户任务不受影响。
         canRunTask: (task) => !task.ownerPluginId
           || (pluginManager?.isRunning(task.ownerPluginId) ?? false),
       }),
 
       registerCoreIpc: ({ ipc, runtime, services }) => {
+        const transcriptCompactor = getTranscriptCompactor();
         // 设置变更反应：窗口/托盘/截图热键/主动服务联动
         onGeneralSettingsChanged((before, after) =>
           handleGeneralSettingsChanged(before, after, {
@@ -482,6 +586,7 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
           embeddingIndexService: services.embedding,
           syncVolcanoSearchMcp,
           syncPlaywrightMcp,
+          syncFilesystemMcp,
         });
 
         registerMemoryUserToolIpc({
@@ -497,9 +602,17 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
         registerTtsIpc({ ipc, ttsSessionService: services.ttsSession });
 
         // 聊天会话存储 IPC（chats-store.initialize 建好 cyrene-chats 目录并加载 index）
-        registerChatsIpc(ipc);
+        registerChatsIpc(ipc, {
+          llmClient: services.llm,
+          isPrimaryModelBusy: hasActiveConversationRun,
+          transcriptCompactor,
+        });
         registerMomentsIpc(ipc);
         registerCodeGitIpc({ ipc, service: services.git });
+        // 会话工作区只读文件（右侧面板文件树 / 预览）
+        registerWorkspaceFilesIpc(ipc);
+        // 工作区右上角"打开"菜单：本机应用探测 + 打开执行
+        registerOpenInAppIpc(ipc);
 
         // AG-UI 事件流桥：渲染进程 invoke(AGUI_RUN) → CyreneAgent 跑 Agent 循环 → 事件透传
         registerAgUiIpc(
@@ -578,7 +691,7 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
           bus: toastEvents,
           window: toastWindowController,
           activate: (request) => { activation.request(request); },
-          openTasksWindow: () => { windowManager.createTasksWindow(); },
+          openTasksWindow: () => { void windowManager.openScheduledTasks(); },
           // 音效总开关：设置页可关；每次弹窗时读取，改动即时生效
           isSoundEnabled: () => loadGeneralSettings().toastSoundEnabled,
           shouldSuppressNotify: (event) => {
@@ -619,8 +732,12 @@ export function createDefaultApplicationDependencies(): ApplicationDependencies 
         }
       },
       syncBuiltInMcp: async () => {
-        // 内置 MCP 自动连接：Playwright（默认关闭，选项控制）
+        // 内置 MCP 自动连接：Playwright / Filesystem（均默认关闭，选项控制）
         await syncPlaywrightMcp(loadGeneralSettings());
+        await syncFilesystemMcp({
+          filesystemMcpEnabled: loadGeneralSettings().filesystemMcpEnabled,
+          allowedDir: app.getPath("downloads"),
+        });
       },
       restoreMcp: (signal) => initMcpManager({ signal }),
       reconcileMemory: async (signal) => {

@@ -5,13 +5,12 @@ const { trace, preparePlanRunContext, buildHarnessPromptLayers, materializeHarne
   preparePlanRunContext: vi.fn(),
   buildHarnessPromptLayers: vi.fn(),
   materializeHarnessStartTranscript: vi.fn(),
-  runStore: { create: vi.fn() },
+  runStore: { create: vi.fn(), get: vi.fn() },
 }));
 
 vi.mock("./plan-lifecycle", () => ({ preparePlanRunContext }));
 vi.mock("./prompt-builder", () => ({ buildHarnessPromptLayers, materializeHarnessStartTranscript }));
 vi.mock("../run-store", () => ({ getHarnessRunStore: vi.fn(() => runStore) }));
-vi.mock("../run-recovery", () => ({ prepareHarnessRecovery: vi.fn() }));
 vi.mock("../../tools/registry/tool-registry", () => ({
   toolRegistry: { getEnabledTools: vi.fn(() => []) },
 }));
@@ -37,6 +36,7 @@ describe("harness run preparation", () => {
     });
     runStore.create.mockReset();
     runStore.create.mockImplementation(() => trace.push("create"));
+    runStore.get.mockReset();
   });
 
   it("materializes the startup transcript before creating the run store", async () => {
@@ -58,5 +58,19 @@ describe("harness run preparation", () => {
       runId: "run-preparation",
       messages: expect.arrayContaining([{ role: "user", content: "materialized" }]),
     }));
+  });
+
+  it("does not inspect interrupted runs for an ordinary new turn", async () => {
+    await prepareHarnessRun({
+      runId: "run-new",
+      conversationId: "thread-1",
+      conversationMode: "work",
+      settings: { provider: "test", baseUrl: "", model: "model", apiKey: "" },
+      messages: [{ role: "user", content: "new turn" }],
+      toolSystemContent: "",
+      soulSystemBaseContent: "persona",
+    } as never, new AbortController().signal);
+
+    expect(runStore.get).not.toHaveBeenCalled();
   });
 });

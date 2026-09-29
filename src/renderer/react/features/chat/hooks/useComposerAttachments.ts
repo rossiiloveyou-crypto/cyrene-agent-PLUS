@@ -3,6 +3,7 @@ import type { ComposerAttachment } from "../components/ChatComposer";
 import { t } from "../../../i18n";
 import type { ScreenshotInsertPayload } from "../../../../../shared/ipc-channels";
 import { arrayBufferToBase64, containsFiles, PASTE_IMAGE_MAX_BYTES } from "../pages/attachment-utils";
+import { useFeedback } from "../../../components/feedback/FeedbackProvider";
 
 /** window.chat 中附件链路用到的子集（桥模式：显式 cast，不依赖全局 Window 声明）。 */
 interface ComposerChatApi {
@@ -36,8 +37,11 @@ export interface ComposerAttachmentsApi {
   removeAttachment: (index: number) => void;
   /** 消息落盘后的图片预处理：direct 直传 / caption 视觉描述，结果写回消息上的附件条目 */
   prepareImageAttachments: (sessionId: string, messageId: string, attachments: ComposerAttachment[]) => Promise<void>;
-  /** 发送后清空当前 scope 的附件（语音提交 keepComposer 场景不调用） */
-  clearScopeAttachments: () => void;
+  /**
+   * 消息入队确认成功后清理附件：只移除 sent 快照里的条目，空快照不清任何附件
+   * （请求期间新加的保留；语音提交 keepComposer 场景不调用）。
+   */
+  clearScopeAttachments: (sent: ComposerAttachment[]) => void;
   /** 新建任务：删除整个 mode scope 的暂存附件 */
   deleteScopeAttachments: (scope: string) => void;
   dragHandlers: ComposerDragHandlers;
@@ -60,6 +64,8 @@ export function useComposerAttachments(input: {
   ) => void;
 }): ComposerAttachmentsApi {
   const { scopeKey, getActiveScope, patchMessageAttachments } = input;
+  // 统一反馈入口：附件链路的失败/提示走非阻塞轻提示
+  const feedback = useFeedback();
   const [attachmentsByScope, setAttachmentsByScope] = useState<Record<string, ComposerAttachment[]>>({});
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
@@ -117,7 +123,8 @@ export function useComposerAttachments(input: {
         }));
       }
     } catch (error) {
-      window.alert(t("chatPage.ingestFilesFailed", { error: error instanceof Error ? error.message : String(error) }));
+      // 导入失败：简短失败反馈，非阻塞错误轻提示
+      feedback.notice({ tone: "error", message: t("chatPage.ingestFilesFailed", { error: error instanceof Error ? error.message : String(error) }) });
     } finally {
       setAttachmentBusy(false);
     }
@@ -132,7 +139,8 @@ export function useComposerAttachments(input: {
     const chat = composerChatApi();
     if (!chat?.saveScreenshotTemp) return;
     if (file.size > PASTE_IMAGE_MAX_BYTES) {
-      window.alert(t("chatPage.pastedImageTooLargeSkipped"));
+      // 超大图片已跳过：提示性反馈，非阻塞警告轻提示
+      feedback.notice({ tone: "warning", message: t("chatPage.pastedImageTooLargeSkipped") });
       return;
     }
     setAttachmentBusy(true);
@@ -159,7 +167,8 @@ export function useComposerAttachments(input: {
         : raw === "INVALID_SCREENSHOT_IMAGE"
           ? t("chatPage.pastedImageInvalid")
           : t("chatPage.pastedImageFailed", { error: raw });
-      window.alert(text);
+      // 粘贴失败：简短失败反馈，非阻塞错误轻提示
+      feedback.notice({ tone: "error", message: text });
     } finally {
       setAttachmentBusy(false);
     }
@@ -171,16 +180,20 @@ export function useComposerAttachments(input: {
     if (!result || result.ok) return;
     const reason = typeof result.reason === "string" ? result.reason : "";
     let text: string;
+    let tone: "info" | "error" = "error";
     if (reason.startsWith("HELPER_")) {
       text = t("chatPage.screenshotHelperNotReady");
     } else if (reason.startsWith("SCREENSHOT_CANCELLED")) {
       text = t("chatPage.screenshotCancelled");
+      // 用户主动取消：信息性反馈而非错误
+      tone = "info";
     } else if (reason === "SCREENSHOT_FILE_PATH_REQUIRED") {
       text = t("chatPage.screenshotFileMissing");
     } else {
       text = t("chatPage.screenshotFailed", { reason: reason || t("chatPage.unknownError") });
     }
-    window.alert(text);
+    // 截图失败：非阻塞轻提示（取消为 info，其余为 error）
+    feedback.notice({ tone, message: text });
   }
 
   async function prepareImageAttachments(
@@ -240,8 +253,22 @@ export function useComposerAttachments(input: {
     }));
   }
 
-  function clearScopeAttachments() {
-    setAttachmentsByScope((current) => ({ ...current, [scopeKey]: [] }));
+  /**
+   * 消息入队确认成功后清理附件：只移除随消息提交的 sent 快照里的条目
+   * （按 filePath/name 对账）。空快照（发送时本就没有附件）什么都不清——
+   * 入队请求期间用户新加的附件必须保留，与草稿清理守卫同口径。
+   */
+  function clearScopeAttachments(sent: ComposerAttachment[]) {
+    setAttachmentsByScope((current) => {
+      if (sent.length === 0) return current;
+      const sentKeys = new Set(sent.map((attachment) => attachment.filePath ?? attachment.name));
+      return {
+        ...current,
+        [scopeKey]: (current[scopeKey] ?? []).filter(
+          (attachment) => !sentKeys.has(attachment.filePath ?? attachment.name),
+        ),
+      };
+    });
   }
 
   function deleteScopeAttachments(scope: string) {
@@ -273,12 +300,18 @@ export function useComposerAttachments(input: {
   }
 
   function handleDrop(event: DragEvent<HTMLElement>) {
-    if (!containsFiles(event.dataTransfer)) return;
+    // 无条件拦截默认行为：即使拖入的不是文件（如 URL/富文本），也不允许窗口意外导航
     event.preventDefault();
+    if (!containsFiles(event.dataTransfer)) return;
     dragDepthRef.current = 0;
     setIsDraggingFiles(false);
     const files = Array.from(event.dataTransfer.files);
-    if (files.length > 0) void chooseFiles(files);
+    if (files.length > 0) {
+      void chooseFiles(files);
+    } else {
+      // 声称携带文件但实际为空（部分应用拖出的富内容）：给出提示而非静默丢弃
+      feedback.notice({ tone: "warning", message: t("chatPage.dropNoFiles") });
+    }
   }
 
   return {

@@ -48,6 +48,13 @@ vi.mock("./registry/tool-registry", () => ({
   },
 }));
 
+// electron mock：desktop / userData 都指向临时目录（write_file 相对路径解析与基线落盘依赖）
+vi.mock("electron", () => ({
+  app: {
+    getPath: (_name: string) => tmpDir,
+  },
+}));
+
 // Mock vision-captioner
 vi.mock("../vision-captioner", () => ({
   captionImage: vi.fn(),
@@ -57,6 +64,12 @@ vi.mock("../vision-captioner", () => ({
 import "./fs-tools";
 import { toolRegistry } from "./registry/tool-registry";
 import { ToolExecutionError } from "./registry/tool-execution-error";
+
+// Vitest 5 默认 clearMocks 会在每个测试前清空 mock 调用记录；工具注册发生在
+// import "./fs-tools" 的模块顶层，这里在清空前快照一份供全部测试使用
+const registeredTools = new Map(
+  vi.mocked(toolRegistry.register).mock.calls.map(([tool]) => [tool.id, tool]),
+);
 
 let tmpDir: string;
 
@@ -74,9 +87,9 @@ afterEach(() => {
 
 describe("read_file structured output", () => {
   it("explicitly marks filesystem text and directory reads as concurrency-safe", () => {
-    const readFile = vi.mocked(toolRegistry.register).mock.calls.find((call) => call[0].id === "read_file")?.[0];
-    const listDir = vi.mocked(toolRegistry.register).mock.calls.find((call) => call[0].id === "list_dir")?.[0];
-    const readImage = vi.mocked(toolRegistry.register).mock.calls.find((call) => call[0].id === "read_image")?.[0];
+    const readFile = registeredTools.get("read_file");
+    const listDir = registeredTools.get("list_dir");
+    const readImage = registeredTools.get("read_image");
 
     expect(readFile?.isConcurrencySafe?.({ path: "C:\\workspace\\a.txt" })).toBe(true);
     expect(listDir?.isConcurrencySafe?.({ path: "C:\\workspace" })).toBe(true);
@@ -87,9 +100,7 @@ describe("read_file structured output", () => {
     const testFile = path.join(tmpDir, "test.txt");
     fs.writeFileSync(testFile, "line 1\nline 2\nline 3\nline 4\nline 5");
 
-    const tool = vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "read_file",
-    )?.[0];
+    const tool = registeredTools.get("read_file");
     expect(tool).toBeDefined();
 
     const result = JSON.parse(await tool!.execute({ path: testFile }));
@@ -105,9 +116,7 @@ describe("read_file structured output", () => {
     const testFile = path.join(tmpDir, "test.txt");
     fs.writeFileSync(testFile, "line 1\nline 2\nline 3\nline 4\nline 5");
 
-    const tool = vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "read_file",
-    )?.[0];
+    const tool = registeredTools.get("read_file");
 
     const result = JSON.parse(await tool!.execute({ path: testFile, startLine: 3 }));
     expect(result.startLine).toBe(3);
@@ -120,9 +129,7 @@ describe("read_file structured output", () => {
     const testFile = path.join(tmpDir, "test.txt");
     fs.writeFileSync(testFile, "line 1\nline 2\nline 3\nline 4\nline 5");
 
-    const tool = vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "read_file",
-    )?.[0];
+    const tool = registeredTools.get("read_file");
 
     const result = JSON.parse(await tool!.execute({ path: testFile, startLine: 2, maxLines: 2 }));
     expect(result.startLine).toBe(2);
@@ -134,9 +141,7 @@ describe("read_file structured output", () => {
     const testFile = path.join(tmpDir, "empty.txt");
     fs.writeFileSync(testFile, "");
 
-    const tool = vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "read_file",
-    )?.[0];
+    const tool = registeredTools.get("read_file");
 
     const result = JSON.parse(await tool!.execute({ path: testFile }));
     expect(result.totalLines).toBe(1); // 空文件 split 后有一个空字符串
@@ -144,27 +149,21 @@ describe("read_file structured output", () => {
   });
 
   it("returns error for non-existent file", async () => {
-    const tool = vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "read_file",
-    )?.[0];
+    const tool = registeredTools.get("read_file");
 
     const result = JSON.parse(await tool!.execute({ path: "/nonexistent/file.txt" }));
     expect(result.error).toContain("文件不存在");
   });
 
   it("returns error for relative path", async () => {
-    const tool = vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "read_file",
-    )?.[0];
+    const tool = registeredTools.get("read_file");
 
     const result = JSON.parse(await tool!.execute({ path: "relative/path.txt" }));
     expect(result.error).toContain("绝对路径");
   });
 
   it("returns error for directory", async () => {
-    const tool = vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "read_file",
-    )?.[0];
+    const tool = registeredTools.get("read_file");
 
     const result = JSON.parse(await tool!.execute({ path: tmpDir }));
     expect(result.error).toContain("不是文件");
@@ -174,9 +173,7 @@ describe("read_file structured output", () => {
     const testFile = path.join(tmpDir, "test.txt");
     fs.writeFileSync(testFile, "first\nsecond\nthird");
 
-    const tool = vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "read_file",
-    )?.[0];
+    const tool = registeredTools.get("read_file");
 
     const result = JSON.parse(await tool!.execute({ path: testFile }));
     expect(result.content).toContain("    1 | first");
@@ -188,9 +185,7 @@ describe("read_file structured output", () => {
     const testFile = path.join(tmpDir, "crlf.txt");
     fs.writeFileSync(testFile, "line 1\r\nline 2\r\nline 3");
 
-    const tool = vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "read_file",
-    )?.[0];
+    const tool = registeredTools.get("read_file");
 
     const result = JSON.parse(await tool!.execute({ path: testFile }));
     expect(result.totalLines).toBe(3);
@@ -199,19 +194,42 @@ describe("read_file structured output", () => {
 
 describe("write_file truthful contract", () => {
   function writeTool() {
-    return vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "write_file",
-    )?.[0];
+    return registeredTools.get("write_file");
   }
 
-  it("rejects a relative path with a typed error", async () => {
-    await expect(writeTool()!.execute({ path: "relative.txt", content: "x" }))
+  it("相对文件名落到桌面根目录（learn 模式笔记场景，收编自 write_markdown）", async () => {
+    const result = JSON.parse(await writeTool()!.execute({ path: "笔记.md", content: "# 标题" }));
+    expect(result.success).toBe(true);
+    expect(result.path).toBe(path.join(tmpDir, "笔记.md"));
+    expect(fs.readFileSync(path.join(tmpDir, "笔记.md"), "utf8")).toBe("# 标题");
+  });
+
+  it("相对文件名带子目录时自动创建父目录", async () => {
+    const result = JSON.parse(await writeTool()!.execute({ path: "test/report.md", content: "x" }));
+    expect(result.success).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, "test", "report.md"))).toBe(true);
+  });
+
+  it("绑定工作区时相对文件名落到工作区根目录", async () => {
+    const wsRoot = path.join(tmpDir, "my-project");
+    fs.mkdirSync(wsRoot);
+    const result = JSON.parse(await writeTool()!.execute(
+      { path: "notes/todo.txt", content: "x" },
+      { resolvedWorkspaceRoot: wsRoot },
+    ));
+    expect(result.success).toBe(true);
+    expect(result.path).toBe(path.join(wsRoot, "notes", "todo.txt"));
+  });
+
+  it("相对路径含 .. 穿越时报错拒绝", async () => {
+    await expect(writeTool()!.execute({ path: "../escape.txt", content: "x" }))
       .rejects.toMatchObject({
         name: "ToolExecutionError",
         code: "E_PATH_NOT_ABSOLUTE",
         category: "invalid_arguments",
         effectState: "not_applied",
       } satisfies Partial<ToolExecutionError>);
+    expect(fs.existsSync(path.join(path.dirname(tmpDir), "escape.txt"))).toBe(false);
   });
 
   it("returns stat-backed evidence and allows a zero-byte file", async () => {
@@ -251,9 +269,7 @@ describe("write_file truthful contract", () => {
 
 describe("write_file 覆盖写骤降防护", () => {
   function writeTool() {
-    return vi.mocked(toolRegistry.register).mock.calls.find(
-      (call) => call[0].id === "write_file",
-    )?.[0];
+    return registeredTools.get("write_file");
   }
 
   function lines(n: number): string {
@@ -300,13 +316,76 @@ describe("write_file 覆盖写骤降防护", () => {
     expect(addTexts).toEqual(["新一", "新二", "新三"]);
   });
 
-  it("append 不做骤降检查（追加只增不减）", async () => {
+  it("append 不做骤降检查（追加只增不减），原文件末尾无换行时补一个", async () => {
     const target = path.join(tmpDir, "append.txt");
     const original = lines(60);
     fs.writeFileSync(target, original);
 
     const result = JSON.parse(await writeTool()!.execute({ path: target, content: "尾巴", append: true }));
     expect(result.success).toBe(true);
-    expect(fs.readFileSync(target, "utf8")).toBe(original + "尾巴");
+    expect(fs.readFileSync(target, "utf8")).toBe(original + "\n尾巴");
+  });
+
+  it("原文件以换行结尾时追加不重复换行", async () => {
+    const target = path.join(tmpDir, "append-nl.txt");
+    fs.writeFileSync(target, "第一段\n");
+
+    await writeTool()!.execute({ path: target, content: "第二段", append: true });
+    expect(fs.readFileSync(target, "utf8")).toBe("第一段\n第二段");
+  });
+
+  it("append 目标不存在时等同新建", async () => {
+    const target = path.join(tmpDir, "fresh-append.txt");
+
+    const result = JSON.parse(await writeTool()!.execute({ path: target, content: "初始内容", append: true }));
+    expect(result.success).toBe(true);
+    expect(result.changes[0].kind).toBe("added");
+    expect(fs.readFileSync(target, "utf8")).toBe("初始内容");
+  });
+});
+
+describe("write_file Review 基线捕获（写盘前）", () => {
+  function writeTool() {
+    return registeredTools.get("write_file");
+  }
+
+  /** 列出某 run 的 before/ 基线文件（含 .absent 后缀）。 */
+  function listBaselines(runId: string): string[] {
+    const dir = path.join(tmpDir, "cyrene-runs", "reviews", runId, "before");
+    return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  }
+
+  it("覆盖已有文件时保存 text 基线", async () => {
+    const target = path.join(tmpDir, "note.md");
+    fs.writeFileSync(target, "旧内容\n第二行\n");
+
+    const result = JSON.parse(await writeTool()!.execute(
+      { path: target, content: "新内容" },
+      { runId: "run-wf-1" },
+    ));
+    expect(result.success).toBe(true);
+
+    const baselines = listBaselines("run-wf-1");
+    expect(baselines).toHaveLength(1);
+    expect(fs.readFileSync(path.join(tmpDir, "cyrene-runs", "reviews", "run-wf-1", "before", baselines[0]), "utf8"))
+      .toBe("旧内容\n第二行\n");
+  });
+
+  it("新建文件时写 absent 标记，同一 run 不重复捕获", async () => {
+    const target = path.join(tmpDir, "new-note.md");
+    await writeTool()!.execute({ path: target, content: "内容" }, { runId: "run-wf-2" });
+
+    const baselines = listBaselines("run-wf-2");
+    expect(baselines).toHaveLength(1);
+    expect(baselines[0]).toMatch(/\.absent$/);
+    // 惰性快照：同一 run 再次修改同一文件不重复捕获
+    await writeTool()!.execute({ path: target, content: "再改" }, { runId: "run-wf-2" });
+    expect(listBaselines("run-wf-2")).toHaveLength(1);
+  });
+
+  it("无 runId 时不写基线", async () => {
+    const target = path.join(tmpDir, "plain.md");
+    await writeTool()!.execute({ path: target, content: "x" });
+    expect(fs.existsSync(path.join(tmpDir, "cyrene-runs"))).toBe(false);
   });
 });

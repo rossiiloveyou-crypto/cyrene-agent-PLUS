@@ -20,7 +20,7 @@ import { resolveUncertainEffect } from "./uncertain-effect-guard";
 import type { TaskExecuteRequest, TaskExecuteResult } from "../task-runtime";
 import { buildGoldenDescendantsPrompt, getGoldenDescendantNames } from "../../tasks/task-character-pool";
 import { READ_TOOL_RESULT_TOOL_ID, readToolResultToolSpec } from "./tool-output/read-tool-result";
-import { ENTER_PLAN_MODE_TOOL_ID, WRITE_PLAN_TOOL_ID, enterPlanModeToolSpec, writePlanToolSpec } from "./plan-tools";
+import { ENTER_PLAN_MODE_TOOL_ID, WRITE_PLAN_TOOL_ID, SUBMIT_PLAN_TOOL_ID, enterPlanModeToolSpec, writePlanToolSpec, submitPlanToolSpec } from "./plan-tools";
 
 // ── update_todo ──────────────────────────────────────────
 
@@ -379,6 +379,30 @@ function parseAskQuestions(raw: unknown): { questions?: HarnessAskQuestion[]; er
 }
 
 /**
+ * 把 ask_user 的回答格式化为工具卡可读的「问题 → 回答」预览行。
+ * 失败/超时回退原始 message；未回答的问题标记为「未回答」。
+ */
+export function formatAskUserPreview(
+  parsed: { questions?: HarnessAskQuestion[] },
+  observation: ToolObservation,
+): string[] | string {
+  if (observation.outcome !== "success") return observation.message;
+  let answers: AskAnswer[] = [];
+  try {
+    const output = JSON.parse(observation.output ?? "{}") as { answers?: AskAnswer[] };
+    if (Array.isArray(output.answers)) answers = output.answers;
+  } catch {
+    // 输出不是合法 JSON 时按全部未回答处理
+  }
+  return (parsed.questions ?? []).map((question) => {
+    const matched = answers.find((answer) => answer.questionId === question.id);
+    const custom = matched?.customInput?.trim();
+    const reply = custom || (matched?.selectedLabels ?? []).filter(Boolean).join("、");
+    return `${question.question} → ${reply || "未回答"}`;
+  });
+}
+
+/**
  * 执行 ask_user（交互式澄清提问，await 用户应答）。
  * 完全复用现有 requestUserClarification 链路。
  */
@@ -470,11 +494,17 @@ export async function executeAskUser(
       answers.push({ questionId: q.id, selectedValues, selectedLabels });
     }
 
-    return {
+    // 成功返回：把「问题 → 回答」逐条写进 message，工具卡点开即可看到具体问答
+    const observation: ToolObservation = {
       outcome: "success",
       tool: ASK_USER_TOOL_ID,
       message: `用户已回答 ${answers.length} 个问题`,
       output: JSON.stringify({ answers }),
+    };
+    const preview = formatAskUserPreview({ questions }, observation);
+    return {
+      ...observation,
+      message: Array.isArray(preview) ? `${observation.message}\n${preview.join("\n")}` : observation.message,
     };
   } catch (err) {
     if (isAbortError(err)) throw err;
@@ -585,6 +615,7 @@ export const HARNESS_BUILTIN_TOOL_IDS = new Set([
   READ_TOOL_RESULT_TOOL_ID,
   ENTER_PLAN_MODE_TOOL_ID,
   WRITE_PLAN_TOOL_ID,
+  SUBMIT_PLAN_TOOL_ID,
 ]);
 
 export function isHarnessBuiltin(toolName: string): boolean {
@@ -597,19 +628,19 @@ export function isInteractiveHarnessBuiltin(toolName: string): boolean {
 
 /**
  * 计划工具组按状态注入（可见性即防御）：
- * - NORMAL：enter_plan_mode + write_plan。工具列表是 run 级固定的，模型常在
- *   同一 run 内先调 enter_plan_mode 再调 write_plan，因此两者必须同时注入；
- *   write_plan 自身有状态守卫（非 PLAN_DISCUSSING 调用直接 failure）。
- * - PLAN_DISCUSSING：仅 write_plan（enter_plan_mode 物理隐藏，幂等防御）
- * - PLAN_REVIEW / EXECUTING：全部隐藏（REVIEW 无模型轮；EXECUTING 防执行中再进计划）
+ * - NORMAL：enter_plan_mode + write_plan + submit_plan。工具列表是 run 级固定的，模型常在
+ *   同一 run 内先调 enter_plan_mode 再调 write_plan，讨论收敛后 submit_plan 交卷审批，
+ *   因此三者必须同时注入；write_plan / submit_plan 自身有状态守卫（非合法状态调用直接 failure）。
+ * - PLAN_DISCUSSING：write_plan + submit_plan（enter_plan_mode 物理隐藏，幂等防御）
+ * - PLAN_REVIEW / EXECUTING：全部隐藏（REVIEW 挂在 run 内等待，无模型轮；EXECUTING 防执行中再进计划）
  * - undefined（旧调用方/子任务）：不注入任何计划工具
  */
 function planToolSpecsFor(planState: import("../plan-mode").PlanStateName | undefined): ToolSpec[] {
   switch (planState) {
     case "NORMAL":
-      return [enterPlanModeToolSpec, writePlanToolSpec];
+      return [enterPlanModeToolSpec, writePlanToolSpec, submitPlanToolSpec];
     case "PLAN_DISCUSSING":
-      return [writePlanToolSpec];
+      return [writePlanToolSpec, submitPlanToolSpec];
     default:
       return [];
   }

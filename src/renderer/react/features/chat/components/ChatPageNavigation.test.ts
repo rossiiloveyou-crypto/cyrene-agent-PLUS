@@ -3,25 +3,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../components/ui/SidebarToggle", () => ({
-  SidebarToggle: ({ collapsed }: { collapsed: boolean }) => createElement("span", null, `sidebar-toggle:${collapsed}`),
+  SidebarToggle: () => createElement("span", null, "sidebar-toggle"),
 }));
 vi.mock("../../../components/ui/ModeSwitch", () => ({
   ModeSwitch: () => createElement("span", null, "mode-switch"),
 }));
-vi.mock("../../../components/ui/ToolModeButton", () => ({
-  ToolModeButton: ({ active }: { active: boolean }) => createElement("span", null, `tool-button:${active}`),
+vi.mock("../../../components/ui/MomentsModeButton", () => ({
+  MomentsModeButton: () => createElement("span", null, "moments-button"),
 }));
-vi.mock("../../../components/ui/SkillModeButton", () => ({
-  SkillModeButton: () => createElement("span", null, "skill-button"),
-}));
-vi.mock("../../../components/ui/ModelModeButton", () => ({
-  ModelModeButton: () => createElement("span", null, "model-button"),
-}));
-vi.mock("../../../components/ui/PluginModeButton", () => ({
-  PluginModeButton: ({ active }: { active: boolean }) => createElement("span", null, `plugin-button:${active}`),
-}));
-vi.mock("../../../components/ui/ToolConsoleButton", () => ({
-  ToolConsoleButton: ({ active }: { active: boolean }) => createElement("span", null, `console-button:${active}`),
+vi.mock("../../../components/ui/ScheduledTasksModeButton", () => ({
+  ScheduledTasksModeButton: () => createElement("span", null, "scheduled-tasks-button"),
 }));
 vi.mock("../../../components/ui/WindowControls", () => ({
   WindowControls: () => createElement("span", null, "window-controls"),
@@ -41,12 +32,12 @@ vi.mock("./ConversationSidebar", () => ({
 import { ChatPageNavigation } from "./ChatPageNavigation";
 
 describe("ChatPageNavigation", () => {
-  it("hides the mode switch while a tool panel is open", () => {
+  it("hides the mode switch while a panel is open", () => {
     const html = renderToStaticMarkup(createElement(ChatPageNavigation, {
-      collapsed: false,
-      activePanel: "tool",
+      activePanel: "moments",
       mode: "chat",
       sessions: [],
+      sidebarSessions: [],
       activeSessionId: undefined,
       onToggleCollapsed: () => undefined,
       onModeChange: () => undefined,
@@ -64,16 +55,19 @@ describe("ChatPageNavigation", () => {
     }));
 
     expect(html).not.toContain("mode-switch");
-    expect(html).toContain("tool-button:true");
+    expect(html).toContain("moments-button");
+    expect(html).toContain("scheduled-tasks-button");
+    expect(html.indexOf("new-task-button")).toBeLessThan(html.indexOf("scheduled-tasks-button"));
+    expect(html.indexOf("scheduled-tasks-button")).toBeLessThan(html.indexOf("moments-button"));
     expect(html).toContain("conversation-sidebar");
   });
 
-  it("places the plugin entry after the model entry and marks it active", () => {
+  it("does not expose model management in the chat sidebar", () => {
     const html = renderToStaticMarkup(createElement(ChatPageNavigation, {
-      collapsed: false,
-      activePanel: "plugin",
+      activePanel: null,
       mode: "chat",
       sessions: [],
+      sidebarSessions: [],
       activeSessionId: undefined,
       onToggleCollapsed: () => undefined,
       onModeChange: () => undefined,
@@ -90,33 +84,8 @@ describe("ChatPageNavigation", () => {
       onOpenSettings: () => undefined,
     }));
 
-    expect(html.indexOf("model-button")).toBeLessThan(html.indexOf("plugin-button:true"));
-    expect(html).not.toContain("mode-switch");
-  });
-
-  it("renders the tool console entry next to the plugin entry and marks it active", () => {
-    const html = renderToStaticMarkup(createElement(ChatPageNavigation, {
-      collapsed: false,
-      activePanel: "console",
-      mode: "chat",
-      sessions: [],
-      activeSessionId: undefined,
-      onToggleCollapsed: () => undefined,
-      onModeChange: () => undefined,
-      onNewTask: () => undefined,
-      onTogglePanel: () => undefined,
-      onSelectSession: () => undefined,
-      onOpenProject: () => undefined,
-      onRenameSession: () => undefined,
-      onDeleteSession: () => undefined,
-      onTogglePinSession: () => undefined,
-      onMinimize: () => undefined,
-      onMaximize: () => undefined,
-      onCloseWindow: () => undefined,
-      onOpenSettings: () => undefined,
-    }));
-
-    expect(html).toContain("console-button:true");
-    expect(html.indexOf("plugin-button:false")).toBeLessThan(html.indexOf("console-button:true"));
+    expect(html).not.toContain("model-button");
+    expect(html).toContain("moments-button");
+    expect(html).toContain("mode-switch");
   });
 });

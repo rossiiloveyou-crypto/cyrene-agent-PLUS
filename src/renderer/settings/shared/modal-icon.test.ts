@@ -21,6 +21,12 @@ function resetModalDom(): void {
   modalState.cyOverlay = null;
   modalState.cyHtmlOverlay = null;
   modalState.cyInputOverlay = null;
+  // 阻塞队列状态也要复位：新的输入/富文本弹窗走单实例队列，上一条未收尾时
+  // 后续调用只会入队而不再就地渲染 —— 不复位会让本文件里"连续调用同一弹窗"
+  // 的用例（第 2/3/4 条）拿不到 #cy-input-icon。这是测试夹具的隔离修复，
+  // 不改变产品行为（产品里同时刻只应有一个阻塞弹窗）。
+  modalState.blockingQueue.length = 0;
+  modalState.blockingActive = false;
   document.body.innerHTML = "";
 }
 
@@ -81,6 +87,9 @@ describe("showInputModal 图标", () => {
     let icon = document.getElementById("cy-input-icon")!;
     expect(icon.textContent).toBe("🗑️");
     expect(icon.querySelector("svg")).toBeNull();
+
+    // 收尾当前弹窗后再开下一个：输入弹窗走单实例阻塞队列，未收尾时后续调用只会入队
+    document.getElementById("cy-input-confirm")!.click();
 
     // 第二次不传 icon：必须复位成默认铅笔，不能沿用上一次的 emoji
     void showInputModal({ title: "新建区块", message: "名字" });
