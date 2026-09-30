@@ -956,8 +956,14 @@ export async function buildAgentRunOptions(
     (channelSystem ? channelSystem + "\n\n" : "") +
     baseSoulSystemPrompt;
   const soulSystemBaseContent = soulSystemWithoutCita;
+  // 🔴 H-24：这里**不能再放 `environmentContext`**。
+  // 它有专用字段 `runtimeEnvironmentContext`（下方返回值），而 `prompt-builder` 会把
+  // `soulRuntimeContext` 与 `runtimeEnvironmentContext` **各自**推入 `runtimeParts`
+  // （prompt-builder.ts:93 与 :95）⇒ 两处都放就会让同一份环境块在请求里出现两次
+  // （实测：`## 运行环境` 与 `## 用户信息` 各重复 2 次，约 1300 字符/轮）。
+  // `prompt-builder.ts:102` 的去重只针对 `stablePrefix`，挡不住「两个 runtime 部件互为子串」。
+  // 归属依据：`prompt-builder.test.ts:65` 正是把环境块当 `runtimeEnvironmentContext` 的输入。
   const soulRuntimeContext = [
-    environmentContext,
     conversationTimeContext,
     chatSocialContextBlock,
     momentsContextBlock,
