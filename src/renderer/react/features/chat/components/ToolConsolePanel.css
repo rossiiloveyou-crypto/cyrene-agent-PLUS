@@ -625,3 +625,45 @@
   min-height: 0;
 }
 
+/* ===== 关键词策略：触发词 / 拦截词（原「设置-偏好」的两项，迁移到控制台） ===== */
+.tool-console__keyword-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rb-space-xxs);
+  flex-shrink: 0;
+}
+
+.tool-console__keyword-label {
+  color: var(--rb-text-primary);
+  font: var(--rb-text-small-em);
+}
+
+.tool-console__keyword-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 62px;
+  padding: 7px 10px;
+  border: 1px solid var(--rb-border-default);
+  border-radius: var(--rb-radius-md);
+  background: var(--rb-surface-workspace);
+  color: var(--rb-text-primary);
+  font: var(--rb-text-mono);
+  resize: vertical;
+}
+
+.tool-console__keyword-input::placeholder {
+  color: var(--rb-text-disabled);
+}
+
+.tool-console__keyword-input:focus {
+  outline: none;
+  border-color: var(--rb-border-focus);
+}
+
+.tool-console__keyword-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--rb-space-xs);
+}
+

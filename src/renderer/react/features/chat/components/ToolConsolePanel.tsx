@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal } from "antd";
 import { useTranslation } from "../../../i18n";
+import {
+  buildKeywordsPatch,
+  keywordsToText,
+  mergeKeywordText,
+  resolveKeywordsAfterSave,
+  type KeywordConfig,
+} from "./channel-keywords";
 import "./ToolConsolePanel.css";
 
 /** 与主进程 channels/types.ts 对齐的渠道 id（渲染端不 import 主进程模块） */
@@ -88,9 +95,17 @@ interface ToolConsoleApi {
   channelsAuditOpenLog?: (id: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
   channelsAuditRevealLog?: (id: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
   onChannelsAudit?: (callback: (entry: AuditEntry) => void) => () => void;
-  channelsGetConfig?: () => Promise<{ audit?: { recordSuccessTurns?: boolean } }>;
+  channelsGetConfig?: () => Promise<{ audit?: { recordSuccessTurns?: boolean }; keywords?: Partial<KeywordConfig> }>;
   channelsSaveConfig?: (patch: unknown) => Promise<unknown>;
+  channelsKeywordsImportTxt?: () => Promise<
+    { ok: true; keywords: string[]; fileName?: string } | { ok: false; canceled?: boolean; error?: string }
+  >;
 }
+
+/*
+ * 关键词策略的纯逻辑（文本 ↔ 数组、导入合并、保存回填）在 `./channel-keywords`，
+ * 单独成文件以便直接单测（面板组件在 SSR 下停在 loading 分支，交互没法静态断言）。
+ */
 
 const AUDIT_LIMIT = 400;
 
@@ -142,6 +157,10 @@ export function ToolConsolePanel() {
   const [config, setConfig] = useState<ToolAccessConfig | null>(null);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [recordSuccess, setRecordSuccess] = useState(false);
+  /** 关键词策略：按行文本编辑，保存时切回数组。 */
+  const [interceptText, setInterceptText] = useState("");
+  const [triggerText, setTriggerText] = useState("");
+  const [keywordsSaving, setKeywordsSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<AuditFilter["kind"]>("all");
@@ -171,6 +190,8 @@ export function ToolConsolePanel() {
         setConfig(access);
         setAudit(Array.isArray(entries) ? entries : []);
         setRecordSuccess(Boolean(settings?.audit?.recordSuccessTurns));
+        setInterceptText(keywordsToText(settings?.keywords?.intercept));
+        setTriggerText(keywordsToText(settings?.keywords?.trigger));
       })
       .catch((error) => console.warn("[ToolConsole] 加载失败:", error))
       .finally(() => {
@@ -224,6 +245,64 @@ export function ToolConsolePanel() {
       console.warn("[ToolConsole] 保存审计开关失败:", error);
       setRecordSuccess(!next);
       setNotice(t("toolConsole.saveFailed"));
+    }
+  }, [t]);
+
+  /**
+   * 保存关键词策略。
+   *
+   * 主进程 `saveChannelsSettings` 对 keywords 做的是**按字段浅合并**
+   * （`settings-store.ts`: `intercept ?? existing`），所以这里必须两类都带上 ——
+   * 只传一类会把另一类原样保留，不会误清空。保存后主进程会 `reloadDispatcherSettings()`，
+   * 下一轮消息即生效，无需重启。
+   */
+  const saveKeywords = useCallback(async () => {
+    const api = consoleApi();
+    if (!api?.channelsSaveConfig) {
+      setNotice(t("toolConsole.unavailable"));
+      return;
+    }
+    setKeywordsSaving(true);
+    try {
+      const saved = (await api.channelsSaveConfig(buildKeywordsPatch(interceptText, triggerText))) as
+        | { keywords?: Partial<KeywordConfig> }
+        | undefined;
+      // 主进程做了去重 / 截断，回填归一化后的结果，避免界面显示与落盘不一致。
+      const next = resolveKeywordsAfterSave(saved, { interceptText, triggerText });
+      setInterceptText(next.interceptText);
+      setTriggerText(next.triggerText);
+      setNotice(t("toolConsole.keywordsSaved"));
+    } catch (error) {
+      console.warn("[ToolConsole] 保存关键词失败:", error);
+      setNotice(t("toolConsole.saveFailed"));
+    } finally {
+      setKeywordsSaving(false);
+    }
+  }, [interceptText, triggerText, t]);
+
+  /** 导入 txt：主进程弹文件选择器并解析，这里只负责把结果追加进输入框。 */
+  const importKeywords = useCallback(async (target: "intercept" | "trigger") => {
+    const api = consoleApi();
+    if (!api?.channelsKeywordsImportTxt) {
+      setNotice(t("toolConsole.unavailable"));
+      return;
+    }
+    try {
+      const result = await api.channelsKeywordsImportTxt();
+      if (!result.ok) {
+        // 用户取消不算失败，不打扰。
+        if (!result.canceled) setNotice(result.error ?? t("toolConsole.keywordsImportFailed"));
+        return;
+      }
+      if (target === "intercept") {
+        setInterceptText((current) => mergeKeywordText(current, result.keywords));
+      } else {
+        setTriggerText((current) => mergeKeywordText(current, result.keywords));
+      }
+      setNotice(t("toolConsole.keywordsImported", { n: result.keywords.length, file: result.fileName ?? "" }));
+    } catch (error) {
+      console.warn("[ToolConsole] 导入关键词失败:", error);
+      setNotice(t("toolConsole.keywordsImportFailed"));
     }
   }, [t]);
 
@@ -348,6 +427,8 @@ export function ToolConsolePanel() {
   const kindLabel = useCallback((entry: AuditEntry) => t(KIND_LABELS[entry.kind] ?? KIND_LABELS.tool_call), [t]);
 
   const rootClassName = auditExpanded ? "tool-console tool-console--audit-expanded" : "tool-console";
+  /** 旧主进程 / 热重载时可能没有配置读写通道，没有就不渲染编辑区（避免点了没反应）。 */
+  const keywordsEditable = Boolean(consoleApi()?.channelsSaveConfig);
 
   if (loading) {
     return <div className="tool-console tool-console--loading">{t("common.loading")}</div>;
@@ -568,6 +649,60 @@ export function ToolConsolePanel() {
           )}
         </ul>
       </section>
+
+      {keywordsEditable && (
+        <section className="tool-console__section">
+          <h2 className="tool-console__section-title">{t("toolConsole.keywordsTitle")}</h2>
+          <p className="tool-console__hint">{t("toolConsole.keywordsHint")}</p>
+
+          <label className="tool-console__keyword-field">
+            <span className="tool-console__keyword-label">{t("toolConsole.interceptKeywordsLabel")}</span>
+            <span className="tool-console__hint">{t("toolConsole.interceptKeywordsDesc")}</span>
+            <textarea
+              className="tool-console__keyword-input"
+              aria-label={t("toolConsole.interceptKeywordsLabel")}
+              placeholder={t("toolConsole.keywordsPlaceholder")}
+              rows={3}
+              value={interceptText}
+              onChange={(event) => setInterceptText(event.target.value)}
+            />
+            <span className="tool-console__keyword-actions">
+              <button type="button" className="tool-console__ghost" onClick={() => void importKeywords("intercept")}>
+                {t("toolConsole.keywordsImport")}
+              </button>
+            </span>
+          </label>
+
+          <label className="tool-console__keyword-field">
+            <span className="tool-console__keyword-label">{t("toolConsole.triggerKeywordsLabel")}</span>
+            <span className="tool-console__hint">{t("toolConsole.triggerKeywordsDesc")}</span>
+            <textarea
+              className="tool-console__keyword-input"
+              aria-label={t("toolConsole.triggerKeywordsLabel")}
+              placeholder={t("toolConsole.keywordsPlaceholder")}
+              rows={3}
+              value={triggerText}
+              onChange={(event) => setTriggerText(event.target.value)}
+            />
+            <span className="tool-console__keyword-actions">
+              <button type="button" className="tool-console__ghost" onClick={() => void importKeywords("trigger")}>
+                {t("toolConsole.keywordsImport")}
+              </button>
+            </span>
+          </label>
+
+          <div className="tool-console__keyword-actions">
+            <button
+              type="button"
+              className="tool-console__primary"
+              disabled={keywordsSaving}
+              onClick={() => void saveKeywords()}
+            >
+              {keywordsSaving ? t("toolConsole.keywordsSaving") : t("toolConsole.keywordsSave")}
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="tool-console__section tool-console__section--audit">
         <div className="tool-console__audit-head">
