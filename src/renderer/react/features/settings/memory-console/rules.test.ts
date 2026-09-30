@@ -177,8 +177,16 @@ describe("记忆管理台规则 · 三段式擦除守卫链", () => {
     expect(component).toContain("startErase(personKey, round + 1)");
     // ③ 那个"上限常量减去它自己"的写法**不得复发**（它恒等于 0，会让 limit 分支变死代码）
     expect(component).not.toContain("MAX_ERASE_RECONFIRM_ROUNDS - MAX_ERASE_RECONFIRM_ROUNDS");
-    // ④ 轮次必须真的进了 state（否则 confirmErase 取不到）
-    expect(component).toMatch(/useState<\{ plan: PersonErasePlan; typed: string; round: number \} \| null>/);
+    // ④ 轮次必须真的进了 state（否则 confirmErase 取不到）。
+    //    H-22 后 state 类型改为 `EraseFlowState<PersonErasePlan>`（多了 `step` 字段），
+    //    断言随之更新，但**强度不变**：仍要求实例化到具体方案类型，
+    //    且 `plan` / `typed` / `round` 三个字段都在（`round` 丢了这条守卫就白设了）。
+    expect(component).toContain("useState<EraseFlowState<PersonErasePlan> | null>");
+    const flowState = readFileSync(resolve(__dirname, "erase-step.ts"), "utf8");
+    expect(flowState).toMatch(/export interface EraseFlowState<Plan = unknown> \{/);
+    expect(flowState).toMatch(/plan: Plan;/);
+    expect(flowState).toMatch(/typed: string;/);
+    expect(flowState).toMatch(/round: number;/);
   });
 });
 

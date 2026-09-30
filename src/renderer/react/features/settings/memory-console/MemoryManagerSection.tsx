@@ -38,6 +38,15 @@ import {
   nextEraseStep,
   type ManagerView,
 } from "./rules";
+import {
+  backToPreview,
+  cancelEraseFlow,
+  continueFromPreview,
+  eraseModalVisibility,
+  startEraseFlow,
+  typeErasePhrase,
+  type EraseFlowState,
+} from "./erase-step";
 import "./MemoryConsole.css";
 
 interface DetailState {
@@ -86,7 +95,11 @@ export function MemoryManagerSection() {
   const [trace, setTrace] = useState<{ id: string; text: string; entries: Array<{ speaker: string; text: string; meta: string }> } | null>(null);
   // `round` = 本轮擦除的**回归轮次**（0 起），与里子模块 `erasure-flow.ts:423` 的 `for` 变量同语义：
   // 首次预演=0，每「预演后又新增记忆」重来一次则 +1；`nextEraseStep(report, round)` 的 `limit` 分支靠它才可达。
-  const [erase, setErase] = useState<{ plan: PersonErasePlan; typed: string; round: number } | null>(null);
+  //
+  // 🔴 H-22：`step` 是三段式擦除的**显式阶段**（见 `./erase-step`）。此前两个 Modal 的 `open` 都绑
+  //    `Boolean(erase)`，于是「预演」与「强确认」同开、确认框压住预演内容 ⇒ 用户看不到「会删什么」
+  //    就要打确认短语，知情同意在视觉上失效。现在按 step 串行：preview →（点「我已了解，继续」）→ confirm。
+  const [erase, setErase] = useState<EraseFlowState<PersonErasePlan> | null>(null);
 
   const load = useCallback(async (next: ManagerView = view) => {
     if (!api) return;
@@ -246,7 +259,8 @@ export function MemoryManagerSection() {
     try {
       const plan = await api.erasePreview(personKey);
       if (!plan) return;
-      setErase({ plan, typed: "", round });
+      // 每次（重新）预演都从 preview 开始 —— H-22 修复的核心：不让两个弹窗同开。
+      setErase(startEraseFlow(plan, round));
       setBusy("");
     } catch (error) {
       setBusy("");
@@ -442,35 +456,42 @@ export function MemoryManagerSection() {
       </>}
     </Card>
 
-    {/* ① 预演：先把「会删什么、会留什么」摆出来，再让用户进确认框 */}
+    {/*
+      ① 预演：先把「会删什么、会留什么」摆出来，再让用户进确认框。
+      🔴 H-22：`open` 必须带 `step === "preview"` —— 否则它会与②同开、被②盖住，
+      用户看不见预演内容就要打确认短语（知情同意静默失效）。
+      这里也补回「继续」按钮（`previewContinue`）：此前 `footer={null}` 让用户无从进入②。
+    */}
     <Modal
       className="cy-settings-theme-modal"
-      open={Boolean(erase)}
+      open={eraseModalVisibility(erase?.step).previewOpen}
       width={640}
       title={t("settingsPage.memory.manager.erase.previewTitle", { name: erase?.plan.knownNames?.[0] || erase?.plan.personKey || "" })}
+      okText={t("settingsPage.memory.manager.erase.previewContinue")}
       cancelText={t("settingsPage.memory.manager.cancel")}
-      onCancel={() => setErase(null)}
-      footer={null}
+      onCancel={() => setErase(cancelEraseFlow())}
+      onOk={() => setErase((current) => continueFromPreview(current))}
     >
       {erase && <ErasePreview plan={erase.plan} t={t} />}
     </Modal>
 
-    {/* ② 强确认：必须亲手打出确认短语（严格相等，trim 不算数） */}
+    {/* ② 强确认：必须亲手打出确认短语（严格相等，trim 不算数）。只在 step=confirm 时开。 */}
     <Modal
       className="cy-settings-theme-modal"
-      open={Boolean(erase)}
+      open={eraseModalVisibility(erase?.step).confirmOpen}
       title={t("settingsPage.memory.manager.erase.confirmTitle")}
       okText={t("settingsPage.memory.manager.erase.confirmButton")}
       okButtonProps={{ danger: true, disabled: !erase || erase.typed !== erasePhrase, loading: busy === "erase" }}
-      cancelText={t("settingsPage.memory.manager.cancel")}
-      onCancel={() => setErase(null)}
+      cancelText={t("settingsPage.memory.manager.erase.confirmBack")}
+      // 「取消」退回预演而不是整体放弃 —— 用户常在确认框里想再看一眼删什么。
+      onCancel={() => setErase((current) => backToPreview(current))}
       onOk={() => void confirmErase()}
     >
       <p>{t("settingsPage.memory.manager.erase.confirmMessage", { name: erase?.plan.knownNames?.[0] || erase?.plan.personKey || "", phrase: erasePhrase })}</p>
       <Input
         value={erase?.typed ?? ""}
         placeholder={erasePhrase}
-        onChange={(event) => setErase((current) => current && { ...current, typed: event.target.value })}
+        onChange={(event) => setErase((current) => typeErasePhrase(current, event.target.value))}
       />
       <p className="memory-manager__group-hint">{t("settingsPage.memory.manager.erase.noRestartNote")}</p>
     </Modal>
