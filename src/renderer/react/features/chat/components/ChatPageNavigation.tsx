@@ -9,6 +9,7 @@ import { NewTaskButton } from "../../../components/ui/NewTaskButton";
 import { ScheduledTasksModeButton } from "../../../components/ui/ScheduledTasksModeButton";
 import { SettingsButton } from "../../../components/ui/SettingsButton";
 import { SidebarToggle } from "../../../components/ui/SidebarToggle";
+import { ToolConsoleButton } from "../../../components/ui/ToolConsoleButton";
 import { UserAvatar } from "../../../components/ui/UserAvatar";
 import { WindowControls } from "../../../components/ui/WindowControls";
 import { CharacterInfoPopover } from "../../character/CharacterInfoPopover";
@@ -130,6 +131,7 @@ export const ChatPageNavigation = React.memo(function ChatPageNavigation({
           </button>
           <ScheduledTasksModeButton active={activePanel === "scheduledTasks"} onClick={() => onTogglePanel("scheduledTasks")} />
           <MomentsModeButton active={activePanel === "moments"} onClick={() => onTogglePanel("moments")} />
+          <ToolConsoleButton active={activePanel === "console"} onClick={() => onTogglePanel("console")} />
         </div>
         <div className="cy-page-conversations">
           <ConversationSidebar

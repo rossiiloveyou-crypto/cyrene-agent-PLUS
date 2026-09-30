@@ -8,6 +8,8 @@ import { formatDateTime } from "../../../settings/shared/format";
 import { useTranslation } from "../../i18n";
 import { SettingsInput, SettingsSwitch } from "../../components/ui/SettingsControls";
 import { Card } from "../../components/ui/Card";
+import { MemoryManagerSection } from "./memory-console/MemoryManagerSection";
+import { DangerZoneSection } from "./memory-console/DangerZoneSection";
 
 type L0 = MemoryPanelPayload["l0"];
 type L1 = MemoryPanelPayload["l1"];
@@ -175,6 +177,10 @@ export function MemorySettingsPanel() {
       <section className="cy-settings-section"><div className="cy-settings-section__heading"><h2><History size={18} />{t("settingsPage.memory.reflectionsTitle")}</h2><p>{t("settingsPage.memory.reflectionsDescription")}</p></div>
         <Card className="cy-memory-list">{data.reflections.length ? data.reflections.map((item) => <article className="cy-memory-record" key={item.id}><strong>{item.title}</strong><span>{item.body}</span><small>{item.meta}</small></article>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("settingsPage.memory.noReflections")} />}</Card>
       </section>
+      {/* P9 T2 · 记忆管理台 + 按人擦除（旧面板 `settings/memory/manager.ts` 的能力接回） */}
+      <MemoryManagerSection />
+      {/* P9 T2 · 危险区：群聊近期上下文条数（H-02）+ 删除全部记忆（H-03） */}
+      <DangerZoneSection />
       <section className="cy-settings-section"><div className="cy-settings-section__heading"><h2><BrandIcon icon={siObsidian} size={18} label="Obsidian" />{t("settingsPage.memory.vault.title")}</h2><p>{t("settingsPage.memory.vault.description")}</p></div>
         <Card className="cy-memory-card">{vault?.vaultPath ? <><div className="cy-memory-vault-path">{vault.vaultPath}</div><div className="cy-settings-row"><div className="cy-settings-row__copy"><strong>{t("settingsPage.memory.vault.autoSync")}</strong><span>{t("settingsPage.memory.vault.autoSyncDescription")}</span></div><SettingsSwitch ariaLabel={t("settingsPage.memory.vault.autoSync")} checked={vault.autoSync} onChange={(checked) => void setAutoSync(checked)} /></div><div className="cy-memory-vault-actions"><span>{vault.lastSyncAt ? t("settingsPage.memory.vault.lastSync", { time: formatDateTime(vault.lastSyncAt) }) : t("settingsPage.memory.vault.neverSynced")}</span><Button loading={busy === "sync"} onClick={() => void vaultAction("sync")}>{t("settingsPage.memory.vault.sync")}</Button><Button loading={busy === "unbind"} onClick={() => void vaultAction("unbind")}>{t("settingsPage.memory.vault.unbind")}</Button></div></> : <div className="cy-memory-vault-actions"><span>{t("settingsPage.memory.vault.notBound")}</span><Button loading={busy === "bind"} onClick={() => void vaultAction("bind")}>{t("settingsPage.memory.vault.bind")}</Button></div>}</Card>
       </section>

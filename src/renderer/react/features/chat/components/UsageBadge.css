@@ -27,7 +27,7 @@
 }
 
 .cy-usage__label {
-  color: var(--cy-text-muted, #8e8e93);
+  color: var(--rb-text-secondary, #8e8e93);
 }
 
 /* 文字渐变：颜色/渐变来自外观设置-个性化（--cy-usage-badge-image） */
@@ -59,9 +59,9 @@
   z-index: 40;
   width: 268px;
   padding: 12px 14px 14px;
-  border: 1px solid var(--cy-border, #f2f2f2);
+  border: 1px solid var(--rb-border-default, #f2f2f2);
   border-radius: 14px;
-  background: var(--cy-bg-workspace, #fff);
+  background: var(--rb-surface-workspace, #fff);
   box-shadow: 0 12px 32px rgb(29 29 31 / 14%);
 }
 
@@ -75,18 +75,18 @@
 .cy-usage__menu-head--global {
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid var(--cy-border, #f2f2f2);
+  border-top: 1px solid var(--rb-border-default, #f2f2f2);
 }
 
 .cy-usage__menu-head strong {
   font-size: 13px;
-  color: var(--cy-text, #1d1d1f);
+  color: var(--rb-text-primary, #1d1d1f);
 }
 
 .cy-usage__menu-head span {
   font-size: 11px;
   line-height: 1.5;
-  color: var(--cy-text-muted, #8e8e93);
+  color: var(--rb-text-secondary, #8e8e93);
 }
 
 .cy-usage__rows {
@@ -105,13 +105,13 @@
 }
 
 .cy-usage__rows dt {
-  color: var(--cy-text-muted, #8e8e93);
+  color: var(--rb-text-secondary, #8e8e93);
 }
 
 .cy-usage__rows dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
-  color: var(--cy-text, #1d1d1f);
+  color: var(--rb-text-primary, #1d1d1f);
 }
 
 .cy-usage__models {
@@ -135,16 +135,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--cy-text-muted, #8e8e93);
+  color: var(--rb-text-secondary, #8e8e93);
 }
 
 .cy-usage__model-value {
   font-variant-numeric: tabular-nums;
-  color: var(--cy-text, #1d1d1f);
+  color: var(--rb-text-primary, #1d1d1f);
 }
 
 .cy-usage__empty {
   margin: 0;
   font-size: 11px;
-  color: var(--cy-text-muted, #8e8e93);
+  color: var(--rb-text-secondary, #8e8e93);
 }

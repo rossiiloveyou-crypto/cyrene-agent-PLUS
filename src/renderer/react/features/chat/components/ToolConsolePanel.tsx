@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Modal } from "antd";
 import { useTranslation } from "../../../i18n";
 import "./ToolConsolePanel.css";
 
@@ -279,17 +280,27 @@ export function ToolConsolePanel() {
     void persist({ [key]: next });
   }, [persist]);
 
-  const clearAudit = useCallback(async () => {
+  const clearAudit = useCallback(() => {
     const api = consoleApi();
     if (!api?.channelsAuditClear) return;
-    if (!window.confirm(t("toolConsole.clearConfirm"))) return;
-    try {
-      await api.channelsAuditClear();
-      setAudit([]);
-      setSelectedId(null);
-    } catch (error) {
-      console.warn("[ToolConsole] 清空失败:", error);
-    }
+    // 先把方法抓成局部 const：`api?` 的窄化不会跨进 onOk 闭包（TS2722）
+    const clear = api.channelsAuditClear;
+    // 走 antd 成员方法（默认弹窗边界：裸 confirm / window.confirm 被 default-dialogs-regression 禁止）
+    Modal.confirm({
+      title: t("toolConsole.clearConfirm"),
+      okText: t("toolConsole.clear"),
+      okButtonProps: { danger: true },
+      cancelText: t("settingsPage.channels.cancel"),
+      onOk: async () => {
+        try {
+          await clear();
+          setAudit([]);
+          setSelectedId(null);
+        } catch (error) {
+          console.warn("[ToolConsole] 清空失败:", error);
+        }
+      },
+    });
   }, [t]);
 
   const openLog = useCallback(async (id: string, reveal: boolean) => {
