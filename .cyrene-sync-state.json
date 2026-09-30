@@ -1,0 +1,13 @@
+{
+  "upstream": {
+    "name": "Cyrene-Agent (official)",
+    "github": "https://github.com/Playa-Cyrene/Cyrene-Agent.git",
+    "mirrorPath": "E:/AI_Chating/off-cyan/Cyrene-Agent",
+    "ref": "refs/remotes/official/master"
+  },
+  "lastSyncedCommit": "b11b8851",
+  "lastSyncedAt": "2026-09-25",
+  "mergeCommit": "51a20338",
+  "fork": { "remote": "origin", "url": "https://gitee.com/playa0/cyrene-agent.git", "branch": "master" },
+  "notes": "同步点 = 上一次真正合并的官方提交；改这个文件必须同时更新 lastSyncedAt。"
+}
