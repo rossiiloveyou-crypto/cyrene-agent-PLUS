@@ -2,7 +2,7 @@
 // Worldbook 不在此注册，它走独立常驻检索路径
 
 import { searchMemory } from "../../../rag/index";
-import { resolveScopeId } from "../../../zones/scope";
+import { resolveScopeId, shouldInjectOwnerProfile } from "../../../zones/scope";
 import type { MemoryCandidate } from "../../../memory/memory-types";
 import type { ToolRiskLevel } from "../../../permission";
 import type { ToolContext } from "./tool-context";
@@ -272,13 +272,27 @@ interface L2OverviewItem {
   status: string;
 }
 
-/** 纯函数：把 L0/L1/L2 目录格式化为概览文本（可测试）。 */
+/**
+ * 组装「通读记忆」概览。
+ *
+ * `l0` / `l1` 传 `null` = **本域不提供本人画像**（未开启 `injectOwnerProfile` 的域，例如外部群聊）。
+ * 这时不要输出空白段落 —— 那会让模型误判成「她没记住」，而实际是**边界**：
+ * 必须显式说明该域看不到个人画像，模型才能如实回答「这类信息我不该在这里知道」。
+ */
 export function formatMemoryOverview(
-  l0: Record<string, unknown>,
-  l1: Record<string, unknown>,
+  l0: Record<string, unknown> | null,
+  l1: Record<string, unknown> | null,
   l2Items: L2OverviewItem[],
 ): string {
   const lines: string[] = [];
+
+  if (!l0 || !l1) {
+    lines.push("== 核心画像（L0）/ 近期状态（L1）==");
+    lines.push("- （本会话所在记忆域不提供本人画像：这是隐私边界，不是「没有记忆」；不要据此推断用户的情况）");
+    lines.push("");
+    appendL2Section(lines, l2Items);
+    return lines.join("\n");
+  }
 
   lines.push("== 核心画像（L0）==");
   const l0Fields = ["preferredName", "occupation", "longTermInterests", "language", "permanentNote"];
@@ -307,6 +321,13 @@ export function formatMemoryOverview(
   if (!l1Any) lines.push("- （空）");
 
   lines.push("");
+  appendL2Section(lines, l2Items);
+
+  return lines.join('\n');
+}
+
+/** L2 概览段：画像可见与否都要输出，故单独成函数。 */
+function appendL2Section(lines: string[], l2Items: L2OverviewItem[]): void {
   const total = l2Items.length;
   lines.push(`== 对话记忆（L2，共 ${total} 条，列出最新 ${Math.min(total, MEMORY_OVERVIEW_LIMIT)} 条）==`);
   if (total === 0) {
@@ -320,8 +341,6 @@ export function formatMemoryOverview(
   }
   lines.push("");
   lines.push("带 id 参数可读取单条 L2 全文。");
-
-  return lines.join('\n');
 }
 
 /** 纯函数：构造 write_memory 的 MemoryCandidate（可测试）。 */
@@ -400,17 +419,31 @@ toolRegistry.register({
       return lines.join('\n');
     }
 
-    const [l0, l1] = await Promise.all([
-      memoryStore.getL0(),
-      memoryStore.getL1(),
-    ]);
+    // 🔴 隐私边界（H-26）：L0/L1 是**用户本人**的全局画像（数据结构上不带 scope），
+    // 只有开启了「注入本人画像」的记忆域才允许读 —— 与 buildAlwaysOnContext 用同一个守卫
+    // （orchestrator/index.ts 的 shouldInjectOwnerProfile），避免两条路各自演化。
+    //
+    // 历史缺陷：这里曾无条件读 L0/L1，注入层挡住了、工具层却原样送出，
+    // 导致在外部群聊里被念出「我最近在准备 CPA」。修法即下面这个三元。
+    const profileVisible = shouldInjectOwnerProfile(scopeId);
+
+    const [l0, l1] = profileVisible
+      ? await Promise.all([
+        memoryStore.getL0(),
+        memoryStore.getL1(),
+      ])
+      : [null, null];
     const items: L2OverviewItem[] = scopedL2.map((m) => ({
       id: m.id,
       title: m.slug || (m.content.length > 40 ? m.content.slice(0, 40) + "…" : m.content),
       createdAt: m.createdAt,
       status: m.status,
     }));
-    return formatMemoryOverview(l0 as unknown as Record<string, unknown>, l1 as unknown as Record<string, unknown>, items);
+    return formatMemoryOverview(
+      l0 as unknown as Record<string, unknown> | null,
+      l1 as unknown as Record<string, unknown> | null,
+      items,
+    );
   },
 });
 
