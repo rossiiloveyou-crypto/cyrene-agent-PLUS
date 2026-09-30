@@ -1690,7 +1690,11 @@
           "reportFailedTitle": "执行擦除失败：{{error}}",
           "reconfirmLimitReached": "预演之后又新增了 {{count}} 条。已达重新预演次数上限，请稍后重新发起擦除。",
           "needsReconfirm": "预演之后又新增了 {{count}} 条关于他的记忆，需要重新预演（最多 {{max}} 轮）。"
-        }
+        },
+        "groupCount": "{{count}} 条",
+        "groupSelected": "已选 {{count}}",
+        "memorySummary": "摘要（含 {{count}} 条子记忆）",
+        "memoryStatus": "状态：{{status}}"
       },
       "danger": {
         "title": "危险操作",

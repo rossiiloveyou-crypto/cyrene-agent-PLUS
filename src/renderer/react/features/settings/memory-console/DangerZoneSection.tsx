@@ -10,6 +10,10 @@
 //
 // ⚠️ 与「按人擦除」的关键差异（`erasure-flow.ts:8-11` 写明的三条）：
 //    擦除**不需要**重启（缓存原地失效）；本区块的两个动作都**不受**此豁免。
+//
+// 🔴 **P9.5（H-19）**：`cy-settings-row` 那套房规类在本页**排版不成立**（标题吃掉整行、
+//    控件被挤到下一行，见证据截图）→ 改用旧面板的**扁平 flex 行**（`.zone-card__switch`
+//    的等价形态）+ `memory-manager__group` 分组盒。样式在 `./MemoryConsole.css`。
 
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Input, InputNumber, Modal, Spin } from "antd";
@@ -28,8 +32,16 @@ import {
   MIN_GROUP_CONTEXT_LIMIT,
   normalizeGroupContextLimit,
 } from "./rules";
+import "./MemoryConsole.css";
 
 type Feedback = { type: "success" | "error" | "info"; text: string } | null;
+
+function feedbackClass(feedback: Feedback): string {
+  if (!feedback) return "memory-manager__feedback";
+  if (feedback.type === "success") return "memory-manager__feedback memory-manager__feedback--ok";
+  if (feedback.type === "error") return "memory-manager__feedback memory-manager__feedback--err";
+  return "memory-manager__feedback";
+}
 
 export function DangerZoneSection() {
   const { t } = useTranslation();
@@ -116,58 +128,62 @@ export function DangerZoneSection() {
       <h2><AlertTriangle size={18} />{t("settingsPage.memory.danger.title")}</h2>
       <p>{t("settingsPage.memory.danger.description")}</p>
     </div>
-    {feedback && <Alert className="cy-settings-alert" showIcon type={feedback.type} message={feedback.text} closable onClose={() => setFeedback(null)} />}
-    {loading ? <div className="cy-settings-loading"><Spin /></div> : <Card className="cy-memory-card">
-      {/* ① 群聊近期上下文条数（H-02 / B-8） */}
-      <div className="cy-settings-row">
-        <div className="cy-settings-row__copy">
-          <strong>{t("settingsPage.memory.danger.limitTitle")}</strong>
-          <span>{t("settingsPage.memory.danger.limitDescription", { min: MIN_GROUP_CONTEXT_LIMIT, max: MAX_GROUP_CONTEXT_LIMIT, default: DEFAULT_GROUP_CONTEXT_LIMIT })}</span>
+    <Card className="cy-memory-card">
+      <p className={feedbackClass(feedback)} role="status">{feedback?.text ?? ""}</p>
+      {loading ? <div className="cy-settings-loading"><Spin /></div> : <>
+        {/* ① 群聊近期上下文条数（H-02 / B-8）—— 扁平行：左侧文案块 + 右侧控件组 */}
+        <div className="memory-manager__row memory-manager__row--setting">
+          <div className="memory-manager__setting-copy">
+            <span className="memory-manager__row-name">{t("settingsPage.memory.danger.limitTitle")}</span>
+            <span className="memory-manager__row-meta">{t("settingsPage.memory.danger.limitDescription", {
+              min: MIN_GROUP_CONTEXT_LIMIT, max: MAX_GROUP_CONTEXT_LIMIT, default: DEFAULT_GROUP_CONTEXT_LIMIT,
+            })}</span>
+          </div>
+          <div className="memory-manager__setting-control">
+            <InputNumber
+              min={MIN_GROUP_CONTEXT_LIMIT}
+              max={MAX_GROUP_CONTEXT_LIMIT}
+              step={1}
+              precision={0}
+              value={limit}
+              aria-label={t("settingsPage.memory.danger.limitTitle")}
+              onChange={(value) => setLimit(typeof value === "number" ? value : null)}
+            />
+            <Button
+              type="primary"
+              loading={busy === "limit"}
+              disabled={!dirty || !isGroupContextLimitValid(limit, MIN_GROUP_CONTEXT_LIMIT, MAX_GROUP_CONTEXT_LIMIT)}
+              onClick={() => void saveLimit()}
+            >{t("settingsPage.memory.save")}</Button>
+            <Button icon={<RefreshCcw size={14} />} onClick={() => { setLimit(savedLimit); void load(); }}>{t("settingsPage.memory.manager.refresh")}</Button>
+          </div>
         </div>
-        <div className="cy-settings-row__control cy-settings-button-group">
-          <InputNumber
-            min={MIN_GROUP_CONTEXT_LIMIT}
-            max={MAX_GROUP_CONTEXT_LIMIT}
-            step={1}
-            precision={0}
-            value={limit}
-            aria-label={t("settingsPage.memory.danger.limitTitle")}
-            onChange={(value) => setLimit(typeof value === "number" ? value : null)}
+
+        {/* ② 删除全部记忆（H-03 / B-9）：强确认词 + 二次确认 + 重启 */}
+        <div className="memory-manager__row memory-manager__row--setting">
+          <div className="memory-manager__setting-copy">
+            <span className="memory-manager__row-name">{t("settingsPage.memory.danger.deleteAllTitle")}</span>
+            <span className="memory-manager__row-meta">{t("settingsPage.memory.danger.deleteAllDescription")}</span>
+          </div>
+          <div className="memory-manager__setting-control">
+            <Button danger icon={<Trash2 size={14} />} onClick={() => { setTyped(""); setConfirmOpen(true); }}>
+              {t("settingsPage.memory.danger.deleteAllButton")}
+            </Button>
+          </div>
+        </div>
+
+        {/* 删除成功后：把「必须重启」与「已删除什么」摆出来，并给一个立刻重启的入口 */}
+        {deletedPaths.length > 0 && <div className="memory-manager__restart-note">
+          <Alert
+            type="warning"
+            showIcon
+            message={t("settingsPage.memory.danger.restartRequired")}
+            description={t("settingsPage.memory.danger.restartDescription")}
           />
-          <Button
-            type="primary"
-            loading={busy === "limit"}
-            disabled={!dirty || !isGroupContextLimitValid(limit, MIN_GROUP_CONTEXT_LIMIT, MAX_GROUP_CONTEXT_LIMIT)}
-            onClick={() => void saveLimit()}
-          >{t("settingsPage.memory.save")}</Button>
-          <Button icon={<RefreshCcw size={14} />} onClick={() => { setLimit(savedLimit); void load(); }}>{t("settingsPage.memory.manager.refresh")}</Button>
-        </div>
-      </div>
-
-      {/* ② 删除全部记忆（H-03 / B-9）：强确认词 + 二次确认 + 重启 */}
-      <div className="cy-settings-row">
-        <div className="cy-settings-row__copy">
-          <strong>{t("settingsPage.memory.danger.deleteAllTitle")}</strong>
-          <span>{t("settingsPage.memory.danger.deleteAllDescription")}</span>
-        </div>
-        <div className="cy-settings-row__control cy-settings-button-group">
-          <Button danger icon={<Trash2 size={14} />} onClick={() => { setTyped(""); setConfirmOpen(true); }}>
-            {t("settingsPage.memory.danger.deleteAllButton")}
-          </Button>
-        </div>
-      </div>
-
-      {/* 删除成功后：把「必须重启」与「已删除什么」摆出来，并给一个立刻重启的入口 */}
-      {deletedPaths.length > 0 && <div className="cy-memory-card__actions">
-        <Alert
-          type="warning"
-          showIcon
-          message={t("settingsPage.memory.danger.restartRequired")}
-          description={t("settingsPage.memory.danger.restartDescription")}
-        />
-        <Button type="primary" danger onClick={restartNow}>{t("settingsPage.memory.danger.restartNow")}</Button>
-      </div>}
-    </Card>}
+          <Button type="primary" danger onClick={restartNow}>{t("settingsPage.memory.danger.restartNow")}</Button>
+        </div>}
+      </>}
+    </Card>
 
     {/* 强确认：必须亲手打出确认短语；规则照抄 delete-all.ts（严格相等，trim 不算数） */}
     <Modal
@@ -182,7 +198,7 @@ export function DangerZoneSection() {
     >
       <p>{t("settingsPage.memory.danger.confirmMessage", { phrase })}</p>
       <Input value={typed} placeholder={phrase} onChange={(event) => setTyped(event.target.value)} />
-      <p className="cy-settings-intro">{t("settingsPage.memory.danger.restartHint")}</p>
+      <p className="memory-manager__group-hint">{t("settingsPage.memory.danger.restartHint")}</p>
     </Modal>
   </section>;
 }

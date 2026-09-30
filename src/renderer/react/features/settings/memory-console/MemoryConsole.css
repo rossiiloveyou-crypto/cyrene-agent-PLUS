@@ -1,0 +1,324 @@
+/* P9.5 · 记忆管理台 + 危险操作的排版（H-19 / 判据台账 J-32）
+ *
+ * 来源：**回收**旧设置窗 `src/renderer/settings/settings.css`（phase0-full，5300 行）里的
+ *      `.memory-manager*` 选择器 —— 那就是项目所有者原来的排版（D7「必须原封不动加回去」）。
+ *      旧文件已随 P4 删除，本文件是它的**令牌化再版**。
+ *
+ * 三道改写（P9.5 蓝图 §四 4.2）：
+ *   ① 颜色 → `--rb-*` 角色令牌（旧 CSS 里为**深色主题**手写的 rgba 一律换成令牌，
+ *      否则在 pearl-white（当前唯一主题）下会出现"白底白块"）
+ *   ② 字号 → 房规令牌（`--rb-text-*`）；旧 CSS 用的 `--rb-text-base` **当前已不存在**，
+ *      按语义改为 `--rb-text-body-em`（标题）/ `--rb-text-body`（正文）
+ *   ③ 间距/圆角 → 与房规一致
+ *
+ * 🔴 `var(--rb-x, <旧值>)` 里的兜底值是**有意保留**的：本仓既有 579 处同写法
+ *    （见 `NewTaskButton.css` / `UserProfileDialog.css`），用途是"令牌缺失时不让颜色消失"。
+ *    ⚠️ 兜底值**不许**写 `--cy-*`（那是被 `theme-token-contract.test.ts` 禁用的别名）。
+ */
+
+/* ── 工具栏：视图切换 + 刷新 + 反馈行 ─────────────────────── */
+
+.memory-manager__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.memory-manager__views {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.memory-manager__feedback {
+  flex: 1 1 100%;
+  min-height: 0;
+  margin: 0;
+  color: var(--rb-text-secondary, #4f4a57);
+  font: var(--rb-text-small, 400 14px/1.5 sans-serif);
+}
+
+.memory-manager__feedback--ok { color: var(--rb-success, #15803d); }
+.memory-manager__feedback--err { color: var(--rb-danger, #b91c1c); }
+
+/* ── 列表：按人 / 按域 / 按会话 ───────────────────────────── */
+
+.memory-manager__list {
+  display: grid;
+  gap: 8px;
+}
+
+/* 5 列：勾选 / 名称 / ID / 计数 / 详情按钮（5 个子元素必须正好占满 5 列，否则按钮会被挤到第二行） */
+.memory-manager__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--rb-radius-lg, 12px);
+  background: var(--rb-surface-hover, #fafafc);
+  border: 1px solid var(--rb-border-subtle, rgb(0 0 0 / 6%));
+}
+
+.memory-manager__row.is-selected {
+  border-color: var(--rb-border-focus, #ff6b97);
+  background: var(--rb-pink-50, #fff1f6);
+}
+
+.memory-manager__row-check {
+  display: flex;
+  align-items: center;
+}
+
+.memory-manager__row-name {
+  color: var(--rb-text-primary, #1d1d1f);
+  font: var(--rb-text-small-em, 500 14px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+.memory-manager__row-id {
+  color: var(--rb-text-disabled, #6f6876);
+  font: var(--rb-text-micro, 400 12px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+.memory-manager__row-meta {
+  color: var(--rb-text-secondary, #4f4a57);
+  font: var(--rb-text-small, 400 14px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+/* ── 详情区（列表 ↔ 详情两态里的"详情"）───────────────────── */
+
+.memory-manager__detail {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--rb-radius-xl, 16px);
+  background: var(--rb-surface-hover, #fafafc);
+  border: 1px solid var(--rb-border-default, #e5e5ea);
+}
+
+.memory-manager__detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 🔴 详情标题必须是**标题字号**，不是 `cy-memory-card__top` 的小注释字号 —— H-19 第 1 步 */
+.memory-manager__detail-head h3 {
+  margin: 0;
+  color: var(--rb-text-primary, #1d1d1f);
+  font: var(--rb-text-body-em, 500 16px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+.memory-manager__detail-summary {
+  margin: 0;
+  color: var(--rb-text-secondary, #4f4a57);
+  font: var(--rb-text-small, 400 14px/1.5 sans-serif);
+}
+
+.memory-manager__detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ── 分组：他的记忆 / 别人提到他（两态分组盒）─────────────── */
+
+.memory-manager__group {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--rb-radius-lg, 12px);
+  background: var(--rb-surface-workspace, #f5f5f7);
+  border: 1px solid var(--rb-border-subtle, rgb(0 0 0 / 6%));
+}
+
+/* 橙色边框区分"会连带动到别人"的那一组（旧设计的语义色） */
+.memory-manager__group--mentioned {
+  border-color: color-mix(in srgb, var(--rb-warning, #c58a31) 34%, transparent);
+}
+
+.memory-manager__group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.memory-manager__group-title {
+  color: var(--rb-text-primary, #1d1d1f);
+  font: var(--rb-text-body-em, 500 16px/1.5 sans-serif);
+}
+
+.memory-manager__group-count,
+.memory-manager__group-selected {
+  color: var(--rb-text-secondary, #4f4a57);
+  font: var(--rb-text-small, 400 14px/1.5 sans-serif);
+}
+
+.memory-manager__group-hint,
+.memory-manager__group-empty {
+  margin: 0;
+  color: var(--rb-text-disabled, #6f6876);
+  font: var(--rb-text-micro, 400 12px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+.memory-manager__group-rows {
+  display: grid;
+  gap: 6px;
+}
+
+/* ── 单条记忆（详情里的记忆行）───────────────────────────── */
+
+.memory-manager__memory {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--rb-radius-md, 8px);
+  background: var(--rb-surface-elevated, #fff);
+  border: 1px solid var(--rb-border-subtle, rgb(0 0 0 / 6%));
+}
+
+.memory-manager__memory.is-selected {
+  border-color: var(--rb-border-focus, #ff6b97);
+  background: var(--rb-pink-50, #fff1f6);
+}
+
+.memory-manager__memory-check {
+  display: flex;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.memory-manager__memory-main {
+  min-width: 0;
+}
+
+.memory-manager__memory-body {
+  margin: 0;
+  color: var(--rb-text-primary, #1d1d1f);
+  font: var(--rb-text-small, 400 14px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+.memory-manager__memory-meta {
+  margin: 4px 0 0;
+  color: var(--rb-text-secondary, #4f4a57);
+  font: var(--rb-text-micro, 400 12px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+/* ── 溯源 ──────────────────────────────────────────────── */
+
+.memory-manager__trace {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--rb-radius-lg, 12px);
+  background: var(--rb-surface-workspace, #f5f5f7);
+  border: 1px solid var(--rb-border-subtle, rgb(0 0 0 / 6%));
+}
+
+.memory-manager__trace-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.memory-manager__trace-speaker {
+  color: var(--rb-accent, #ff5b8a);
+  font: var(--rb-text-small-em, 500 14px/1.5 sans-serif);
+  white-space: nowrap;
+}
+
+.memory-manager__trace-text {
+  color: var(--rb-text-default, #2c2c2e);
+  font: var(--rb-text-small, 400 14px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+.memory-manager__trace-meta {
+  grid-column: 2;
+  color: var(--rb-text-disabled, #6f6876);
+  font: var(--rb-text-micro, 400 12px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+.memory-manager__trace-empty {
+  margin: 0;
+  color: var(--rb-text-secondary, #4f4a57);
+  font: var(--rb-text-small, 400 14px/1.5 sans-serif);
+}
+
+/* ── P9.5 新增：扁平行（危险操作的两个设置项）───────────────
+   旧房规 `.cy-settings-row` 是"标题占满一行、控件掉到下一行"的布局，
+   在本页排版不成立（见证据截图）→ 改用与 `.zone-member-row` 同族的**单行 flex**。 */
+
+.memory-manager__row--setting {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.memory-manager__setting-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.memory-manager__setting-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.memory-manager__restart-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ── P9.5 新增：擦除预演弹窗的清单排版 ────────────────────── */
+
+.memory-manager__preview {
+  display: grid;
+  gap: 6px;
+}
+
+.memory-manager__preview-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--rb-text-secondary, #4f4a57);
+  font: var(--rb-text-small, 400 14px/1.5 sans-serif);
+  overflow-wrap: anywhere;
+}
+
+/* ── P9.5：antd 控件的收口 ─────────────────────────────────
+   旧 CSS 的按钮是 `ghost-btn` / 勾选框是裸 `input[type=checkbox]`（两者都随旧设置窗删除了）。
+   新面板用 antd `Button`：这里把字号对齐房规，避免比同行的说明文字更抢眼。 */
+
+.memory-manager__row .ant-btn,
+.memory-manager__detail-actions .ant-btn,
+.memory-manager__memory .ant-btn {
+  font: var(--rb-text-small, 400 14px/1.5 sans-serif);
+}
+
+.memory-manager__row-check input[type="checkbox"],
+.memory-manager__memory-check input[type="checkbox"] {
+  accent-color: var(--rb-accent, #ff5b8a);
+  cursor: pointer;
+}

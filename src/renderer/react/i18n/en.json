@@ -1690,7 +1690,11 @@
           "reportFailedTitle": "Erasure failed: {{error}}",
           "reconfirmLimitReached": "{{count}} new entries appeared after the preview. The re-preview limit was reached; start the erasure again later.",
           "needsReconfirm": "{{count}} new memories about them appeared after the preview; re-previewing (up to {{max}} rounds)."
-        }
+        },
+        "groupCount": "{{count}} entries",
+        "groupSelected": "{{count}} selected",
+        "memorySummary": "summary ({{count}} sub-entries)",
+        "memoryStatus": "status: {{status}}"
       },
       "danger": {
         "title": "Danger zone",
