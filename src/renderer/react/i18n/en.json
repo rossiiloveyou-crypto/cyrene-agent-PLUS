@@ -1665,7 +1665,6 @@
         "erase": {
           "confirmPhrase": "ERASE COMPLETELY",
           "previewTitle": "Erasure preview · {{name}}",
-          "previewContinue": "Continue",
           "previewFailedTitle": "Preview failed: {{error}}",
           "confirmTitle": "Confirm again",
           "confirmMessage": "This erases \"{{name}}\" completely. Type the confirmation phrase \"{{phrase}}\" to enable the button.",

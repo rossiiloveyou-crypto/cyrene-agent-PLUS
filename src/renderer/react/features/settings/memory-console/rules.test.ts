@@ -149,6 +149,37 @@ describe("记忆管理台规则 · 三段式擦除守卫链", () => {
     // 超过上限也必须收敛到 limit，不能重新回到 reconfirm（否则会无限循环）
     expect(nextEraseStep({ needsReconfirm: true }, MAX_ERASE_RECONFIRM_ROUNDS + 5)).toBe("limit");
   });
+
+  // 🔴 P10 T6②：上面那条只测了**纯函数**（它一直是对的），**测不出**"调用方恒传同一个数"。
+  //    下面两条把"轮次真的在递进"钉死：一条测序列、一条按源码守卫调用点。
+  it("回归轮次**递进**时 limit 一定到达（组件侧曾恒传 0 → limit 永不可达）", () => {
+    // 模拟 MemoryManagerSection 的驱动序列：用当前 round 判定；若为 reconfirm 则以 round + 1 重新预演。
+    // 这与里子模块 `erasure-flow.ts:423` 的 `for (let round = 0; round <= MAX; round += 1)` 同语义。
+    const steps: string[] = [];
+    let round = 0;
+    for (;;) {
+      const step = nextEraseStep({ needsReconfirm: true }, round);
+      steps.push(step);
+      if (step !== "reconfirm") break;
+      round += 1;
+    }
+    // 共 3 次执行（round = 0 / 1 / 2），第 3 次判定为 limit；reconfirm 恰好 2 次
+    expect(steps).toEqual(["reconfirm", "reconfirm", "limit"]);
+    expect(round).toBe(MAX_ERASE_RECONFIRM_ROUNDS);
+    expect(steps.filter((step) => step === "reconfirm")).toHaveLength(MAX_ERASE_RECONFIRM_ROUNDS);
+  });
+
+  it("组件必须把**真实轮次**传进 nextEraseStep（源码级守卫，防复发）", () => {
+    const component = readFileSync(resolve(__dirname, "MemoryManagerSection.tsx"), "utf8");
+    // ① 传的是变量 round，不是常量表达式
+    expect(component).toContain("nextEraseStep(report, round)");
+    // ② 回归时轮次要真的 +1（否则永远停在第 0 轮）
+    expect(component).toContain("startErase(personKey, round + 1)");
+    // ③ 那个"上限常量减去它自己"的写法**不得复发**（它恒等于 0，会让 limit 分支变死代码）
+    expect(component).not.toContain("MAX_ERASE_RECONFIRM_ROUNDS - MAX_ERASE_RECONFIRM_ROUNDS");
+    // ④ 轮次必须真的进了 state（否则 confirmErase 取不到）
+    expect(component).toMatch(/useState<\{ plan: PersonErasePlan; typed: string; round: number \} \| null>/);
+  });
 });
 
 describe("记忆管理台规则 · 群聊近期上下文条数", () => {

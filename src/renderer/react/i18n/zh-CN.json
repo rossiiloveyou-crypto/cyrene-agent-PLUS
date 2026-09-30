@@ -1665,7 +1665,6 @@
         "erase": {
           "confirmPhrase": "彻底擦除",
           "previewTitle": "擦除预演 · {{name}}",
-          "previewContinue": "继续",
           "previewFailedTitle": "预演失败：{{error}}",
           "confirmTitle": "二次确认",
           "confirmMessage": "将彻底擦除「{{name}}」。请手动输入确认短语「{{phrase}}」后按钮才可点。",

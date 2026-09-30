@@ -84,7 +84,9 @@ export function MemoryManagerSection() {
   const [query, setQuery] = useState("");
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [trace, setTrace] = useState<{ id: string; text: string; entries: Array<{ speaker: string; text: string; meta: string }> } | null>(null);
-  const [erase, setErase] = useState<{ plan: PersonErasePlan; typed: string } | null>(null);
+  // `round` = 本轮擦除的**回归轮次**（0 起），与里子模块 `erasure-flow.ts:423` 的 `for` 变量同语义：
+  // 首次预演=0，每「预演后又新增记忆」重来一次则 +1；`nextEraseStep(report, round)` 的 `limit` 分支靠它才可达。
+  const [erase, setErase] = useState<{ plan: PersonErasePlan; typed: string; round: number } | null>(null);
 
   const load = useCallback(async (next: ManagerView = view) => {
     if (!api) return;
@@ -238,13 +240,13 @@ export function MemoryManagerSection() {
 
   // ── 三段式「彻底擦除」：① 预演 ② 强确认 ③ 执行 ──
 
-  async function startErase(personKey: string) {
+  async function startErase(personKey: string, round = 0) {
     if (!api || !canErasePersonKey(personKey)) return;
     setBusy("erase-preview");
     try {
       const plan = await api.erasePreview(personKey);
       if (!plan) return;
-      setErase({ plan, typed: "" });
+      setErase({ plan, typed: "", round });
       setBusy("");
     } catch (error) {
       setBusy("");
@@ -255,6 +257,11 @@ export function MemoryManagerSection() {
   async function confirmErase() {
     if (!api || !erase || !detail) return;
     const personKey = erase.plan.personKey || detail.item.key;
+    // 🔴 本轮轮次必须在 `setErase(null)` **之前**取出（否则下面的回归判定拿不到真实轮次）。
+    //   P10 T6②：这里原来是「上限常量**减去它自己**」（恒等于 0）→
+    //   `nextEraseStep` 的 `limit` 分支**永不可达**，"重确认上限"形同虚设、文案 `reconfirmLimitReached` 是死文案。
+    //   ⚠️ 本条注释刻意**不写出那个表达式**：`rules.test.ts` 有一条源码级守卫按字面量搜它（防复发）。
+    const round = erase.round;
     const phrase = t("settingsPage.memory.manager.erase.confirmPhrase");
     // 守卫链：personKey 形态 / 严格相等 / previewId 非空 —— 任一不满足绝不执行
     if (!canProceedToErase({ personKey, previewId: erase.plan.previewId, typed: erase.typed, phrase })) return;
@@ -271,7 +278,7 @@ export function MemoryManagerSection() {
     setErase(null);
     if (!report) return;
 
-    const step = nextEraseStep(report, MAX_ERASE_RECONFIRM_ROUNDS - MAX_ERASE_RECONFIRM_ROUNDS);
+    const step = nextEraseStep(report, round);
     if (step !== "done") {
       setFeedback({
         type: "info",
@@ -281,8 +288,8 @@ export function MemoryManagerSection() {
       });
       await load();
       await openDetail(detail.item.key);
-      // 回到 ① 重新预演（上限由 nextEraseStep 保证，不会无限循环）
-      if (step === "reconfirm") await startErase(personKey);
+      // 回到 ① 重新预演（上限由 nextEraseStep(report, round) 保证：轮次真正递增，不会无限循环）
+      if (step === "reconfirm") await startErase(personKey, round + 1);
       return;
     }
 
