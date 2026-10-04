@@ -190,13 +190,19 @@
 ## 九、当前基线（✅ 最新，供逐项比对）
 
 ```text
-# ── 仓库状态（2026-10-04 实测，**目标已改为 8fe5ba7a**）──
-ours HEAD          = 9ab07517   （feat(控制台): 触发/拦截关键词接线到渠道控制台）
-branch             = master  →  origin/master (gitee) ahead 230
-merge-base         = b11b8851   （2026-09-25 23:30）
+# ── 仓库状态（2026-10-04 17:xx 实测；**P0 收口后**，目标已改为 8fe5ba7a）──
+ours HEAD          = 6871f1f4   （chore(P0): 收口任务前累积改动）
+  ↳ 历史值         = 9ab07517   （feat(控制台): 触发/拦截关键词接线到渠道控制台；被 P0 提交取代，不删）
+branch             = master  →  origin/master (gitee) ahead 231   （P0 提交后 230→231）
+merge-base         = b11b8851   （2026-09-25 23:30，P0 后复测未变）
 merge target       = 8fe5ba7a   （官方 master 最新 = v1.3.0 tag + 11 提交）
+🆕 锚点 tag（P0 打）
+  pre-heb-1.3.0        = 6871f1f4   （annotated；**我方基线**：收口后的树）
+  official-target-8fe5ba7a = 8fe5ba7a （annotated；**合并目标**，抗 force-update / ref 漂移）
+  ↳ 取 commit 必须写 `official-target-8fe5ba7a^{commit}`（annotated tag 直接 rev-parse 给的是 tag 对象 SHA，见 J-12）
+  ↳ refs/remotes/official/master 仍 = 8fe5ba7a，但**本仓库没有配置 remote.official**（该 ref 是裸远程跟踪 ref）
 上游提交数          = 130        （v1.3.0 时是 119）
-我方提交数          = 11
+我方提交数          = 12         （原 11；+ P0 收口提交）
 双方改动文件        = 上游 756  /  我方 357  /  重叠 65（src 59 / 代码 55）
 试合并冲突          = 40         （UU 20 / UD 16 / DU 4）—— **与 v1.3.0 完全一致，零新增**
 静默重叠            = 8          （git 未报冲突但改动行区间相交；区间相交总数 32，其中 24 个已进冲突列表）
@@ -206,22 +212,44 @@ merge target       = 8fe5ba7a   （官方 master 最新 = v1.3.0 tag + 11 提交
   ↳ 依赖被改的支柱文件 = 14       （hub 文件，按被依赖次数排序见 §9.5）
 git 自动合并        = 709 文件 / +53905 −53760
 
+# ── P0 收口实测（2026-10-04，本节由 P0 施工回写）──
+工作区收口          = 21 条未跟踪项 → **一次提交 6871f1f4**：188 文件 / +79893 行 / 12.78 MB
+  ↳ 暂存构成        = A 证据 118 + B 施工记录 68 + C 资产 1 + `.gitignore` 1
+  ↳ 归类结果        = A/B/C/D 全部归类，**未归类（E 类）= 0**；D 类 69 文件有意不提交 → BACKLOG **B-01**
+  ↳ 21 条与 E2 比对 = **逐条一致**（无第 22 条）→ 停止条件 S3 **未触发**
+🔴 A1 口径修正（判据 **J-10**）：`git status --porcelain` 收口后 = **3 行**（`?? docs/design/`、`?? docs/internal-issue/`、
+  `?? docs/refactor/`），**不是 0 行** —— 三处是 D 类遗留，已登记 B-01，按 J-10 口径判定出口
+`.gitignore` 改动   = +2 行（白名单区 `!dist/renderer/cyrene-welcome.png`）；**实测：这不改变任何 git 行为**，
+  该文件本来就不被任何规则匹配（`dist/renderer/` 未被整体忽略）→ 见 J-13；它仍会被 `git clean -fd` 删掉
+工具链基线（P0 后仍为 P10 值，**尚未跑过** `pnpm install`）
+  node              = v22.23.2   （上游要求 >=24 <25）
+  typescript        = 5.9.3      （package.json devDep `^5.6.0`；上游要求 ^6.0.3）
+  npm / pnpm        = 🔴 **当前 `D:\data\node\` 的 npm/pnpm 安装已损坏**（`Cannot find module …npm-cli.js` /
+                      corepack `pnpm.js` 缺失），且 `.ps1` shim 另被执行策略拦 → 可行性问题登记 BACKLOG **B-04**
+  pwsh              = 本会话可用（`pwsh -Command`）；但**执行策略禁止 `.ps1`**（实测 `UnauthorizedAccess`）
+
 # ── 本机环境（不达标，P1 要解决；M8 = 只给本应用装）──
-node               = v22.23.2   （上游要求 >=24 <25）
+🆕 第二处 Node    = **`D:\data\node24\node.exe` 已存在**（`where node` 列出两处；版本未验证）→ P1 第一步先验它
+node               = v22.23.2   （当前生效的是 `D:\data\node\node.exe`；上游要求 >=24 <25）
 typescript         = 5.9.3      （上游要求 ^6.0.3）
-npm / pnpm         = 存在但 .ps1 shim 被执行策略拦（ExecutionPolicy）
-pwsh               = 不存在     （本机只有 Windows PowerShell 5.1）
 
 # ── 门禁基线（P10 结项值）──
 全量测试            = 563 文件 / 5433 通过 / 1 skipped
 三条机器判据        = class-name-contract（3 条 COVERED_TSX）/ group-context-injection / 全量
 11 项功能基线       = 全部「存在 OK」（文件数见 §七 表）
 
+# ── P0 数据面备份（M9 兑现；判定看 FAILED / Mismatch 两列，不看退出码）──
+备份目录            = E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\
+  node_modules      = 源 132037 文件 / 2.08 GB；robocopy /E 汇总与 `BACKUP-MANIFEST.txt` 见该目录
+  已备份文件        = package.json（6900 B）+ package-lock.json（877384 B）
+  🔴 确认不存在     = `pnpm-lock.yaml` / `pnpm-workspace.yaml`（**实测 `Test-Path` = False**，兑现判据 **J-09**）
+  E: 可用空间       = 254.1 GB（备份前）
+
 # ── 上游同步口径（经验 D35：必须带「源 + 新鲜度」）──
 权威源             = https://github.com/Playa-Cyrene/Cyrene-Agent.git
 本次实测数据来源    = 本地克隆 E:\AI_Work\Cyrene-Agent （master = 8fe5ba7a）
 本次新鲜度         = 2026-10-04 09:24:18（.git/FETCH_HEAD 时间戳）
-🔴 状态文件里的镜像  = E:\AI_Chating\off-cyan\Cyrene-Agent （master = b11b8851，**落后 130 提交**）
+🔴 状态文件里的镜像  = E:\AI_Chating\off-cyan\Cyrene-Agent （master = b11b8851，**落后 130 提交**）→ BACKLOG **B-03**
 脚本实测            = `node scripts/merge/upstream-sync.mjs --check --fetch` → exit **1** /
                       RISK **746** / U_new 756 / L_dev 1041 / SAFE 10
                       stderr: 「镜像路径抓取失败，改试 github…」（**回源成功，非假安全**）
@@ -242,6 +270,10 @@ pwsh               = 不存在     （本机只有 Windows PowerShell 5.1）
 | **J-08** | 合并目标的 commit 变了 → 全部风险数字都要重测 | **实测结论：冲突面、重叠面、删除集、我方新增文件受影响面 —— 对目标全部不敏感** —— `v1.3.0`(119 提交) 与 `8fe5ba7a`(130 提交) 的**冲突数同为 40**（UU 20 / UD 16 / DU 4，**零新增**）、**重叠面同为 65**、**静默风险同为那 8 个文件**、**D 类删除集同为 95 个文件且逐条相同**。<br>只有三个数字会变：上游提交数 119→130、上游改动文件 734→756、自动合并 727→709 文件 / +51442−52549 → **+53905−53760**。 | 拍板 M1 由 `789e5165` 改为 `8fe5ba7a` 后按 §9.4 **E9** 重测（两次试合并均实测）。<br>**仍有价值的原因**：它把"要不要多跟 11 个提交"从**风险问题**降级为**纯数字问题**——风险面无任何变化；同时它让 **D4**（保留被依赖的删除项）与 **M5**（保留 4 模块）这两条判据在换目标后**无需重写** | 本任务全程 |
 | **J-09** | 文档/蓝图里列出的"要操作的文件清单"可直接按字面执行 | **凡清单必逐个 `Test-Path` 验证**；缺失或与磁盘不符时**报错、不静默跳过** | **P0 起草期实测**：总蓝图 §三 曾列 `pnpm-lock.yaml` 为"要备份的锁文件"，而它**只存在于官方 `3470fea7`**、本地磁盘从未有过（P8 N6：未动依赖与锁）。同族教训 = 经验 **C22**（蓝图里的行号/路径是"写的时候"的快照）与 **D15**（行号不是稳定标识） | P0 起，本任务全程 |
 | **J-06** | 台账里 B/C 行只要登记就算"已登记" | B/C 行**必须三列预填完毕**才允许进入验收；未预填的显式写 `待预填（P6）`，并由判据 ② 保证 **P6 收口时归零** | 规范 §4.1.2 硬要求 7（③④⑤ 三列预填完毕该行才允许出现）与"P0 就要登记 H-B 待验项"冲突 → 用**显式占位取值 + 归零判据**化解，而不是让占位静默留在表里 | P6 之后 |
+| **J-10** | 收口判据 = `git status --porcelain` **= 0 行** | **收口判据必须写成"作用域内 0 行 ＋ 作用域外剩余项逐条已登记"两条**：<br>① `git status --porcelain \| Where-Object { $_ -notmatch 'docs/(design\|internal-issue\|refactor)/' }` = **0 行**；<br>② 剩余 `??` 项**必须逐条能在 `BACKLOG-长期待办.md` 里查到编号**（当前 = 3 条，全部 → **B-01**） | **P0 实测自相矛盾**：蓝图 §六 同时要求"A1 = 0 行"与"三处 D 类遗留不算失败"，两者不可能同时成立。若不复核就会重蹈 **J-01**（判据与步骤自相矛盾，`task-合并` P3 偏差 2）覆辙：要么把 D 类硬提交（污染基线），要么把 A1 放宽到失效 | P0 起收尾判据 |
+| **J-11** | 用 `hash-object` 与 `HEAD:path` 比原始 SHA 判"文件是否被改动" | **禁止**这样判；一律用 `git diff` / `git status` / `git diff --cached`，或 `git hash-object --path <p> <file>` 取归一化值 | **P0 实测踩到**：本仓库 `core.autocrlf=true`，`.gitignore` 磁盘 blob `997b5b08` vs `HEAD:.gitignore` `d0138aeb` **不相等**，但 `git diff` **为空**（git 会把 CRLF 归一化成 LF 再比）。若据此判定"文件已被改"，会直接推翻"工作区干净"这一前置①的前提，**在错误前提上继续施工**（经验 **C14**：验证工具自身必须被验证） | 本任务全程（所有 blob 比对） |
+| **J-12** | annotated tag 的 `git rev-parse <tag>` 就等于它指向的 commit | **`git rev-parse <tag>` 返回的是 tag 对象 SHA**；要 commit 必须写 `<tag>^{commit}` 或 `git rev-list -n1 <tag>` | **P0 实测**：`git rev-parse pre-heb-1.3.0` → `016338bc…`（tag 对象），而它指向的 commit 是 `6871f1f4`；蓝图 §六 **A2/A8 写的是裸 `rev-parse <tag>` 并期望得到 commit** → **按字面执行必然 FAIL**。反证：`git merge-base <两个 tag>` 与 `git rev-list --count <ref>..<tag>` **都正确**（它们自动解包），只有裸 `rev-parse` 不解包 | P0 起，本任务全程 |
+| **J-13** | `.gitignore` 里的 `!` 白名单条目能"保护"产品资产不被 `git clean -fd` 删掉 | **`!` 只对"本会被忽略"的路径有用；对本来就没被忽略的路径，它是纯注释、零行为效果**。判定"某资产会不会被 `git clean -fd` 删"要看<u>`git clean -ndX` / `git clean -nd` 干跑</u>，**不是**看白名单里有没有它 | **P0 实测**：`dist/renderer/cyrene-welcome.png` 加 `!` 前后，`git status` 报的都是 `??`（都进得了 git），但 `dist/renderer/` **未被任何规则整体忽略**（`siblings = check-ignore` 全不匹配）→ 因此 **`git clean -fd` 会删掉它**，而那两行 `!` 拦不住。蓝图 §四 4.2 把它当成"补白名单 = 保住资产"来写，**保护机制归因错了**（正确结论不变：**P0 不做任何清理动作**，经验 **C30**） | P0 起，含所有"资产保护"类判据 |
 
 ### 9.2 历史基线（仅存档）
 
@@ -274,6 +306,15 @@ git 自动合并        = 727 文件 / +51442 −52549
 > ⑥ 🔴 **把"官方 diff 输出里的文件名"当成"本地磁盘存在的文件"** —— 本文件 §三 曾写"备份 `package.json` + `package-lock.json` + `pnpm-lock.yaml` 三个文件"，
 >    而 `pnpm-lock.yaml` **只存在于官方 `3470fea7`**，本地磁盘**从来没有过**（P8 的 N6 明确「未动依赖与锁」）。
 >    已在 §三 就地改正并加判据 **J-09**：**凡列出"要操作的文件清单"，逐个 `Test-Path` 验证，缺失时报错而非静默跳过**（经验 **C22 / D15**：行号与文件名都不是稳定标识）。
+> ⑦ 🔴 **本文件与 `PHASE-0-提交收口与锚点.md` 的判据自相矛盾**：一边要求收口判据 A1 = **0 行**，
+>    一边又写"`docs/design|internal-issue|refactor` 仍出现在 `??` 列表里不算 A1 失败"。
+>    **P0 实测：收口后 `git status --porcelain` = 3 行（就是那三处目录），不是 0** —— 二者不可能同时成立。
+>    已按 **J-10** 改为**两条口径**（作用域内 0 行 ＋ 作用域外剩余项逐条已登记 BACKLOG），而不是把判据放宽到失效。
+> ⑧ 🔴 **锚点 tag 的取 commit 命令写错了**：§六 A2/A8 用裸 `git rev-parse <tag>` 并期望得到 commit，
+>    但本 Phase 打的是 **annotated tag**，裸 `rev-parse` 返回 **tag 对象 SHA**（实测 `016338bc…` ≠ commit `6871f1f4`），
+>    **按字面执行必然 FAIL**。已按 **J-12** 改为 `<tag>^{commit}`。同族：**J-11**（`hash-object` vs `HEAD:path` 受 `core.autocrlf` 影响）、
+>    **J-13**（`!` 白名单条目对"未被忽略的路径"零行为效果，"资产会不会被 `git clean` 删"要用 `-ndX` 干跑判）。
+>    三条都是**"验证工具自身没被验证"**（经验 **C14**）的实例。
 
 ### 9.4 实测证据（决定本任务全部做法，不是推断）
 
