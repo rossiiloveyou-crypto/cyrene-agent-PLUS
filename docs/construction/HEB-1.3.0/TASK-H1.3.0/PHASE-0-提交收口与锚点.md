@@ -418,10 +418,10 @@ tsc           : $(if (Test-Path "$R\node_modules\.bin\tsc.CMD") { & "$R\node_mod
 | # | 目标（§一） | 状态 | 证据 |
 |---|---|---|---|
 | T1 | 21 条逐条归类，未归类 = 0 | ✅ | A 证据 118 文件 / B 施工记录 68 / C 资产 1 / D 遗留 69（→ BACKLOG **B-01**）；**E 类 = 0** |
-| T2 | 一次提交，`--porcelain` = 0 | ✅ | 提交 **`6871f1f41c816ed8d1fa3b82320413d9ff8eb3a1`**（188 文件 / +79893 行 / 12.78 MB）；按 **J-10** 口径判定出口（作用域内 0 行） |
-| T3 | 两个锚点 tag | ✅ | `pre-heb-1.3.0` → `6871f1f4`；`official-target-8fe5ba7a` → `8fe5ba7a`（**均 annotated**，须用 `^{commit}` 取，**J-12**） |
-| T4 | `node_modules` 备份 + 清单 | ✅ | `E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\`；`BACKUP-MANIFEST.txt` = **`MATCH ✅`**（132037 = 132037 文件 / 2.08 GB） |
-| T5 | 合并前置四项实测值入档 | ✅ | HEAD `6871f1f4` / merge-base `b11b8851…` / 目标 `8fe5ba7a…` / 上游提交数 **130**（见 §十二 5） |
+| T2 | 一次提交，`--porcelain` = 0 | ✅ | 收口提交 **`6871f1f41c816ed8d1fa3b82320413d9ff8eb3a1`**（188 文件 / +79893 行 / 12.78 MB）＋ 文档提交 **`7a35ad0b`**（5 文件）＝ **P0 共 2 个提交**（偏离说明见完成报告 §五 偏差 8）；按 **J-10** 口径判定出口（作用域内 0 行） |
+| T3 | 两个锚点 tag | ✅ | `pre-heb-1.3.0` → `6871f1f4`（＝收口提交）；`official-target-8fe5ba7a` → `8fe5ba7a`（**均 annotated**，须用 `^{commit}` 取，**J-12**） |
+| T4 | `node_modules` 备份 + 清单 | ✅ | `E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\`；`BACKUP-MANIFEST.txt` = **`MATCH ✅`**（源 = 目标 = **132037 文件 / 2234681003 字节 / 2.08 GB**）；robocopy `Mismatch 0 · FAILED 0 · Extras 0` |
+| T5 | 合并前置四项实测值入档 | ✅ | HEAD `7a35ad0b` / merge-base `b11b8851…` / 目标 `8fe5ba7a…` / 上游提交数 **130**（见 §十二 5） |
 
 **人工环节达成核对**：本 Phase 无新增 H-nn；H-06…H-09 已在台账闭合（引用 §五，**不复制结论**）。
 **台账追加**：§三 新增 **Q5**（P0 有意不提交三处 D 类遗留 → 去路 BACKLOG **B-01**），属**说明**而非新增拍板。
@@ -484,14 +484,14 @@ tsc           : $(if (Test-Path "$R\node_modules\.bin\tsc.CMD") { & "$R\node_mod
 | `git diff --cached --name-only`（提交前） | **188**（A 118 / B 68 / C 1 / `.gitignore` 1）；D 类 **0**；E 类 **0** |
 | `git -C $R diff --numstat -- .gitignore` | **`2  0  .gitignore`** → 只追加、**未改既有行** ✅ |
 | `git show --stat --name-only HEAD \| Select-String 'docs/(design\|internal-issue\|refactor)/'` | **0 行** → **A7 ✅** |
-| `git log -1 --format=%H` | `6871f1f41c816ed8d1fa3b82320413d9ff8eb3a1` |
-| `git rev-parse 'pre-heb-1.3.0^{commit}'` | `6871f1f41c816ed8d1fa3b82320413d9ff8eb3a1` → **A2 ✅** |
+| `git log -1 --format=%H` | `7a35ad0b4891fcab3ca873268b5906396a90d993`（P0 文档提交）；收口提交 = `6871f1f4` |
+| `git rev-parse 'pre-heb-1.3.0^{commit}'` | `6871f1f41c816ed8d1fa3b82320413d9ff8eb3a1` → **A2 ✅**（＝收口提交，符合 A2 字面 "P0 提交哈希"） |
 | `git rev-parse 'official-target-8fe5ba7a^{commit}'` | `8fe5ba7a5b3a86043b8034abeaa98f72f7459039` → **A2 ✅** |
 | `git cat-file -t pre-heb-1.3.0` / `official-target-8fe5ba7a` | `tag` / `tag` → **均 annotated** |
 | `git merge-base pre-heb-1.3.0 official-target-8fe5ba7a` | `b11b88512cf0cf6dace56b59ff9487947ef01c28` → **A3 ✅** |
 | `git rev-list --count b11b8851..official-target-8fe5ba7a` | **130** → **A8 ✅** |
-| `git rev-list --count b11b8851..HEAD` | **12**（原 11 ＋ P0 提交） |
-| `git status -sb`（首行） | `## master...origin/master [ahead 231]`（收口前为 230） |
+| `git rev-list --count b11b8851..HEAD` | **13**（原 11 ＋ P0 的 2 个提交） |
+| `git status -sb`（首行） | `## master...origin/master [ahead 232]`（收口前为 230） |
 | `git diff --cached --name-only` 中单文件体积 | **最大 < 5 MB** → 停止条件 **S4 未触发** ✅ |
 | 备份：源 / 目标 文件数·字节 | **132037 / 132037 文件**；**2.08 GB / 2.08 GB** → `MATCH ✅`（**A4 / A5 ✅**） |
 | 锁文件 `Test-Path` 逐个实测 | `package.json` ✅ 6900 B ／ `package-lock.json` ✅ 877384 B ／ `pnpm-lock.yaml` ❌ ／ `pnpm-workspace.yaml` ❌（**兑现 J-09**，且**未静默跳过**） |
@@ -515,7 +515,7 @@ tsc           : $(if (Test-Path "$R\node_modules\.bin\tsc.CMD") { & "$R\node_mod
 | # | 触发 | 回写目标 | 内容 | 已勾 |
 |---|---|---|---|---|
 | 1 | **T1** 判据被修正 | `BLUEPRINT-总蓝图.md` §9.1 | 追加 **J-10**（A1 口径 = 作用域内 0 行 ＋ 域外逐条已登记）· **J-11**（禁用裸 blob 哈希判改动）· **J-12**（annotated tag 须 `^{commit}`）· **J-13**（`!` 白名单不是删除保护）。<br>⚠️ **编号说明**：蓝图此处写"追加 J-09 与 J-10"，但 **J-09 已被总蓝图 §9.1 占用**（Test-Path，编号先行）→ A1 口径改用 **J-10**，另新增 **J-11…J-13** | [x] |
-| 2 | **T2** 基线被改写 | `BLUEPRINT-总蓝图.md` §九 | ours HEAD `9ab07517` → **`6871f1f4`**（旧值**保留并标注**，未静默删除）＋ 新增两个锚点 tag（含"须 `^{commit}`"提醒）＋ 我方提交数 11→12 ＋ ahead 230→231 ＋ P0 收口实测块 ＋ 备份块 ＋ 环境块（`node24` / npm 损坏） | [x] |
+| 2 | **T2** 基线被改写 | `BLUEPRINT-总蓝图.md` §九 | ours HEAD `9ab07517` → **`7a35ad0b`**（旧值**保留并标注**，未静默删除）＋ 注明 **P0 = 2 个提交**且锚点打在收口提交 `6871f1f4` ＋ 新增两个锚点 tag（含"须 `^{commit}`"提醒）＋ 我方提交数 11→13 ＋ ahead 230→232 ＋ P0 收口实测块 ＋ 备份块 ＋ 环境块（`node24` / npm 损坏） | [x] |
 | 3 | **T3** 蓝图被实测推翻 | 本文件 §二 | 21 条审计结果与 E2 **逐条一致**（无需改正）；但 **E4 定性收窄**、**4.2 保护机制归因错**、**4.3 期望 213 量纲混淆** → 三条已就地记录并**保留"曾错、已修正"** | [x] |
 | 4 | **T4** 新增经验 | `../methodology/BLUEPRINT-经验库-*.md` | 4 条新坑（**容器计数≠内容计数** / **annotated tag 不解包** / **`!` 非删除保护** / **autocrlf 下裸哈希不可判改动**）—— 待**撰写者**按 H/M/L 归位、键号续编 | **[—]** |
 

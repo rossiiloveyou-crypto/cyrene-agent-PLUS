@@ -190,19 +190,24 @@
 ## 九、当前基线（✅ 最新，供逐项比对）
 
 ```text
-# ── 仓库状态（2026-10-04 17:xx 实测；**P0 收口后**，目标已改为 8fe5ba7a）──
-ours HEAD          = 6871f1f4   （chore(P0): 收口任务前累积改动）
-  ↳ 历史值         = 9ab07517   （feat(控制台): 触发/拦截关键词接线到渠道控制台；被 P0 提交取代，不删）
-branch             = master  →  origin/master (gitee) ahead 231   （P0 提交后 230→231）
+# ── 仓库状态（2026-10-04 17:1x 实测；**P0 收口后**，目标已改为 8fe5ba7a）──
+ours HEAD          = 7a35ad0b   （docs(P0): 收口完成报告 + BACKLOG + 总蓝图回写）
+  ↳ P0 收口提交     = 6871f1f4   （chore(P0): 收口任务前累积改动 —— 188 文件，是**锚点 tag 指向的提交**）
+  ↳ 历史值         = 9ab07517   （feat(控制台): 触发/拦截关键词接线到渠道控制台；被 P0 取代，不删）
+🔴 **P0 产生了 2 个提交**（蓝图 §四 4.3 期望 1 个）：① `6871f1f4` 收口改动本身；② `7a35ad0b` P0 自己的文档交付物
+  （完成报告 = §七 产出物之一，必须在提交里才算交付）。**锚点 `pre-heb-1.3.0` 打在 ①**，
+  因为它是蓝图 **§六 A2 的字面要求**（"前者 = P0 提交哈希"＝收口提交），也是**语义上的"任务前基线"**。
+  ⚠️ **P1 若要"完整回退到 P0 末态"用 `7a35ad0b`**（含 P0 文档）；若要"回到合并起点"用 `pre-heb-1.3.0`。两者差 1 个文档提交。
+branch             = master  →  origin/master (gitee) ahead 232   （收口前 230；+2 个 P0 提交）
 merge-base         = b11b8851   （2026-09-25 23:30，P0 后复测未变）
 merge target       = 8fe5ba7a   （官方 master 最新 = v1.3.0 tag + 11 提交）
 🆕 锚点 tag（P0 打）
-  pre-heb-1.3.0        = 6871f1f4   （annotated；**我方基线**：收口后的树）
+  pre-heb-1.3.0        = 6871f1f4   （annotated；**我方基线**＝收口后的树）
   official-target-8fe5ba7a = 8fe5ba7a （annotated；**合并目标**，抗 force-update / ref 漂移）
   ↳ 取 commit 必须写 `official-target-8fe5ba7a^{commit}`（annotated tag 直接 rev-parse 给的是 tag 对象 SHA，见 J-12）
   ↳ refs/remotes/official/master 仍 = 8fe5ba7a，但**本仓库没有配置 remote.official**（该 ref 是裸远程跟踪 ref）
 上游提交数          = 130        （v1.3.0 时是 119）
-我方提交数          = 12         （原 11；+ P0 收口提交）
+我方提交数          = 13         （原 11；+2 个 P0 提交）
 双方改动文件        = 上游 756  /  我方 357  /  重叠 65（src 59 / 代码 55）
 试合并冲突          = 40         （UU 20 / UD 16 / DU 4）—— **与 v1.3.0 完全一致，零新增**
 静默重叠            = 8          （git 未报冲突但改动行区间相交；区间相交总数 32，其中 24 个已进冲突列表）
@@ -213,10 +218,12 @@ merge target       = 8fe5ba7a   （官方 master 最新 = v1.3.0 tag + 11 提交
 git 自动合并        = 709 文件 / +53905 −53760
 
 # ── P0 收口实测（2026-10-04，本节由 P0 施工回写）──
-工作区收口          = 21 条未跟踪项 → **一次提交 6871f1f4**：188 文件 / +79893 行 / 12.78 MB
+工作区收口          = 21 条未跟踪项 → **提交 6871f1f4**：188 文件 / +79893 行 / 12.78 MB
   ↳ 暂存构成        = A 证据 118 + B 施工记录 68 + C 资产 1 + `.gitignore` 1
   ↳ 归类结果        = A/B/C/D 全部归类，**未归类（E 类）= 0**；D 类 69 文件有意不提交 → BACKLOG **B-01**
   ↳ 21 条与 E2 比对 = **逐条一致**（无第 22 条）→ 停止条件 S3 **未触发**
+  ↳ 量纲提醒        = `git status --porcelain` 的**行数（21）是目录级条目数**，**≠ 文件数（187）**；
+                      **唯一权威是 `git diff --cached --name-only`**（见 J-11 同族的量纲坑）
 🔴 A1 口径修正（判据 **J-10**）：`git status --porcelain` 收口后 = **3 行**（`?? docs/design/`、`?? docs/internal-issue/`、
   `?? docs/refactor/`），**不是 0 行** —— 三处是 D 类遗留，已登记 B-01，按 J-10 口径判定出口
 `.gitignore` 改动   = +2 行（白名单区 `!dist/renderer/cyrene-welcome.png`）；**实测：这不改变任何 git 行为**，
@@ -240,7 +247,8 @@ typescript         = 5.9.3      （上游要求 ^6.0.3）
 
 # ── P0 数据面备份（M9 兑现；判定看 FAILED / Mismatch 两列，不看退出码）──
 备份目录            = E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\
-  node_modules      = 源 132037 文件 / 2.08 GB；robocopy /E 汇总与 `BACKUP-MANIFEST.txt` 见该目录
+  node_modules      = robocopy 汇总 **Dirs 10983/10983 · Files 132037/132037 · Mismatch 0 · FAILED 0 · Extras 0**
+  BACKUP-MANIFEST   = 一致性 **`MATCH ✅`**（源 = 目标 = **132037 文件 / 2234681003 字节 / 2.08 GB**，偏差 0.00%）
   已备份文件        = package.json（6900 B）+ package-lock.json（877384 B）
   🔴 确认不存在     = `pnpm-lock.yaml` / `pnpm-workspace.yaml`（**实测 `Test-Path` = False**，兑现判据 **J-09**）
   E: 可用空间       = 254.1 GB（备份前）

@@ -3,8 +3,10 @@
 > **状态**：✅ 已完成
 > **执行日期**：2026-10-04
 > **执行者**：agent（无对话历史，仅凭 `PHASE-0-提交收口与锚点.md` + `BLUEPRINT-总蓝图.md` 两份）
-> **结论**：21 条未跟踪项**逐条归类完毕（未归类 = 0）**，一次提交 `6871f1f4`（**188 文件 / +79893 行 / 12.78 MB**）；
-> 打两个 annotated 锚点 `pre-heb-1.3.0` / `official-target-8fe5ba7a`；`node_modules` 备份完成（132037 文件 / 2.08 GB）。
+> **结论**：21 条未跟踪项**逐条归类完毕（未归类 = 0）**，收口提交 `6871f1f4`（**188 文件 / +79893 行 / 12.78 MB**），
+> 加 P0 文档交付提交 `7a35ad0b` → 当前 HEAD = **`7a35ad0b`**（**P0 共 2 个提交**，见 §五 偏差 8）；
+> 打两个 annotated 锚点 `pre-heb-1.3.0`（→ `6871f1f4`）/ `official-target-8fe5ba7a`（→ `8fe5ba7a`）；
+> `node_modules` 备份完成并 **`MATCH ✅`**（132037 文件 / 2234681003 字节 / 2.08 GB，`Mismatch 0 · FAILED 0`）。
 > **主判据 8 项全 PASS**，但**修正了 4 条蓝图判据**（J-10…J-13）——其中 **2 条若按蓝图字面执行会必然失败**。
 > **报告规范**：见 `../methodology/BLUEPRINT-撰写规范.md` §5
 
@@ -13,28 +15,30 @@
 | # | 验收项 | 结果 |
 |---|---|---|
 | A1 | 任务前累积改动已收口（**J-10 口径**） | ✅ **3 行** = 全部为已登记 B-01 的 D 类遗留；作用域内 **0 行** |
-| A2 | 两个锚点存在且指向正确（**须 `^{commit}`**） | ✅ `pre-heb-1.3.0→6871f1f4` / `official-target-8fe5ba7a→8fe5ba7a`（**均为 annotated**） |
+| A2 | 两个锚点存在且指向正确（**须 `^{commit}`**） | ✅ `pre-heb-1.3.0→6871f1f4`（收口提交）/ `official-target-8fe5ba7a→8fe5ba7a`（**均为 annotated**） |
 | A3 | 锚点的合并基点未变 | ✅ `b11b88512cf0cf6dace56b59ff9487947ef01c28` |
-| A4 | 备份完整（`MATCH ✅`） | ✅ manifest 命中 `MATCH ✅`（132037 = 132037） |
-| A5 | 备份规模符合实测 | ✅ 源 **132037 文件 / 2.08 GB**，与 E10 逐位一致（偏差 0%） |
+| A4 | 备份完整（`MATCH ✅`） | ✅ manifest 命中 `MATCH ✅`；robocopy `Mismatch 0 · FAILED 0 · Extras 0` |
+| A5 | 备份规模符合实测 | ✅ 源 = 目标 = **132037 文件 / 2234681003 字节 / 2.08 GB**，与 E10 偏差 **0.00%** |
 | A6 | 白名单生效 | ⚠️ **判据本身写反，见 §五 偏差 3**（exit 0 而非 1；但**产出的结论不变**） |
 | A7 | 提交未夹带 D 类遗留 | ✅ 0 行 |
-| A8 | 合并前置四项就位 | ✅ HEAD `6871f1f4` / merge-base `b11b8851` / 目标 `8fe5ba7a` / 上游提交 **130** |
+| A8 | 合并前置四项就位 | ✅ HEAD `7a35ad0b` / merge-base `b11b8851` / 目标 `8fe5ba7a` / 上游提交 **130** |
 
 **验收总计**：8 项主判据 → PASS **7** / PASS（判据修正）**1** / FAIL **0**
 
 ## 二、最终状态（交接给 P1）
 
 ```
-HEAD               = 6871f1f4   （chore(P0): 收口任务前累积改动）
-branch             = master  →  origin/master (gitee) ahead 231
+HEAD               = 7a35ad0b   （docs(P0): 收口完成报告 + BACKLOG + 总蓝图回写）
+  ↳ P0 收口提交     = 6871f1f4   （chore(P0): 收口任务前累积改动；188 文件；**锚点 tag 指向它**）
+  ↳ 起点（收口前）   = 9ab07517
+branch             = master  →  origin/master (gitee) ahead 232   （收口前 230；+2 个 P0 提交）
 merge-base         = b11b88512cf0cf6dace56b59ff9487947ef01c28   （未变）
 merge target       = 8fe5ba7a5b3a86043b8034abeaa98f72f7459039   （钉成 annotated tag）
 上游提交数          = 130
 工作区             = 仅 3 行 ??（D 类遗留，已登记 B-01）—— **无 M / 无暂存**
 锚点 tag           = pre-heb-1.3.0（annotated，→ 6871f1f4）
                      official-target-8fe5ba7a（annotated，→ 8fe5ba7a）
-备份               = E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\  （MATCH ✅）
+备份               = E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\  （MATCH ✅，Mismatch 0 / FAILED 0）
 ```
 
 **产出物**：
@@ -110,6 +114,11 @@ git -C $R -c core.quotepath=false diff --cached --name-only |
 
 git -C $R commit -m "chore(P0): 收口任务前累积改动（证据目录 + 施工记录 + 欢迎页海报白名单）"
 # → [master 6871f1f4] 188 files changed, 79893 insertions(+)
+
+# P0 的文档交付物另起一个提交（§七 产出物必须在提交里才算交付）
+git -C $R add -- docs/construction/HEB-1.3.0/TASK-H1.3.0
+git -C $R commit -m "docs(P0): 收口完成报告 + BACKLOG + 总蓝图回写（判据 J-10…J-13）"
+# → [master 7a35ad0b] 5 files changed, 515 insertions(+), 24 deletions(-)
 ```
 
 ### 3.5 §四 4.4 打两个锚点 tag
@@ -146,7 +155,7 @@ robocopy "$R\node_modules" "$BK\node_modules" /E /NFL /NDL /NJH /NP /R:2 /W:2 /L
 | # | 验收项 | 期望 | 实测 | 判定 |
 |---|---|---|---|---|
 | A1 | 收口 | 0 行（J-10 口径） | 作用域内 0 行；全量 3 行（= 已登记 B-01） | ✅ |
-| A2 | 锚点指向 | P0 提交 / `8fe5ba7a` | `6871f1f4` / `8fe5ba7a`（用 `^{commit}` 取） | ✅ |
+| A2 | 锚点指向 | 收口提交 / `8fe5ba7a` | `6871f1f4` / `8fe5ba7a`（用 `^{commit}` 取） | ✅ |
 | A3 | merge-base | `b11b8851…` | `b11b88512cf0cf6dace56b59ff9487947ef01c28` | ✅ |
 | A4 | 备份完整 | 命中 `MATCH` | `MATCH ✅`（双重数字：文件数 + 字节数） | ✅ |
 | A5 | 备份规模 | 132037 / ≈2.08 GB | 132037 / 2.08 GB | ✅ |
@@ -161,11 +170,11 @@ A1  git status --porcelain | Where-Object { $_ -notmatch 'docs/(design|internal-
       ?? docs/internal-issue/
       ?? docs/refactor/
 A3  b11b88512cf0cf6dace56b59ff9487947ef01c28
-A8  HEAD                                  = 6871f1f41c816ed8d1fa3b82320413d9ff8eb3a1
+A8  HEAD                                  = 7a35ad0b4891fcab3ca873268b5906396a90d993
     merge-base(HEAD, target)              = b11b88512cf0cf6dace56b59ff9487947ef01c28
     target^{commit}                       = 8fe5ba7a5b3a86043b8034abeaa98f72f7459039
     rev-list --count b11b8851..target     = 130
-    rev-list --count b11b8851..HEAD       = 12（原 11 + P0 提交）
+    rev-list --count b11b8851..HEAD       = 13（原 11 + P0 的 2 个提交）
 ```
 
 ## 五、关键偏差与判定修正（**给后续 Phase 必读**）★
@@ -179,6 +188,7 @@ A8  HEAD                                  = 6871f1f41c816ed8d1fa3b82320413d9ff8e
 | **5** | `.gitignore` 磁盘 blob `997b5b08` ≠ `HEAD:.gitignore` `d0138aeb`，但 `git diff` 为空 | `core.autocrlf=true`：git 比对前把 CRLF 归一化为 LF，`hash-object --path` 才是归一化哈希 | 判据 **J-11** | 🔴 后续**禁止**用裸 `hash-object` vs `HEAD:path` 判"是否改动" |
 | **6** | 前置③ 用 `refs/remotes/official/master`，但该 ref 会被下次 `--fetch` 移动 | **实测本仓库根本没有 `remote.official`**（`git config` 只有 `remote.origin.*`），该 ref 是**裸远程跟踪 ref** | 蓝图的做法本身正确（已钉成 tag），但**原因要更正**：不是"防 fetch 移动"这么简单，而是**它没有配置来源、语义无保障** | ✅ 全程只用 tag `official-target-8fe5ba7a`；**不要**去掉 `^{commit}` |
 | **7** | E4 把三处 `docs/` 目录定性为"上游保留、我方删除后残留的副本" | **实测更正**：`docs/design`(44) / `docs/internal-issue`(19) / `docs/refactor`(6) 在**我方 HEAD 与祖先中都存在**（`in-ancestor = 44/17/6`），**并非"上游独有"**；其中 **6 个文件内容与合并目标不同**、**2 个目标中根本没有** | 分类**不变**（仍属 D 类、仍不提交），但**定性收窄**：这 69 个文件里**混有本地独有内容**，**不是纯粹的"上游副本"** | 🔴 **P5 必须逐文件判**，不能整目录按"上游副本"处理；见 BACKLOG B-01 §二 |
+| **8** | 蓝图 §一 T2 与 §四 4.3 要求"**一次提交**"；§七 产出物却把**本 Phase 的完成报告**列为产出物 | 两者**不可兼得**：完成报告的内容只能在收口提交**之后**写出来（它要记录提交哈希、备份数字）。→ 实测做成 **2 个提交**：`6871f1f4`（收口改动，188 文件）+ `7a35ad0b`（P0 文档交付，5 文件） | 判为**合理偏离**：① 收口提交保持了"只含任务前累积改动"的**纯度**（这正是 §二「被推翻的原计划」要防的）；② 完成报告进入了版本控制（否则 §七 的产出物**没有交付物可验**）。**锚点 `pre-heb-1.3.0` 打在收口提交 `6871f1f4`** —— 既符合 **A2 字面要求**，也是语义上的"合并起点" | ⚠️ **P1 注意两点**：① 回退到"合并起点"用 `pre-heb-1.3.0`，回退到"**含 P0 文档的末态**"用 **`7a35ad0b`**（两者树差异仅 5 个文档文件）；② 我方提交数 = **13**（原 11 + 2），`ahead origin/master` = **232** |
 
 ## 六、已知坑的实测复现情况
 
@@ -208,7 +218,8 @@ A8  HEAD                                  = 6871f1f41c816ed8d1fa3b82320413d9ff8e
 |---|---|---|
 | **撤销 P0 提交（保留文件）** | `git reset --soft 9ab07517` → 回到"21 条未跟踪 + 已暂存"的起点 | ✅ 逻辑可验证（提交是**纯追加** + `.gitignore` 2 行） |
 | **撤销 P0 提交（回到收口前树）** | `git reset --hard pre-heb-1.3.0~1` ⚠️ **必须带 `~1`** | ✅ 实测 `pre-heb-1.3.0^{commit}` = `6871f1f4`，其父 = `9ab07517` |
-| **整棵树（收口后的基线）** | `git reset --hard pre-heb-1.3.0` → 即 **6871f1f4 的树**（D 类遗留**仍在磁盘上**，因它们从未被跟踪） | ✅ 实测锚点解包正确 |
+| **整棵树（回到收口后的基线）** | `git reset --hard pre-heb-1.3.0` → 即 **6871f1f4 的树**（== 合并起点）<br>⚠️ 它**不含 P0 的文档交付**（完成报告 / BACKLOG / 回写），因它们在后一个提交 `7a35ad0b` 里 | ✅ 实测锚点解包正确；`6871f1f4` 与 `7a35ad0b` 的**树差异仅 5 个文档文件** |
+| **回到 P0 末态（含 P0 文档）** | `git reset --hard 7a35ad0b` | ✅ 实测 = 当前 HEAD |
 | **撤销锚点** | `git tag -d pre-heb-1.3.0 official-target-8fe5ba7a` | ✅ 幂等、无副作用 |
 | **撤销 `.gitignore` 那 2 行** | `git checkout pre-heb-1.3.0~1 -- .gitignore` | ✅ 实测该文件在收口前 = HEAD 版本（8127 B） |
 | **数据面（备份回退）** | `robocopy "E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\node_modules" "$R\node_modules" /E`（**先不加 `/PURGE`**） | 未验证（P1 出问题时才用） |
@@ -233,13 +244,21 @@ A8  HEAD                                  = 6871f1f41c816ed8d1fa3b82320413d9ff8e
 8. 🔴 **三处 D 类目录（69 文件）仍在工作区且仍未被跟踪** —— 这是 **P0 的有意保留**：
    `git status` 会有 3 行 `??`，**不是异常**；去路见 **BACKLOG B-01**（P5 逐文件判定）。
    ⚠️ 其中 **67/69 个路径在合并目标里同名存在**，P2「我方删 / 上游保留」处置时**务必复查它们有没有被写回**。
+9. 🔴 **P1 结束时的"零未提交"出口条件会撞上同一条规矩**：`PHASE-0-提交收口` 的纪律是"每 Phase 单独提交"，
+   而**该 Phase 自己的完成报告只能在提交之后写** → 必然产生**第二个提交**（P0 实测即如此，见 §五 偏差 8）。
+   **建议 P1 起直接在蓝图里写明"每 Phase 允许 2 个提交：改动提交 + 文档提交"**，
+   否则每个 Phase 收口时都会重现"判据说 1 个、实际 2 个"的自相矛盾（同族：**J-10**）。
+   ⚠️ 若照抄"每 Phase 一个提交"的字面要求，就会**要么让完成报告进不了版本控制**（产出物不可验），
+   **要么把文档混进改动提交**（破坏"改动面纯净"，正是 §二 要防的）。
+10. **P0 的两个提交哈希**：收口 `6871f1f4`（锚点 `pre-heb-1.3.0` 指向它）／ 文档 `7a35ad0b`（= 当前 HEAD）。
+   **"合并起点"用 `pre-heb-1.3.0`；"P0 末态（含文档）"用 `7a35ad0b`。**
 
 ## 九、Phase 0 目标达成核对
 
 | 目标（来自蓝图 §一） | 状态 |
 |---|---|
 | T1 21 条逐条归类，未归类 = 0 | ✅ A 118 / B 68 / C 1 / D 69（D 登记 B-01）；**E 类 = 0** |
-| T2 一次提交，`--porcelain` = 0 | ✅ 提交 `6871f1f4`（188 文件）；按 **J-10** 口径出口（作用域内 0 行） |
+| T2 一次提交，`--porcelain` = 0 | ✅ 收口提交 `6871f1f4`（188 文件）+ 文档提交 `7a35ad0b`（**P0 共 2 个提交**，见 §五 偏差 8）；按 **J-10** 口径出口（作用域内 0 行） |
 | T3 两个锚点 tag | ✅ `pre-heb-1.3.0` + `official-target-8fe5ba7a`（**均 annotated**） |
 | T4 `node_modules` 备份 + 清单 | ✅ `MATCH ✅`，132037 文件 / 2.08 GB + `BACKUP-MANIFEST.txt` |
 | T5 合并前置四项实测值入档 | ✅ 见 §四 A8 与总蓝图 §九 |
@@ -259,7 +278,7 @@ A8  HEAD                                  = 6871f1f41c816ed8d1fa3b82320413d9ff8e
 | 触发条件 | 回写目标 | 回写内容一句话 | 已勾选 |
 |---|---|---|---|
 | **T1 判据被修正** | `BLUEPRINT-总蓝图.md` §9.1 | 追加 **J-10**（A1 口径 = 作用域内 0 行 ＋ 域外逐条已登记）· **J-11**（禁用裸 blob 哈希判改动）· **J-12**（annotated tag 须 `^{commit}`）· **J-13**（`!` 白名单不是删除保护） | [x] |
-| **T2 基线数值被改写** | `BLUEPRINT-总蓝图.md` §九 | ours HEAD `9ab07517` → **`6871f1f4`**（旧值保留并标注）；新增两个锚点 tag；我方提交数 11→12；ahead 230→231 | [x] |
+| **T2 基线数值被改写** | `BLUEPRINT-总蓝图.md` §九 | ours HEAD `9ab07517` → **`7a35ad0b`**（旧值保留并标注）；注明 **P0 = 2 个提交**且锚点打在收口提交 `6871f1f4`；新增两个锚点 tag；我方提交数 11→13；ahead 230→232 | [x] |
 | **T3 蓝图描述被实测推翻** | `PHASE-0-提交收口与锚点.md` §二 / 本报告 §五 | 21 条与 E2 **逐条一致**（无需改正）；但 **E4 的定性被收窄**（混有本地独有内容）、**4.2 的保护机制归因错**、**A2/A8 取 commit 写法错** → 三条全部就地记录 | [x] |
 | **T4 新增一条经验** | `../methodology/BLUEPRINT-经验库-具体坑.md` | 4 条新坑（容器计数≠内容计数 / annotated tag 不解包 / `!` 非删除保护 / autocrlf 下裸哈希不可判改动）—— **待撰写者复核后按 H/M/L 归位、键号续编** | **[—]** |
 
