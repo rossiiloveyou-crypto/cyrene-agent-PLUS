@@ -1,0 +1,8 @@
+fix(隐私): read_memory 不再向未开启 injectOwnerProfile 的域泄漏本人画像（H-26）
+
+- 群聊里 owner 的 L0/L1 被 read_memory 无条件读出（真实发生：群里被问出「CPA」）
+- 复用 shouldInjectOwnerProfile(scopeId) 守卫，与上下文注入走同一个判据
+- 画像不可见时返回边界提示而非空白（避免模型误判成「没有记忆」）
+- 新增 4 条回归测试（tool-registry-memory-scope.test.ts），故障注入已验证其有效性
+
+来源：人工验证 B-6（H-13 运行期）第 1 步失败 → 定界 → 修复 → 复测

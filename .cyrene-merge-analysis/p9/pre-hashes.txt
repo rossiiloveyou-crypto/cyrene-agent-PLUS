@@ -1,0 +1,7 @@
+﻿84302687792ece1737414d2c8f908c6f742fdb9d  src/renderer/react/features/chat/components/ChatPageNavigation.tsx
+96743abdd5af60cb520634a4c7c31c7ec1f4e6ba  src/renderer/react/features/settings/MemorySettingsPanel.tsx
+89804671f74c3a57a27eedb8999c50666982d616  src/renderer/react/features/settings/AppearanceSettingsPage.tsx
+59da327b82280667cb38196e970402af0b495e85  src/renderer/react/features/chat/components/ToolConsolePanel.css
+4f2c5a1fe041356d6d0376bd3c92b1013740c032  src/renderer/react/features/chat/components/ToolConsolePanel.tsx
+98003d310dde95179796380f16d2130cbeaaa26f  src/renderer/react/i18n/zh-CN.json
+85cec8b552cb302b545ab5019d6e05a4aff8c1b8  src/renderer/react/i18n/en.json

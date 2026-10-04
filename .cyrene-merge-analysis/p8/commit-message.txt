@@ -1,0 +1,21 @@
+merge(P8): 完成三方合并 —— 本地 12 天工作重接到官方 b11b8851
+
+范围：46 文件 / 64 冲突块（P3 实测）→ P4 15 删 + P5 17 文件/27 块 + P6 9 文件/36 块
+状态：UU/UD/DU/AA = 0；全仓库冲突标记 = 0；三套 tsc = 0
+
+关键决策
+- D1 桌面对话绑定彻底删除（保留 conversation-binding-store，zones 仍依赖）
+- D2 旧设置窗退场，设置走官方 React 路线
+- D3 群聊旁听不迁进 CTA 轨迹（history-log 原样保留）
+- D4 群语料原地不动（corpus 与 CTA 无关）
+- D5 旧版本兼容默认放弃
+- D6 任务文档不进本提交
+
+验证（P7 收口 + 验证作业单实测）
+- 定向门禁 13 文件 / 273 tests 全绿；语料豁免 22 passed；群聊旁听探测器 4 passed
+- 全量仅剩 2 条存量失败（ToolConsolePanel 的令牌与 window.confirm），与合并无关
+- 构建链：vite 8.3.0 / vitest 5.0.1 / electron 44.4.3；dist/renderer 6 个入口产物
+
+已知遗留（P9 处理）
+- 渠道控制台 / 记忆管理台（含按人擦除、删除全部记忆）/ 区块页 三项 UI 入口未接回官方 React 设置页；
+  后端与 preload 桥完好（渲染层 0 调用）。判据 J-19、台账 H-15

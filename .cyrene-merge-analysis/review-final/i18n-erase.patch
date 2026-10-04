@@ -1,0 +1,29 @@
+diff --git a/src/renderer/react/i18n/en.json b/src/renderer/react/i18n/en.json
+index 73473040..c01e1ba3 100644
+--- a/src/renderer/react/i18n/en.json
++++ b/src/renderer/react/i18n/en.json
+@@ -1666,7 +1679,9 @@
+           "confirmPhrase": "ERASE COMPLETELY",
+           "previewTitle": "Erasure preview · {{name}}",
+           "previewFailedTitle": "Preview failed: {{error}}",
++          "previewContinue": "I understand, continue",
+           "confirmTitle": "Confirm again",
++          "confirmBack": "Back to preview",
+           "confirmMessage": "This erases \"{{name}}\" completely. Type the confirmation phrase \"{{phrase}}\" to enable the button.",
+           "confirmButton": "Erase",
+           "noRestartNote": "Erasure needs no restart: caches are invalidated in place (unlike deleting all memories).",
+diff --git a/src/renderer/react/i18n/zh-CN.json b/src/renderer/react/i18n/zh-CN.json
+index 4c93edb2..7b5f1e00 100644
+--- a/src/renderer/react/i18n/zh-CN.json
++++ b/src/renderer/react/i18n/zh-CN.json
+@@ -1666,7 +1679,9 @@
+           "confirmPhrase": "彻底擦除",
+           "previewTitle": "擦除预演 · {{name}}",
+           "previewFailedTitle": "预演失败：{{error}}",
++          "previewContinue": "我已了解，继续",
+           "confirmTitle": "二次确认",
++          "confirmBack": "返回预演",
+           "confirmMessage": "将彻底擦除「{{name}}」。请手动输入确认短语「{{phrase}}」后按钮才可点。",
+           "confirmButton": "执行擦除",
+           "noRestartNote": "擦除不需要重启：缓存会在原地失效（与「删除全部记忆」不同）。",
+

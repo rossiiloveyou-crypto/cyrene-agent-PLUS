@@ -1,0 +1,9 @@
+feat(P9): 接回渠道控制台/记忆管理台/区块页，并修掉两条存量失败
+
+- ① 渠道控制台：ChatPageNavigation 补 import + JSX（面板类型与宿主早已就位）
+- ② 记忆管理台 + 按人擦除 + 删除全部记忆 + 群聊近期上下文条数（MemorySettingsPanel 新区块）
+- ③ 区块页：新建 ZonesSettingsPanel 并注册 section="zones"（含手动按群号加白）
+- ④ 修 theme-token-contract（改用 --rb-* 角色令牌，3 个文件 148 处）
+     与 default-dialogs-regression（window.confirm → Modal.confirm）
+- 规则来源：D7（凡我方新增功能所依赖的 UI 入口，必须原封不动加回）
+- H-A 补充拍板：S4 停止条件命中（实测违规 3 文件而非 1 个），项目所有者裁定扩到 3 文件全修

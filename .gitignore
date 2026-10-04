@@ -110,6 +110,8 @@ dist/components/
 !dist/renderer/icons/
 !dist/renderer/models/
 !dist/renderer/splash.html
+# 欢迎页海报：被 src/renderer/react/features/onboarding/WelcomeGate.tsx 引用（首次运行可见），必须进 Git。
+!dist/renderer/cyrene-welcome.png
 
 # Test & coverage
 coverage/

@@ -1,0 +1,7 @@
+feat(控制台): 触发/拦截关键词接线到渠道控制台（原设置页从未接线）
+
+- 后端本就就绪（dispatcher 读 intercept、napcat-adapter 读 trigger、keyword-policy 归一化），缺的只是 UI
+- 控制台新增「关键词策略」区块：拦截词 / 触发词 + 保存 + 从 txt 导入，带 API 守卫
+- 抽出纯逻辑 channel-keywords.ts（文本↔数组、导入合并去重、保存 patch 形状、保存回填）
+- 新增 28 条测试：14 纯逻辑 + 5 源码契约（IPC 通道 / 77 个 i18n 键两语言齐）+ 5 jsdom 真实渲染 + 4 跨层（面板 patch → 真实 saveChannelsSettings → 断言落盘 JSON）
+- 新样式全用 --rb-* 角色令牌（--cy-* 命中 0）；未动主进程 / preload / IPC 一行

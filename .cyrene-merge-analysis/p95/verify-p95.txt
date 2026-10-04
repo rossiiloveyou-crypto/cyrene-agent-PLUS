@@ -1,0 +1,123 @@
+﻿[1] CSS 文件 = 58   已定义类名 = 1491
+
+=== features/settings/memory-console/MemoryManagerSection.tsx
+    相关类名 0   未定义 0
+
+=== features/settings/memory-console/DangerZoneSection.tsx
+    相关类名 0   未定义 0
+
+=== features/settings/ZonesSettingsPanel.tsx
+    相关类名 1   未定义 0
+
+[3] 旧 settings.css: 规则块 852  选择器(拆分后) 873
+    新两文件:        规则块 80  选择器(拆分后) 87
+    旧 CSS 命中该族选择器 = 79（其中位于 @media 内 = 0）
+    新 CSS 命中该族选择器 = 87
+
+[4] 旧有新无（丢失）= 22
+    - .memory-manager__batch
+    - .memory-manager__detail
+    - .memory-manager__detail-head h3
+    - .memory-manager__group
+    - .memory-manager__group--mentioned
+    - .memory-manager__list
+    - .memory-manager__memory
+    - .memory-manager__row
+    - .memory-manager__trace
+    - .memory-manager__views .option-block
+    - .zone-card
+    - .zone-card__config
+    - .zone-card__head
+    - .zone-card__switch input[type="checkbox"]
+    - .zone-card__switch input[type="checkbox"]:disabled
+    - .zone-member-row
+    - .zone-member-row .ghost-btn
+    - .zone-member-row__id + .ghost-btn
+    - .zones-list
+    - /* ───────────────────────────────────────────── 记忆区块（Zones）面板 复用 .memory-card / .ghost-btn 的配色与圆角变量，不引入新色板。 ───────────────────────────────────────────── */ .zones-toolbar
+    - /* ───────────────────────────────────────────── 记忆管理控制台（P3） 复用 .memory-card / .ghost-btn / .option-block / .zones-batch-actions 的配色与圆角变量， 不引入新色板。批量条直接套 .zones-batch-actions（只有间距差异）。 ───────────────────────────────────────────── */ .memory-manager__toolbar
+    - /* 选择器弹层（复用 .cy-modal-overlay / .cy-modal 外观） */ .zones-picker
+
+[5] 属性名缺失的选择器 = 11
+    .memory-manager__group-empty  → 缺 font-size
+    .memory-manager__group-hint  → 缺 font-size
+    .memory-manager__row-id  → 缺 font-size
+    .memory-manager__row-name  → 缺 font-weight
+    .memory-manager__trace-meta  → 缺 font-size
+    .zone-card__badge  → 缺 font-size
+    .zone-card__empty  → 缺 font-size
+    .zone-card__note  → 缺 font-size
+    .zone-member-row__badge  → 缺 font-size
+    .zone-member-row__id  → 缺 font-size
+    .zones-picker__note  → 缺 font-size
+
+[6] 旧无新有（新增）= 30
+    + .memory-manager__detail-actions .ant-btn
+    + .memory-manager__memory .ant-btn
+    + .memory-manager__memory-check input[type="checkbox"]
+    + .memory-manager__preview-list
+    + .memory-manager__restart-note
+    + .memory-manager__row-check input[type="checkbox"]
+    + .memory-manager__setting-control
+    + .memory-manager__setting-copy
+    + /* 5 列：勾选 / 名称 / ID / 计数 / 详情按钮（5 个子元素必须正好占满 5 列，否则按钮会被挤到第二行） */ .memory-manager__row
+    + /* P9.5 · 记忆区块（zones）页的排版（H-19 / 判据台账 J-32） * * 来源：**回收**旧设置窗 `src/renderer/settings/settings.css`（phase0-full，5300 行）里的 * `zone*` 选择器 —— 那就是项目所有者原来的排版（D7「必须原封不动加回去」）。 * 旧文件已随 P4 删除，本文件是它的**令牌化再版**。 * * 三道改写（P9.5 蓝图 §四 4.2）： * ① 颜色 → `--rb-*` 角色令牌（旧 CSS 里为**深色主题**手写的 rgba 一律换成令牌， * 否则在 pearl-white（当前唯一主题）下会出现"白底白块"） * ② 字号 → 房规令牌；旧用的 `--rb-text-base` **当前已不存在** → `--rb-text-body-em` * ③ 间距/圆角 → 与房规一致 * * 🔴 `var(--rb-x
+    + /* P9.5 · 记忆管理台 + 危险操作的排版（H-19 / 判据台账 J-32） * * 来源：**回收**旧设置窗 `src/renderer/settings/settings.css`（phase0-full，5300 行）里的 * `.memory-manager*` 选择器 —— 那就是项目所有者原来的排版（D7「必须原封不动加回去」）。 * 旧文件已随 P4 删除，本文件是它的**令牌化再版**。 * * 三道改写（P9.5 蓝图 §四 4.2）： * ① 颜色 → `--rb-*` 角色令牌（旧 CSS 里为**深色主题**手写的 rgba 一律换成令牌， * 否则在 pearl-white（当前唯一主题）下会出现"白底白块"） * ② 字号 → 房规令牌（`--rb-text-*`）；旧 CSS 用的 `--rb-text-base` **当前已不存在**， * 按语义改为 `--rb-text-body-em`（标题）/ `--rb-text-body`（正文） * ③ 间距/圆角 → 与房规一致 * * 🔴 `var(--rb-x
+    + /* ── P9.5 新增：扁平行（危险操作的两个设置项）─────────────── 旧房规 `.cy-settings-row` 是"标题占满一行、控件掉到下一行"的布局， 在本页排版不成立（见证据截图）→ 改用与 `.zone-member-row` 同族的**单行 flex**。 */ .memory-manager__row--setting
+    + /* ── P9.5 新增：擦除预演弹窗的清单排版 ────────────────────── */ .memory-manager__preview
+    + /* ── P9.5：antd 控件的收口 ───────────────────────────────── 旧 CSS 的按钮是 `ghost-btn` / 勾选框是裸 `input[type=checkbox]`（两者都随旧设置窗删除了）。 新面板用 antd `Button`：这里把字号对齐房规，避免比同行的说明文字更抢眼。 */ .memory-manager__row .ant-btn
+    + /* ── 分组：他的记忆 / 别人提到他（两态分组盒）─────────────── */ .memory-manager__group
+    + /* ── 列表：按人 / 按域 / 按会话 ───────────────────────────── */ .memory-manager__list
+    + /* ── 区块卡 ────────────────────────────────────────────── */ .zones-list
+    + /* ── 单条记忆（详情里的记忆行）───────────────────────────── */ .memory-manager__memory
+    + /* ── 成员行 ────────────────────────────────────────────── */ /* 🔴 扁平 flex 行：checkbox / badge / name / id / 按钮是**同一父节点的直接子元素**。 缩进与标题一致（都由 `.zone-card` 的 padding 决定），「移出」靠 `margin-left: auto` 贴行尾 —— H-19 第 2 步。 */ .zone-member-row
+    + /* ── 成员选择器弹层 ─────────────────────────────────────── */ .zones-picker
+    + /* ── 溯源 ──────────────────────────────────────────────── */ .memory-manager__trace
+    + /* ── 详情区（列表 ↔ 详情两态里的"详情"）───────────────────── */ .memory-manager__detail
+    + /* 「移出」贴行尾（旧 `zone-member-row__id + .ghost-btn` 的等价规则）。 ⚠️ 原版靠 `margin-left: auto` 生效的前提是**它前面的兄弟都是 `flex: 0 0 auto`**； `__name` 是 `min-width: 0` 的可伸缩项，所以这里保持默认 `flex-shrink: 1` 即可。 */ .zone-member-row .zone-member-row__remove
+    + /* 两个开关同一行 */ .zone-card__config
+    + /* 标题行：`desktop (root)` + 成员数 + 操作 —— 一行内左右分列，不挤压 */ .zone-card__head
+    + /* 橙色边框区分"会连带动到别人"的那一组（旧设计的语义色） */ .memory-manager__group--mentioned
+    + /* 🔴 区块卡必须是**一张卡**（有边界 / 内边距 / 圆角 / 阴影）—— H-19 第 2 步 */ .zone-card
+    + /* 🔴 详情标题必须是**标题字号**，不是 `cy-memory-card__top` 的小注释字号 —— H-19 第 1 步 */ .memory-manager__detail-head h3
+    + <旧值>)` 的兜底值是**有意保留**（本仓既有 579 处同写法）； * ⚠️ 兜底值**不许**写 `--cy-*`（被 `theme-token-contract.test.ts` 禁用的别名）。 */ /* ── 工具栏 ────────────────────────────────────────────── */ .zones-toolbar
+    + <旧值>)` 里的兜底值是**有意保留**的：本仓既有 579 处同写法 * （见 `NewTaskButton.css` / `UserProfileDialog.css`），用途是"令牌缺失时不让颜色消失"。 * ⚠️ 兜底值**不许**写 `--cy-*`（那是被 `theme-token-contract.test.ts` 禁用的别名）。 */ /* ── 工具栏：视图切换 + 刷新 + 反馈行 ─────────────────────── */ .memory-manager__toolbar
+
+[7] 全仓定义过的 --rb-* 令牌 = 13
+    MemoryConsole.css: 花括号 44/44  hex=30 rgba=4 var(--cy-=0  用到令牌=23  未定义令牌=16
+       NO-DEF TOKEN --rb-accent
+       NO-DEF TOKEN --rb-border-default
+       NO-DEF TOKEN --rb-border-focus
+       NO-DEF TOKEN --rb-border-subtle
+       NO-DEF TOKEN --rb-pink-50
+       NO-DEF TOKEN --rb-radius-lg
+       NO-DEF TOKEN --rb-radius-md
+       NO-DEF TOKEN --rb-radius-xl
+       NO-DEF TOKEN --rb-success
+       NO-DEF TOKEN --rb-surface-elevated
+       NO-DEF TOKEN --rb-surface-hover
+       NO-DEF TOKEN --rb-text-body-em
+       NO-DEF TOKEN --rb-text-default
+       NO-DEF TOKEN --rb-text-disabled
+       NO-DEF TOKEN --rb-warning
+       NO-DEF TOKEN --rb-x
+    ZonesPanel.css: 花括号 36/36  hex=32 rgba=5 var(--cy-=0  用到令牌=25  未定义令牌=19
+       NO-DEF TOKEN --rb-accent
+       NO-DEF TOKEN --rb-border-default
+       NO-DEF TOKEN --rb-border-focus
+       NO-DEF TOKEN --rb-border-subtle
+       NO-DEF TOKEN --rb-font-mono
+       NO-DEF TOKEN --rb-pink-50
+       NO-DEF TOKEN --rb-pink-600
+       NO-DEF TOKEN --rb-radius-full
+       NO-DEF TOKEN --rb-radius-md
+       NO-DEF TOKEN --rb-radius-xl
+       NO-DEF TOKEN --rb-shadow-card
+       NO-DEF TOKEN --rb-success
+       NO-DEF TOKEN --rb-surface-elevated
+       NO-DEF TOKEN --rb-surface-hover
+       NO-DEF TOKEN --rb-text-body-em
+       NO-DEF TOKEN --rb-text-default
+       NO-DEF TOKEN --rb-text-disabled
+       NO-DEF TOKEN --rb-text-mono
+       NO-DEF TOKEN --rb-x

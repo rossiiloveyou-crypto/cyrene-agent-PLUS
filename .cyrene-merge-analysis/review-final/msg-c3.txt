@@ -1,0 +1,7 @@
+fix(记忆台): 擦除预演与强确认拆成两步，不再同开互盖（H-22）
+
+- 两个 <Modal> 的 open 都绑 Boolean(erase) → 预演被确认框盖住，知情同意静默失效
+- 新增可测阶段机 erase-step.ts（preview → confirm 恒互斥），组件按 step 渲染
+- 补回「我已了解，继续」进确认框、「返回预演」退回看清内容（原先 footer={null} 根本进不了第二步）
+- i18n 补 previewContinue / confirmBack（zh-CN + en）
+- 新增 8 条回归测试；同步更新 rules.test.ts 的源码级守卫（断言强度不降）

@@ -1,0 +1,57 @@
+﻿[1] react CSS 文件 = 58   已定义类名 = 1485
+
+=== features/settings/memory-console/MemoryManagerSection.tsx
+    相关类名 35   未定义 0
+
+=== features/settings/memory-console/DangerZoneSection.tsx
+    相关类名 13   未定义 0
+
+=== features/settings/ZonesSettingsPanel.tsx
+    相关类名 33   未定义 0
+
+[3] 旧 settings.css: 规则块 851  选择器 868
+    新两文件:        规则块 80  选择器 85
+    旧命中该族 = 79（@media 内 = 0）
+    新命中该族 = 85
+
+[4] 旧有新无（真丢失候选）= 6
+    - .memory-manager__batch
+    - .memory-manager__views .option-block
+    - .zone-card__switch input[type="checkbox"]
+    - .zone-card__switch input[type="checkbox"]:disabled
+    - .zone-member-row .ghost-btn
+    - .zone-member-row__id + .ghost-btn
+
+[5] 属性名缺失的选择器 = 14
+    .memory-manager__detail  → 缺 margin-top
+    .memory-manager__detail-head h3  → 缺 font-weight
+    .memory-manager__group-empty  → 缺 font-size
+    .memory-manager__group-hint  → 缺 font-size
+    .memory-manager__row-id  → 缺 font-size
+    .memory-manager__row-name  → 缺 font-weight
+    .memory-manager__toolbar  → 缺 margin-bottom
+    .memory-manager__trace-meta  → 缺 font-size
+    .zone-card__badge  → 缺 font-size
+    .zone-card__empty  → 缺 font-size
+    .zone-card__note  → 缺 font-size
+    .zone-member-row__badge  → 缺 font-size
+    .zone-member-row__id  → 缺 font-size
+    .zones-picker__note  → 缺 font-size
+
+[6] 新 CSS 新增选择器 = 12
+    + .memory-manager__detail-actions .ant-btn
+    + .memory-manager__memory .ant-btn
+    + .memory-manager__memory-check input[type="checkbox"]
+    + .memory-manager__preview
+    + .memory-manager__preview-list
+    + .memory-manager__restart-note
+    + .memory-manager__row .ant-btn
+    + .memory-manager__row--setting
+    + .memory-manager__row-check input[type="checkbox"]
+    + .memory-manager__setting-control
+    + .memory-manager__setting-copy
+    + .zone-member-row .zone-member-row__remove
+
+[7] src/renderer 全域定义的 --rb-* 令牌 = 157
+    MemoryConsole.css: 花括号 44/44  hex=30 rgba=4 var(--cy-=0  用到令牌=22  未定义令牌=0
+    ZonesPanel.css: 花括号 36/36  hex=32 rgba=5 var(--cy-=0  用到令牌=24  未定义令牌=0

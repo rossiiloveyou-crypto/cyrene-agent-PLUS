@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.renderer.json",
+  "compilerOptions": { "noEmit": true },
+  "include": [
+    "src/renderer/settings/memory/delete-all.ts",
+    "src/renderer/settings/memory/erasure-flow.ts",
+    "src/renderer/settings/memory/manager.ts",
+    "src/renderer/settings/zones/panel.ts",
+    "src/renderer/global.d.ts",
+    "src/shared/**/*.ts"
+  ],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

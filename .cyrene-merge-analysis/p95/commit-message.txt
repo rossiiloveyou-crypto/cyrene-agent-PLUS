@@ -1,0 +1,12 @@
+fix(P9.5): 补齐记忆管理台/区块页的排版样式（回收旧 settings.css 的 75 条选择器）
+
+- 记忆管理台：新增 MemoryConsole.css，回收 `.memory-manager*` 36 条选择器并令牌化
+  （详情区有卡片边界、分组有分隔与数量徽标、标题回到标题字号、按钮成行右对齐）
+- 区块页：新增 ZonesPanel.css，回收 `zone*` 35 条选择器并令牌化
+  （区块卡有边界/内边距、标题行左右分列、成员行缩进与标题一致、移出贴行尾、两开关同行）
+- 类名与 DOM 对齐旧面板结构（memory-manager__* / zone*）——
+  H-19 的根因是"有类名、无定义" + DOM 与旧 CSS 不匹配（判据台账 J-32）
+- 新增门禁 class-name-contract.test.ts + class-name-scanner.ts
+  （把 J-32 固化成机器判据，否则下一个新面板会重蹈同一个坑）
+- 补 4 个 i18n 键（groupCount/groupSelected/memorySummary/memoryStatus，两语言）
+- 未动官方既有面板：AppearanceSettingsPage.css 改动 = 0 行

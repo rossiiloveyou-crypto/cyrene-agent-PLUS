@@ -1,0 +1,6 @@
+﻿src/renderer/react/features/settings/memory-console/DangerZoneSection.tsx
+src/renderer/react/features/settings/memory-console/MemoryManagerSection.tsx
+src/renderer/react/features/settings/memory-console/rules.test.ts
+src/renderer/react/features/settings/memory-console/rules.ts
+src/renderer/react/i18n/en.json
+src/renderer/react/i18n/zh-CN.json

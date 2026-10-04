@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.renderer.json",
+  "compilerOptions": { "noEmit": true },
+  "include": [
+    "src/renderer/settings/**/*.ts",
+    "src/renderer/global.d.ts",
+    "src/shared/**/*.ts"
+  ],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

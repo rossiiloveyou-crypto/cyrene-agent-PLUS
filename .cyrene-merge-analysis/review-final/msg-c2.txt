@@ -1,0 +1,7 @@
+fix(prompt): 消除环境块的重复装配（H-24）
+
+- 同一个 environmentContext 被装进两条路：soulRuntimeContext 第 1 项 + 专用字段 runtimeEnvironmentContext
+- prompt-builder 把两者各自推入 runtimeParts → 同一份「## 运行环境 / ## 用户信息」各出现 2 次
+- 改为只留专用字段（归属依据：prompt-builder.test.ts 正是把该块当 runtimeEnvironmentContext 的输入）
+- 实测收益：同一条消息 2474 → 1786 字符（约 −688/轮）
+- 新增 4 条消费端回归测试（environment-injection-dedup.test.ts）

@@ -1,0 +1,68 @@
+﻿diff --git a/src/renderer/react/i18n/en.json b/src/renderer/react/i18n/en.json
+index 73473040..c01e1ba3 100644
+--- a/src/renderer/react/i18n/en.json
++++ b/src/renderer/react/i18n/en.json
+@@ -599,6 +599,19 @@
+     "auditRestoreHint": "Restore to the sidebar size",
+     "recordSuccessTitle": "Record every turn (including successful ones)",
+     "recordSuccessDesc": "By default only failures and blocks are recorded; enabling this also logs each successful turn and grows the log folder fast.",
++    "keywordsTitle": "Keyword policy",
++    "keywordsHint": "One keyword per line (case-insensitive, de-duplicated automatically, max 64 characters each and 500 per list). Saving takes effect immediately, no restart needed.",
++    "keywordsPlaceholder": "One keyword per line…",
++    "interceptKeywordsLabel": "Intercept keywords",
++    "interceptKeywordsDesc": "Any message containing one of these is blocked outright: it never reaches the model, costs no quota, and only leaves a “message blocked” audit entry.",
++    "triggerKeywordsLabel": "Trigger keywords",
++    "triggerKeywordsDesc": "When any of these appears in a group, she counts as being called and replies without an @mention. Direct messages are unaffected.",
++    "keywordsSave": "Save keywords",
++    "keywordsSaving": "Saving…",
++    "keywordsSaved": "Keywords saved and active",
++    "keywordsImport": "Import from txt",
++    "keywordsImported": "Imported {{n}} keywords ({{file}})",
++    "keywordsImportFailed": "Failed to import keywords",
+     "statusSuccess": "Success",
+     "statusFailure": "Failed",
+     "statusBlocked": "Blocked",
+@@ -1666,7 +1679,9 @@
+           "confirmPhrase": "ERASE COMPLETELY",
+           "previewTitle": "Erasure preview · {{name}}",
+           "previewFailedTitle": "Preview failed: {{error}}",
++          "previewContinue": "I understand, continue",
+           "confirmTitle": "Confirm again",
++          "confirmBack": "Back to preview",
+           "confirmMessage": "This erases \"{{name}}\" completely. Type the confirmation phrase \"{{phrase}}\" to enable the button.",
+           "confirmButton": "Erase",
+           "noRestartNote": "Erasure needs no restart: caches are invalidated in place (unlike deleting all memories).",
+diff --git a/src/renderer/react/i18n/zh-CN.json b/src/renderer/react/i18n/zh-CN.json
+index 4c93edb2..7b5f1e00 100644
+--- a/src/renderer/react/i18n/zh-CN.json
++++ b/src/renderer/react/i18n/zh-CN.json
+@@ -599,6 +599,19 @@
+     "auditRestoreHint": "还原到侧边栏大小",
+     "recordSuccessTitle": "记录全部对话（含成功）",
+     "recordSuccessDesc": "默认只记失败与拦截；开启后每次成功对话也会写入，日志文件会增长得很快。",
++    "keywordsTitle": "关键词策略",
++    "keywordsHint": "一行一个词（区分大小写不敏感、自动去重，单项不超过 64 字、每类最多 500 条）。保存后立即生效，不需要重启。",
++    "keywordsPlaceholder": "一行一个词…",
++    "interceptKeywordsLabel": "拦截关键词",
++    "interceptKeywordsDesc": "消息里出现任一词就直接拦下：不进模型、不消耗额度，只在审计里留一条「消息拦截」。",
++    "triggerKeywordsLabel": "触发关键词",
++    "triggerKeywordsDesc": "群里出现任一词就视作「被叫到」，不必 @ 她。私聊不受影响（私聊始终会响应）。",
++    "keywordsSave": "保存关键词",
++    "keywordsSaving": "保存中…",
++    "keywordsSaved": "关键词已保存并生效",
++    "keywordsImport": "从 txt 导入",
++    "keywordsImported": "已导入 {{n}} 个关键词（{{file}}）",
++    "keywordsImportFailed": "导入关键词失败",
+     "statusSuccess": "成功",
+     "statusFailure": "失败",
+     "statusBlocked": "已拦截",
+@@ -1666,7 +1679,9 @@
+           "confirmPhrase": "彻底擦除",
+           "previewTitle": "擦除预演 · {{name}}",
+           "previewFailedTitle": "预演失败：{{error}}",
++          "previewContinue": "我已了解，继续",
+           "confirmTitle": "二次确认",
++          "confirmBack": "返回预演",
+           "confirmMessage": "将彻底擦除「{{name}}」。请手动输入确认短语「{{phrase}}」后按钮才可点。",
+           "confirmButton": "执行擦除",
+           "noRestartNote": "擦除不需要重启：缓存会在原地失效（与「删除全部记忆」不同）。",

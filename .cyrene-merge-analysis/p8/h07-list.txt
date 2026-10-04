@@ -1,0 +1,14 @@
+﻿src/renderer/settings/dom-refs-consistency.test.ts
+src/renderer/settings/keywords-markup.test.ts
+src/renderer/settings/memory-manager-markup.test.ts
+src/renderer/settings/panel-migration-markup.test.ts
+src/renderer/settings/zones-markup.test.ts
+src/renderer/settings/channels/panel.test.ts
+src/renderer/settings/memory/delete-all.test.ts
+src/renderer/settings/memory/erasure-flow.test.ts
+src/renderer/settings/memory/manager.test.ts
+src/renderer/settings/memory/panel.test.ts
+src/renderer/settings/zones/panel.test.ts
+src/renderer/react/features/chat/components/api-config/api-config-source.test.ts
+src/renderer/settings/memory/panel.ts
+src/renderer/settings/preferences/panel.ts
