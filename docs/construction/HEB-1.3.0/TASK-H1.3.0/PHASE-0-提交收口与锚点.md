@@ -27,11 +27,14 @@
 
 ### 目标清单（可勾选）
 
-- [ ] **T1** 逐条审计 21 条未跟踪项，把每一条**归入三类之一**（提交 / 排除 / 单独处理），**未归类 = 0**
-- [ ] **T2** 把该提交的内容**一次提交**（提交信息见 §四 4.3），提交后 `--porcelain` **= 0**
-- [ ] **T3** 打两个锚点 tag：`pre-heb-1.3.0`（我方基线）+ `official-target-8fe5ba7a`（官方目标，抗 force-update）
-- [ ] **T4** 把 `node_modules` + 三个 lockfile 备份到 `E:\AI_Work\备份\`，并写**清单文件**
-- [ ] **T5** 记录**合并前置四项**的实测值（HEAD / merge-base / 目标 ref / 冲突预期），写进 §十二 施工记录
+- [x] **T1** 逐条审计 21 条未跟踪项，把每一条**归入三类之一**（提交 / 排除 / 单独处理），**未归类 = 0**
+- [x] **T2** 把该提交的内容**一次提交**（提交信息见 §四 4.3），提交后 `--porcelain` **= 0**
+      ↳ ⚠️ **实测偏离**：做成 3 个提交（1 改动 + 2 文档），理由见完成报告 §五 偏差 8；`--porcelain` 按 **J-10** 口径
+- [x] **T3** 打两个锚点 tag：`pre-heb-1.3.0`（我方基线）+ `official-target-8fe5ba7a`（官方目标，抗 force-update）
+- [x] **T4** 把 `node_modules` + 三个 lockfile 备份到 `E:\AI_Work\备份\`，并写**清单文件**
+      ↳ 🔴 **实测更正**：磁盘上**只有 `package.json` + `package-lock.json`**；`pnpm-lock.yaml` / `pnpm-workspace.yaml`
+      **不存在**（判据 **J-09** 实测确认，§九 坑 10）
+- [x] **T5** 记录**合并前置四项**的实测值（HEAD / merge-base / 目标 ref / 冲突预期），写进 §十二 施工记录
 
 ### 非目标（明确不做）
 
@@ -418,7 +421,7 @@ tsc           : $(if (Test-Path "$R\node_modules\.bin\tsc.CMD") { & "$R\node_mod
 | # | 目标（§一） | 状态 | 证据 |
 |---|---|---|---|
 | T1 | 21 条逐条归类，未归类 = 0 | ✅ | A 证据 118 文件 / B 施工记录 68 / C 资产 1 / D 遗留 69（→ BACKLOG **B-01**）；**E 类 = 0** |
-| T2 | 一次提交，`--porcelain` = 0 | ✅ | 收口提交 **`6871f1f41c816ed8d1fa3b82320413d9ff8eb3a1`**（188 文件 / +79893 行 / 12.78 MB）＋ 文档提交 **`7a35ad0b`**（5 文件）＝ **P0 共 2 个提交**（偏离说明见完成报告 §五 偏差 8）；按 **J-10** 口径判定出口（作用域内 0 行） |
+| T2 | 一次提交，`--porcelain` = 0 | ✅ | 收口提交 **`6871f1f41c816ed8d1fa3b82320413d9ff8eb3a1`**（188 文件 / +79893 行 / 12.78 MB）＋ P0 自己的文档提交（`7a35ad0b` 等，只动文档）＝ **P0 共 3 个提交**（偏离说明见完成报告 §五 偏差 8）；按 **J-10** 口径判定出口（作用域内 0 行） |
 | T3 | 两个锚点 tag | ✅ | `pre-heb-1.3.0` → `6871f1f4`（＝收口提交）；`official-target-8fe5ba7a` → `8fe5ba7a`（**均 annotated**，须用 `^{commit}` 取，**J-12**） |
 | T4 | `node_modules` 备份 + 清单 | ✅ | `E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\`；`BACKUP-MANIFEST.txt` = **`MATCH ✅`**（源 = 目标 = **132037 文件 / 2234681003 字节 / 2.08 GB**）；robocopy `Mismatch 0 · FAILED 0 · Extras 0` |
 | T5 | 合并前置四项实测值入档 | ✅ | HEAD `7a35ad0b` / merge-base `b11b8851…` / 目标 `8fe5ba7a…` / 上游提交数 **130**（见 §十二 5） |
@@ -490,8 +493,8 @@ tsc           : $(if (Test-Path "$R\node_modules\.bin\tsc.CMD") { & "$R\node_mod
 | `git cat-file -t pre-heb-1.3.0` / `official-target-8fe5ba7a` | `tag` / `tag` → **均 annotated** |
 | `git merge-base pre-heb-1.3.0 official-target-8fe5ba7a` | `b11b88512cf0cf6dace56b59ff9487947ef01c28` → **A3 ✅** |
 | `git rev-list --count b11b8851..official-target-8fe5ba7a` | **130** → **A8 ✅** |
-| `git rev-list --count b11b8851..HEAD` | **13**（原 11 ＋ P0 的 2 个提交） |
-| `git status -sb`（首行） | `## master...origin/master [ahead 232]`（收口前为 230） |
+| `git rev-list --count b11b8851..HEAD` | **14**（原 11 ＋ P0 的 3 个提交）🔴 **此数会随 P0 文档修订而变，不作判据** |
+| `git status -sb`（首行） | `## master...origin/master [ahead 233]`（收口前为 230）🔴 **同上，不作判据** |
 | `git diff --cached --name-only` 中单文件体积 | **最大 < 5 MB** → 停止条件 **S4 未触发** ✅ |
 | 备份：源 / 目标 文件数·字节 | **132037 / 132037 文件**；**2.08 GB / 2.08 GB** → `MATCH ✅`（**A4 / A5 ✅**） |
 | 锁文件 `Test-Path` 逐个实测 | `package.json` ✅ 6900 B ／ `package-lock.json` ✅ 877384 B ／ `pnpm-lock.yaml` ❌ ／ `pnpm-workspace.yaml` ❌（**兑现 J-09**，且**未静默跳过**） |
@@ -515,7 +518,7 @@ tsc           : $(if (Test-Path "$R\node_modules\.bin\tsc.CMD") { & "$R\node_mod
 | # | 触发 | 回写目标 | 内容 | 已勾 |
 |---|---|---|---|---|
 | 1 | **T1** 判据被修正 | `BLUEPRINT-总蓝图.md` §9.1 | 追加 **J-10**（A1 口径 = 作用域内 0 行 ＋ 域外逐条已登记）· **J-11**（禁用裸 blob 哈希判改动）· **J-12**（annotated tag 须 `^{commit}`）· **J-13**（`!` 白名单不是删除保护）。<br>⚠️ **编号说明**：蓝图此处写"追加 J-09 与 J-10"，但 **J-09 已被总蓝图 §9.1 占用**（Test-Path，编号先行）→ A1 口径改用 **J-10**，另新增 **J-11…J-13** | [x] |
-| 2 | **T2** 基线被改写 | `BLUEPRINT-总蓝图.md` §九 | ours HEAD `9ab07517` → **`7a35ad0b`**（旧值**保留并标注**，未静默删除）＋ 注明 **P0 = 2 个提交**且锚点打在收口提交 `6871f1f4` ＋ 新增两个锚点 tag（含"须 `^{commit}`"提醒）＋ 我方提交数 11→13 ＋ ahead 230→232 ＋ P0 收口实测块 ＋ 备份块 ＋ 环境块（`node24` / npm 损坏） | [x] |
+| 2 | **T2** 基线被改写 | `BLUEPRINT-总蓝图.md` §九 | ours HEAD `9ab07517` → **P0 末态**（旧值**保留并标注**，未静默删除）＋ 注明 **P0 = 3 个提交**且锚点打在收口提交 `6871f1f4` ＋ 新增两个锚点 tag（含"须 `^{commit}`"提醒）＋ 我方提交数 11→14 ＋ ahead 230→233 ＋ **声明"HEAD 精确值不作判据、按角色引用"** ＋ P0 收口实测块 ＋ 备份块 ＋ 环境块（`node24` / npm 损坏） | [x] |
 | 3 | **T3** 蓝图被实测推翻 | 本文件 §二 | 21 条审计结果与 E2 **逐条一致**（无需改正）；但 **E4 定性收窄**、**4.2 保护机制归因错**、**4.3 期望 213 量纲混淆** → 三条已就地记录并**保留"曾错、已修正"** | [x] |
 | 4 | **T4** 新增经验 | `../methodology/BLUEPRINT-经验库-*.md` | 4 条新坑（**容器计数≠内容计数** / **annotated tag 不解包** / **`!` 非删除保护** / **autocrlf 下裸哈希不可判改动**）—— 待**撰写者**按 H/M/L 归位、键号续编 | **[—]** |
 
@@ -535,3 +538,19 @@ tsc           : $(if (Test-Path "$R\node_modules\.bin\tsc.CMD") { & "$R\node_mod
 > 若按"全文 `^\|.*\[ \]` = 0 行"判定，判据会**自命中恒失败**（经验 **D29**）；
 > 若把 `[ ]` 一律改成 `[x]` 又会**谎报撰写者已完成**（经验 **C14**：验证工具自身必须被验证）。
 > → 正解 = **限定行号范围** ＋ 引入**第三种显式取值 `[—]`**。
+>
+> 🔴 **本文件有 3 种清单格式，判据必须逐种覆盖**（P0 实测：首版判据只覆盖了"表格行"一种，
+> 漏掉了 §一 的"`- [ ]` 复选框"格式 —— **这正是"判据作用域 ≠ 被验对象范围"**，经验 **D29 / 判据 J-10**）：
+>
+> ```powershell
+> $F = "docs\construction\HEB-1.3.0\TASK-H1.3.0\PHASE-0-提交收口与锚点.md"
+> # ① 目标清单（§一，`- [ ]` 复选框）—— 期望 0 行
+> Select-String -Path $F -Pattern '^- \[ \]' -Encoding UTF8
+> # ② 回写清单（§十二，表格行）—— 期望 0 行（合法取值只有 [x] / [—]）
+> Select-String -Path $F -Pattern '^\|.*\[ \]' -Encoding UTF8 | Where-Object { $_.LineNumber -ge 470 }
+> # ③ 全文件任何"清单条目形状"的 `[ ]` —— 期望 0 行（剩余命中只允许出现在说明文字/代码块里）
+> Select-String -Path $F -Pattern '^\s*[-|].*\[ \]' -Encoding UTF8
+> ```
+>
+> 📌 **P1 起请照抄这条"逐格式覆盖"的写法**：一个文件里有几种清单格式，就要有几种判据；
+> 只写一种 = 给自己发假绿（本节即为实证）。
