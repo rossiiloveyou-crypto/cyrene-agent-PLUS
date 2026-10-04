@@ -16,7 +16,7 @@
 | # | 验收项 | 结果 |
 |---|---|---|
 | A1 | N-1 已处置、P0 收口判据归零（**J-10 / J-15 口径**） | ✅ **作用域内 0 行**（`git status --porcelain` 仅剩 3 行已登记 **B-01** 的 `??` D 类遗留） |
-| A2 | Node 24 **只对本应用**生效 | ✅ 直调 `v24.21.0`；`where.exe node` **首行** = `<仓库>\.node24\node.exe`；🔴 **系统 `node -v` 仍为 v22.23.2**（M8 未被违反） |
+| A2 | Node 24 **只对本应用**生效 | ✅ 直调 `<仓库>\.node24\node.exe` = `v24.21.0`；设 PATH 后 `node -v` = `v24.21.0`、`where.exe node` **首行** = `<仓库>\.node24\node.exe`；🔴 **系统 `node -v` 仍为 v22.23.2**（M8 未被违反）<br>⚠️ **口径**：`$env:PATH` **不跨进程**（坑 7）→ **新开的 shell 里 `where.exe node` 首行仍是 `D:\data\node\node.exe`**，这是**预期行为、不是失败**；脚本一律写**全路径**（见 §八 交接清单 4） |
 | A3 | `.node24` 未入库、`.gitignore` **只追加** | ✅ `git status --porcelain -- .node24` = **0 行**；`git diff --numstat -- .gitignore` = **`3 0`**（**0 删除**） |
 | A4 | pnpm 可用**或**已记录降级 | ✅ **pnpm 10.33.0 可用**；依赖树侧记**结构性降级**（见 §五 偏差 1），台账 **H-15** 已登记 |
 | A5 | 依赖未漂移 | ✅ `git status --porcelain -- package.json package-lock.json pnpm-lock.yaml pnpm-workspace.yaml` = **0 行**；`package-lock.json` SHA256 前后一致 |
@@ -77,7 +77,7 @@ vitest             = v5.0.1 可用（冒烟 3 tests passed）
 | `.cyrene-merge-analysis/heb-p1/p1-install.log` | §4.4 的**实测输出 + 降级判定理由** | 1.6 KB |
 | `.cyrene-merge-analysis/heb-p1/p1-vitest-smoke.log` | vitest 可用性 | 2.1 KB |
 | `<仓库>\.node24` | 应用级 Node 24 **目录联接**（**不入库**） | junction |
-| `.gitignore` | **追加** 3 行（空行 + 注释 + `.node24/`） | +3 / −0 |
+| `.gitignore` | **追加** 7 行（`.node24/` + 证据白名单，两处）；HEAD 245 行逐行未变 | +10 / −0 |
 | `docs/.../PHASE-0-完成报告.md` 等 3 份 + `PHASE-1-工具链升级.md` | 回写入库 + P1 蓝图入库 | 4 文件 / +845 −7 |
 | `docs/.../BLUEPRINT-总蓝图.md` | **回写**：§九 基线（P1 实测块 + 历史段）· §9.1 **J-16/J-17/J-18** · §9.3.1 · §四 索引 | +3 判据 |
 | `docs/.../HUMAN-人工验证台账.md` | **追加 H-15** + §5.2/§5.3 + §六 判据 ⑤（结构守卫） | +1 行 / +1 判据 |
@@ -153,7 +153,8 @@ cmd /c dir /AL "$R" →  2026/10/04 22:14  <JUNCTION>  .node24 [D:\data\node24] 
 **`.gitignore` 只追加**（同 P0 §四 4.2 的纪律）：
 
 ```
-git diff --numstat -- .gitignore   →  3   0   .gitignore        ← **0 删除** ✅
+git diff --numstat -- .gitignore   →  3   0   .gitignore        ← **0 删除** ✅（此处只含 `.node24/` 那一处改动；
+#   第 2 处「证据白名单」是施工尾部才加的，见 §五 偏差 7。两处合计的最终值为 `10  0`，纯追加。）
 # 追加内容：空行 + `# 应用级 Node 24 目录联接（P1 建；指向 D:\data\node24，不入库）` + `.node24/`
 git status --porcelain -- .node24  →  0 行 ✅（未入库）
 git check-ignore -v .node24        →  .gitignore:245:.node24/   .node24（命中，规则生效）
@@ -283,8 +284,8 @@ foreach ($cfg in @("tsconfig.main.json","tsconfig.preload.json","tsconfig.render
 | # | 验收项 | 期望 | 实测 | 判定 |
 |---|---|---|---|---|
 | **A1** | N-1 已处置、P0 收口判据归零 | 0 行 | **0 行**（域外剩 3 行 `??`，全部 → B-01） | ✅ |
-| **A2** | Node 24 只对本应用生效 | `v24.21.0`；`where` 首行 = `.node24\node.exe` | `v24.21.0`；首行 = `E:\AI_Chating\cyrene-agent\.node24\node.exe`；**系统 node 仍 v22.23.2** | ✅ |
-| **A3** | `.node24` 未入库、`.gitignore` 只追加 | 前者 0 行；后者 `1 0` 形 | 前者 **0 行**；后者 **`3 0`**（**0 删除**） | ✅ |
+| **A2** | Node 24 只对本应用生效 | `v24.21.0`；`where` 首行 = `.node24\node.exe` | 设 PATH 后 `node -v` = `v24.21.0`、`where` 首行 = `E:\AI_Chating\cyrene-agent\.node24\node.exe`；**系统 node 仍 v22.23.2**<br>⚠️ 新 shell 里 `where` 首行是系统 node（`$env:PATH` 不跨进程）→ **预期行为**，脚本用全路径 | ✅ |
+| **A3** | `.node24` 未入库、`.gitignore` 只追加 | 前者 0 行；后者**无既有行被改** | 前者 **0 行**；后者相对锚点 = **`10  0`**（**0 删除**，纯追加；⚠️ **不是蓝图预告的 `1 0`** —— 本 Phase 改了 **2 处**：`.node24/` + 证据白名单，见 §五 偏差 7） | ✅ |
 | **A4** | pnpm 可用 **或**已记录降级 | `10.33.0`；若失败须有明确降级记录 | **pnpm = 10.33.0 ✅**；依赖树侧为**结构性降级**且已写明缺什么前置（§五 偏差 1 + 台账 H-15） | ✅（降级已记录） |
 | **A5** | 依赖未漂移 | 0 行 | **0 行**；且 `package-lock.json` SHA256 前后一致、`pnpm-lock.yaml` 未被创建 | ✅ |
 | **A6** | **三套编译基线已记录**（不可替代项） | 三个日志 + 各自 exit 码 + 计数 | 三日志齐备：**全部 exit 0 / `error TS` 0 条**（1793 / 399 / 6580 文件参与） | ✅ |
@@ -303,10 +304,13 @@ git -C $R status --porcelain
 ```powershell
 # ── A2 / A3 ──
 & cmd /c "`"$R\.node24\node.exe`" -v"   →  v24.21.0
-& cmd /c "node -v"                      →  v22.23.2     ← 系统那份**未被改动**（M8 的关键证据）
+$env:PATH = "$R\.node24;$env:PATH"      # 🔴 必须显式设：$env:PATH 不跨进程（坑 7）
+& cmd /c "node -v"                      →  v24.21.0        （本会话内生效）
 where.exe node                          →  首行 E:\AI_Chating\cyrene-agent\.node24\node.exe
+& cmd /c "`"D:\data\node\node.exe`" -v" →  v22.23.2        ← 系统那份**未被改动**（M8 的关键证据）
+where.exe node                          →  新 shell 里首行是 D:\data\node\node.exe（**预期**，非失败）
 git -C $R status --porcelain -- .node24 →  （无输出）✅
-git -C $R diff --numstat -- .gitignore  →  3   0   .gitignore ✅
+git -C $R diff --numstat 'pre-heb-1.3.0^{commit}' HEAD -- .gitignore  →  10  0  .gitignore  （纯追加 ✅）
 ```
 
 ```powershell
@@ -337,7 +341,7 @@ git -C $R status --porcelain -- package.json package-lock.json pnpm-lock.yaml pn
 | # | 情形 | 本次是否命中 |
 |---|---|---|
 | 1 | **时点断言**：A6 的三个数字取值于**执行 4.5 的那一刻** | ✅ 已注明时点（2026-10-04 22:17），此后任何源码改动都会改变它们 —— 那是 P2/P3 的事 |
-| 2 | **有意保留项**：`docs/design|internal-issue|refactor` 仍在 `??` 里 **不算 A1 失败** | ✅ 命中，已按 **J-10 / J-14 / J-15** 口径出口（3 行全部 → B-01） |
+| 2 | **有意保留项**：`docs/design` / `docs/internal-issue` / `docs/refactor` 仍在 `??` 里 **不算 A1 失败** | ✅ 命中，已按 **J-10 / J-14 / J-15** 口径出口（3 行全部 → B-01） |
 | 3 | **外部增长量**：`.cyrene-merge-analysis/heb-p1/` **只增不删** | ✅ 本 Phase 新增 6 个文件（3 基线 + 环境快照 + 安装日志 + vitest 冒烟） |
 | 4 | **降级不算失败**：4.3 走降级路径时 A4 记 `🚫` 而非 `❌` | ✅ 命中（依赖树侧结构性降级），已在 §五 偏差 1 写明**缺什么前置** |
 
@@ -481,12 +485,12 @@ git -C $R status --porcelain -- package.json package-lock.json pnpm-lock.yaml pn
 
 | 级别 | 动作 | 本次验证 |
 |---|---|---|
-| **单文件（`.gitignore`）** | `git -C $R checkout -- .gitignore` | ⚠️ 未实测（改动是纯追加 3 行；`--numstat` = `3 0` 已证无删除） |
+| **单文件（`.gitignore`）** | `git -C $R checkout pre-heb-1.3.0^{commit} -- .gitignore`（⚠️ 会**同时**撤掉两处改动：`.node24/` 与证据白名单） | ⚠️ 未实测；但已用**逐行断言**证明是纯追加（HEAD 245 行逐行未变 + 追加 7 行，见 §五 偏差 7） |
 | **移除 Node 链接** | 🔴 **删前必须确认它是联接**：`cmd /c dir /AL "$R" \| Select-String node24` → 实测输出 `<JUNCTION> .node24 [D:\data\node24]` ✅<br>确认后再 `cmd /c rmdir "$R\.node24"`（**只删联接，不删目标**） | ✅ **已实测 `<JUNCTION>` 标记存在**（蓝图标注的"待验证"项已闭合） |
 | **移除应用级 pnpm shim** | `cmd /c del "$R\.node24\pnpm*"` → 实际删的是 `D:\data\node24` 下的 shim（**不改系统 Node**）；或 `corepack disable` | ⚠️ 未实测（无回退需要） |
 | **撤销本 Phase 提交** | `git -C $R log --oneline -3` → 取 P1 的三个提交哈希后 `git reset --hard <P1 起始提交>`（实测 P1 起始 = **`f5c8bc84`**） | ✅ 已实测 `f5c8bc84` 是 P1 的第一个提交点（= P0 末态） |
 | **数据面（依赖树）** | 本 Phase **没有改动 `node_modules`**（实测前后均 132037 / 2234681003 字节）→ **无需回退**<br>若将来需要：`robocopy "$BK\node_modules" "$R\node_modules" /E`（**先不加 `/PURGE`**） | ✅ **已实测"未改动"**（比"能回退"更强） |
-| **放弃整个动作** | 本 Phase **不改任何源码**（只动 `.gitignore` 3 行 + 新建 `.node24` 联接 + 证据目录）；`git reset --hard` 任一锚点即可复原 | ✅ 逻辑可验证 |
+| **放弃整个动作** | 本 Phase **不改任何源码**（只动 `.gitignore` 共 2 处 + 新建 `.node24` 联接 + 证据目录）；`git reset --hard` 任一锚点即可复原 | ✅ 逻辑可验证 |
 
 > 经验 **F1**：**代码回滚与数据回滚分栏**。
 > **代码**：上述 `reset` 路径（P1 起始 = `f5c8bc84`）。
@@ -562,7 +566,7 @@ git -C $R status --porcelain -- package.json package-lock.json pnpm-lock.yaml pn
 | **不跑全量测试** | ✅ 只跑了 `src/shared/usage-badge.test.ts` 一条（3 tests） |
 | **不修 `D:\data\node` 的破损 npm** | ✅ 全程未触碰该系统目录（Node 24 走应用级联接） |
 | **不动备份** | ✅ `E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\` 未被写入/覆盖（只用 `Join-Path` 读了 manifest） |
-| **不改任何源码** | ✅ `src/` **未被触碰**；工作区改动仅 `.gitignore`（+3 / −0）+ 证据目录 + 文档 |
+| **不改任何源码** | ✅ `src/` **未被触碰**；工作区改动仅 `.gitignore`（2 处，纯追加 `10 0`）+ 证据目录 + 文档 |
 | **P0–P4 禁止提交合并结果** | ✅ 本 Phase 的 3 个提交全部是 `docs(...)` / `chore(...)` / 工具链与证据，**无任何合并内容** |
 
 ## 十、回写清单 ★（**未勾完不得提交**）
@@ -599,6 +603,28 @@ git -C $R status --porcelain -- package.json package-lock.json pnpm-lock.yaml pn
 - **本 Phase 无新增待拍板（H-A）**：M8 / M9 已在总蓝图拍板并闭合；4.4 的降级**不需要人改主意**（蓝图 §四 4.3 已授权降级路径）。
 - 唯一真值在 `HUMAN-人工验证台账.md`。
 
+
+---
+
+## 十一、撰写者复核补正（**规范 §5.2；复核人未参与本 Phase 施工**）
+
+> ⬜ **待撰写者回填**（执行者不自填 —— 规范 §5.2 明确该节由**未参与施工的撰写者**独立复核后填写）。
+>
+> **给复核人的入口提示**：
+> - **复核基线**：`pre-heb-1.3.0^{commit}` = `6871f1f4`（合并起点；⚠️ **其后的 4 个 P0 文档提交**才到 P1 起点）/ P1 起始提交 `f5c8bc84` / 本 Phase 的 4 个提交（`git log --oneline f5c8bc84..HEAD`）
+> - **本报告最值得独立复跑的 4 件事**（因为它们是本 Phase 的**判定性依据**）：
+>   ① 三套编译基线（是否真的 **exit 0 / 0 条**？用**与执行者不同的机制**重跑，如 `--pretty false` 或 `--listFiles` 计数）
+>   ② `.gitignore` 的改动是否真的**无既有行被改**（`--numstat` = `10 0`；并逐行断言"HEAD 245 行逐行相同 + 追加 7 行"），且 `.node24` 确实未入库
+>   ③ **系统 Node 是否真的未被改动**（`D:\data\node\node.exe -v` 仍是 v22.23.2）—— 这是 M8 的核心证据
+>   ④ `package-lock.json` SHA256 是否真的**前后一致**、`pnpm-lock.yaml` 是否真的**未被创建**
+> - **本报告自报的 4 处"机制级"结论，建议按归因四步法复核**：偏差 1（无锁文件 → 结构性失败）、
+>   偏差 4（判据段数错位 → 漏一行）、偏差 6（`Tee-Object` 空输出 + 管道退出码 → 差点假绿）、
+>   **偏差 7（全局 `*.log` 规则 → 3 个核心交付物"已落盘但未入库"，而 `git status` 显示得比实际干净）**。
+> - 🔴 **一条最值得"换机制复跑"的**：偏差 7 —— 执行者是用 `git ls-files` **逐文件回读**发现的。
+>   复核可用**完全不同的机制**再验一次：`git check-ignore -v <每个证据文件>` + `git status --ignored -- .cyrene-merge-analysis/heb-p1`，
+>   看是否还有**别的**证据文件仍处于"磁盘有、git 看不见"的状态。
+> - **已知的自指限制**：本报告与其描述的文件在同一提交里，HEAD 精确值不可作为判据（见 §二 说明）。
+
 ---
 
 ## 附：施工记录
@@ -616,7 +642,7 @@ git -C $R status --porcelain -- package.json package-lock.json pnpm-lock.yaml pn
 | §四 4.4 `pnpm install --frozen-lockfile` 正常执行 | **结构性失败**（exit 1 / `ERR_PNPM_NO_LOCKFILE`）→ 不降级，改用**直接实测比对备份清单** | 本仓库从无 `pnpm-lock.yaml`，该开关的**前提不成立**（见 §五 偏差 1） |
 | §四 4.5 用 `Tee-Object` 落基线日志 | 改为**独立临时文件重定向 + 立即读退出码**，日志头写入命令/版本/两个数字 | `Tee-Object` 对**空输出**不创建文件 + 管道里 `$LASTEXITCODE` 不可信（见 §五 偏差 6） |
 | §二 E1 称 `node24` "没有 `pnpm.cmd`（只有 corepack）" | 实测 `corepack enable` **之后**该目录**有了** `pnpm` / `pnpm.CMD` / `pnpm.ps1` | `corepack enable` 会写 shim 到 node 安装目录 —— 与 E1 不矛盾（E1 描述的是 enable **之前**的状态） |
-| §六 A3 期望 `.gitignore` `--numstat` 形如 `1 0` | 实测 **`3 0`**（空行 + 注释 + `.node24/`） | 蓝图 §四 4.1 只写"追加一行 `.node24/`"，但同节要求"只追加、不改既有行"；为可读性加了**空行 + 中文注释**，**仍是纯追加、0 删除** ✅ |
+| §六 A3 期望 `.gitignore` `--numstat` 形如 `1 0` | 实测 **`10 0`** —— ⚠️ **不是蓝图预告的 1 行**：本 Phase 改了 **2 处**（`.node24/` + 证据白名单，见 §五 偏差 7），共追加 **7 行**（含空行与注释）。已用**逐行断言**证明"HEAD 245 行逐行未变 + 纯追加" | ① 蓝图 §四 4.1 只预告了 `.node24/`，漏了证据白名单那一处；② 为可读性多加了空行与中文注释。**0 处既有内容被改** |
 | §七 期望"3 条 `??`（D 类遗留）+ 其它" | 实测最终工作区 = **3 条 `??`**（全为 D 类遗留 → B-01） | 与 **J-10 口径②** 一致 |
 
 ### 2 · 蓝图未覆盖、施工中发现的漏洞
@@ -637,7 +663,7 @@ git -C $R status --porcelain -- package.json package-lock.json pnpm-lock.yaml pn
 - 🔴 **`vitest.config.ts` 未改名为 `.mts`** —— 官方目标已改名（`R100`），但那是**合并内容**，提前改会把 P3 的处置面搞混。
 - 🔴 **未创建 `pnpm-lock.yaml`** —— 即使它能"让 4.4 跑通"。理由：违反 §一 非目标 + 制造版本漂移（见 §五 偏差 1）。
 - **`package-lock.json` 未删除** —— 官方目标已删它（`D` 类），但那是 **P3** 的处置面。
-- **`.node24` 联接未入库** —— 它是环境产物，已进 `.gitignore`（+3 / −0）。
+- **`.node24` 联接未入库** —— 它是环境产物，已进 `.gitignore`。
 - **`docs/design` / `docs/internal-issue` / `docs/refactor` 三处 `??` 未提交** —— 已登记 **BACKLOG B-01**，按 **J-10 口径②** 出口（P0 的有意保留）。
 
 ### 5 · 验收（实测数字）
@@ -649,7 +675,7 @@ git -C $R status --porcelain -- package.json package-lock.json pnpm-lock.yaml pn
 | `& cmd /c "node -v"`（系统） | **v22.23.2**（**未被改动**，M8 关键证据） |
 | `where.exe node` | 首行 = `E:\AI_Chating\cyrene-agent\.node24\node.exe` ✅ |
 | `git -C $R status --porcelain -- .node24` | **0 行** ✅ |
-| `git -C $R diff --numstat -- .gitignore` | **`3   0   .gitignore`**（0 删除）✅ |
+| `git -C $R diff --numstat 'pre-heb-1.3.0^{commit}' HEAD -- .gitignore` | **`10   0   .gitignore`**（**0 删除**，纯追加）✅ |
 | `& cmd /c "pnpm --version"` | **10.33.0** ✅ |
 | `& cmd /c "`"$R\.node24\pnpm.CMD`" install --frozen-lockfile"` | exit **1** / `ERR_PNPM_NO_LOCKFILE`（**结构性**，见偏差 1） |
 | `package-lock.json` SHA256（前 / 后） | `4BF57A48…A545A0` / `4BF57A48…A545A0` —— **未变** ✅ |
@@ -680,18 +706,3 @@ git -C $R status --porcelain -- package.json package-lock.json pnpm-lock.yaml pn
 | **撰写者复核补正（§十一）** | ⬜ **待撰写者回填** | 执行者不填（规范 §5.2） |
 
 ---
-
-## 十一、撰写者复核补正（**规范 §5.2；复核人未参与本 Phase 施工**）
-
-> ⬜ **待撰写者回填**（执行者不自填 —— 规范 §5.2 明确该节由**未参与施工的撰写者**独立复核后填写）。
->
-> **给复核人的入口提示**：
-> - **复核基线**：`pre-heb-1.3.0`（合并起点）/ P1 起始提交 `f5c8bc84` / 本 Phase 的 3 个提交
-> - **本报告最值得独立复跑的 4 件事**（因为它们是本 Phase 的**判定性依据**）：
->   ① 三套编译基线（是否真的 **exit 0 / 0 条**？用**与执行者不同的机制**重跑，如 `--pretty false` 或 `--listFiles` 计数）
->   ② `.gitignore` 的 `--numstat` 是否真的 **`3 0`**（0 删除），且 `.node24` 确实未入库
->   ③ **系统 Node 是否真的未被改动**（`D:\data\node\node.exe -v` 仍是 v22.23.2）—— 这是 M8 的核心证据
->   ④ `package-lock.json` SHA256 是否真的**前后一致**、`pnpm-lock.yaml` 是否真的**未被创建**
-> - **本报告自报的 3 处"机制级"结论，建议按归因四步法复核**：偏差 1（无锁文件 → 结构性失败）、
->   偏差 4（判据段数错位 → 漏一行）、偏差 6（`Tee-Object` 空输出 + 管道退出码 → 差点假绿）。
-> - **已知的自指限制**：本报告与其描述的文件在同一提交里，HEAD 精确值不可作为判据（见 §二 说明）。
