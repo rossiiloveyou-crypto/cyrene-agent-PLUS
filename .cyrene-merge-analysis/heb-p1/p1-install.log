@@ -1,0 +1,18 @@
+﻿Phase 1 §4.4 pnpm install --frozen-lockfile 实测记录
+时间: 2026-10-04 22:15:59
+命令: pnpm install --frozen-lockfile   (pnpm 10.33.0 / node v24.21.0)
+exit = 1
+---- 原始输出 ----
+ ERR_PNPM_NO_LOCKFILE  Cannot install with "frozen-lockfile" because pnpm-lock.yaml is absent
+
+Note that in CI environments this setting is true by default. If you still need to run install in such cases, use "pnpm install --no-frozen-lockfile"
+
+---- 结论 ----
+ERR_PNPM_NO_LOCKFILE：本仓库从未有 pnpm-lock.yaml（J-09 已证），且 pnpm-workspace.yaml 亦不存在。
+→ --frozen-lockfile 在本仓库【结构上必然失败】，与网络/权限无关（蓝图 §四 4.3 的两个失败处置都不覆盖此因）。
+→ 【未发生任何漂移】：package-lock.json SHA256 前后一致 = 4BF57A481F3B786248821CE8200493E7755671C279DCB269326E1F130AA545A0
+→ 【未创建锁文件】：pnpm-lock.yaml 仍未存在（守门判据 S2 未被触发：S2 判的是【锁文件被改写】，本次是【根本没有锁文件可改】）
+→ 处置：走【降级】(蓝图 §四 4.3 降级路径的同族情形)：依赖树状态改用【直接实测比对备份清单】确认，不用 pnpm 重装。
+→ 理由：pnpm install（不带 --frozen-lockfile）会用 package.json 的 ^ 范围【重新解析】并新建 pnpm-lock.yaml，
+   这正是 S2 要防的【版本漂移】，且会把 P3 才该引入的锁文件【提前搬进工作区】（违反蓝图 §一 非目标）。
+→ 实测替代证据：node_modules = 132037 文件 / 2234681003 字节，与备份清单【逐字节完全一致，偏差 0】

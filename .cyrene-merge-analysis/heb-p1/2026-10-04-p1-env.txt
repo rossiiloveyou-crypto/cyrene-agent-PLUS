@@ -1,0 +1,24 @@
+Phase 1 环境快照（工具链可用化与门禁基线）
+==========================================================
+时间          : 2026-10-04 22:15:26
+node(node24)  : v24.21.0     （应用级联接 E:\AI_Chating\cyrene-agent\.node24 -> D:\data\node24）
+node(系统)    : v22.23.2   （未被本 Phase 改动，M8）
+npm(node24)   : 11.19.0
+corepack      : 0.36.0
+pnpm          : 10.33.0    （经 corepack enable + prepare --activate 提供；见 §4.3。
+                             ⚠️ 本行原为空 —— 首次生成时该命令因嵌套 cmd 里的 `2>$null` 被当成路径而失败，
+                             报错被写进一个名叫 `$null` 的文件。**已删除该文件并改正本行**，见完成报告 §六。）
+tsc(已装)     : 5.9.3     （package.json 声明 ^5.6.0；官方目标要求 ^6.0.3 —— 有意保留，见蓝图 §二 E4）
+node_modules  : 132037 文件 / 2234681003 字节
+备份比对      : 备份清单 = 132037 文件 / 2234681003 字节 → **完全一致（偏差 0）**
+备份清单      : E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\BACKUP-MANIFEST.txt   （一致性 MATCH）
+----------------------------------------------------------
+锁文件现状（J-09：逐个 Test-Path，缺失写明"本就不存在"而非静默跳过）
+  package.json          : True
+  package-lock.json     : True   （877384 B，被跟踪；官方目标已删 → P3 处置）
+  pnpm-lock.yaml        : False  （**本就不存在**，只存在于官方 3470fea7）
+  pnpm-workspace.yaml   : False  （**本就不存在**）
+  yarn.lock             : False
+----------------------------------------------------------
+.gitignore    : 追加 3 行（空行 + 注释 + .node24/）；git diff --numstat = 3 0（**0 删除**）
+.node24       : 目录联接（cmd dir /AL 标记 <JUNCTION>），指向 D:\data\node24；已进 .gitignore，未入库

@@ -1,0 +1,34 @@
+﻿================================================================================
+Phase 1 §4.6 vitest 可用性冒烟（只跑一条最小用例，不跑全量）
+================================================================================
+命令     : "E:\AI_Chating\cyrene-agent\.node24\node.exe" "E:\AI_Chating\cyrene-agent\node_modules\vitest\vitest.mjs" run src/shared/usage-badge.test.ts
+执行时间 : 2026-10-04 22:17:36
+node     : v24.21.0
+vitest   : v5.0.1
+exit 码  : 0
+结果     : Test Files 1 passed (1) / Tests 3 passed (3) / Duration 155ms
+--------------------------------------------------------------------------------
+为什么选这条用例：USAGE_BADGE 是 11 项本地独有能力之一（基线文件数 2）——
+一条用例同时验证【vitest 能跑】＋【本地功能面可测】（蓝图 §四 4.6）。
+本步【不跑全量】：全量 = 563 文件 / 57 秒，属 P5 范围（D7 基线）。
+--------------------------------------------------------------------------------
+⚠️ 观察项（非失败）：vitest 报 'vitest.config.ts 被当 CommonJS 加载' 警告 ——
+官方目标已把它改名为 vitest.config.mts（蓝图 §二 E3 的 R100 重命名），P3 合并时自然消除。
+现在**不改名**：那是把合并内容提前搬进工作区（蓝图 §一 非目标）。
+--------------------------------------------------------------------------------
+原始输出：
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v5.0.1 E:/AI_Chating/cyrene-agent
+
+ ✓ src/shared/usage-badge.test.ts (3 tests) 3ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  22:17:32
+   Duration  155ms (transform 61%, import 24%, worker 9%, tests 6%)
+
+
+================================================================================
