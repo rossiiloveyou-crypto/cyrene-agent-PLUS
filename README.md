@@ -680,6 +680,13 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/rossiiloveyou-crypto">
+                    <img src="https://avatars.githubusercontent.com/u/328735263?v=4" width="48;" alt="rossiiloveyou-crypto"/>
+                    <br />
+                    <sub><b>rossiiloveyou-crypto</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/yuxingyuzhong">
                     <img src="https://avatars.githubusercontent.com/u/240125557?v=4" width="48;" alt="yuxingyuzhong"/>
                     <br />
@@ -719,13 +726,6 @@ MIT 仅约束本仓库的源代码，不适用于角色、Live2D 模型与美术
                     <img src="https://avatars.githubusercontent.com/u/20534568?v=4" width="48;" alt="boring9720"/>
                     <br />
                     <sub><b>chuxuan</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/rossiiloveyou-crypto">
-                    <img src="https://avatars.githubusercontent.com/u/328735263?v=4" width="48;" alt="rossiiloveyou-crypto"/>
-                    <br />
-                    <sub><b>rossiiloveyou-crypto</b></sub>
                 </a>
             </td>
 		</tr>
