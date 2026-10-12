@@ -635,9 +635,9 @@ export const runShellTool: ToolDefinition = {
     "- 需要管道/重定向组合的命令\n" +
     "- 建目录/建文件等文件工具做不到时的兜底（如 mkdir、echo 内容 > 文件、type nul > 新建空文件）\n\n" +
     "不要用于：\n" +
-    "- 读文件 → read_file（更安全）\n" +
-    "- 列目录 → list_dir\n" +
-    "- 搜索代码内容 → search_text\n" +
+    "- 读文件 → Read（更安全）\n" +
+    "- 查找文件名 → Glob\n" +
+    "- 搜索文件内容 → Grep\n" +
     "- 下载网页 → fetch_url\n" +
     "- 启动常驻进程（dev server / npx serve / watch / tail -f）→ 前台模式会在 2 分钟无输出后被强制终止，" +
     "确需后台长驻时传 run_in_background:true，随后用 shell_job 工具查询状态/终止\n" +
@@ -681,4 +681,3 @@ export const runShellTool: ToolDefinition = {
   },
   execute: executeRunShell,
 };
-

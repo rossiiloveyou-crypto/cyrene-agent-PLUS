@@ -47,6 +47,7 @@ export interface AskUserInteraction {
   allowCustomInput?: boolean;
   /** Structured clarification cards advance through these questions in the same bottom slot. */
   questions?: AskUserQuestion[];
+  allowAdditionalContext?: boolean;
   responseKind?: "choice" | "clarification" | "submission";
   currentQuestion?: number;
   totalQuestions?: number;
@@ -333,6 +334,7 @@ export function normalizeChoiceInteraction(value: unknown): AskUserInteraction |
       runId,
       revision,
       cardMode: asAskCardMode(card.mode),
+      allowAdditionalContext: card.additionalContextEnabled === true,
       intro: asNonEmptyString(card.intro),
       responseKind: "submission",
       question: questions[0].question,
@@ -482,6 +484,7 @@ export function isAskComplete(questions: AskUserQuestion[], drafts: AskDrafts): 
 export function buildAskSubmission(
   interaction: AskUserInteraction,
   drafts: AskDrafts,
+  additionalContext?: string,
 ): AskCardSubmission {
   const questions = interaction.questions ?? [];
   if (interaction.responseKind !== "submission"
@@ -494,6 +497,9 @@ export function buildAskSubmission(
     interactionId: interaction.id,
     runId: interaction.runId,
     revision: interaction.revision,
+    ...(interaction.allowAdditionalContext && additionalContext?.trim()
+      ? { additionalContext: additionalContext.trim() }
+      : {}),
     answers: questions.map((question) => {
       const draft = drafts[question.id];
       if (draft.source === "custom") {

@@ -3,50 +3,24 @@
 // 文件树：antd Tree.DirectoryTree，首次只拉根目录，展开目录节点时再拉该层；点击目录名即展开。
 // 文件预览：点击文件由 ChatPage 打开 file:<relPath> 标签，内容走
 // workspaceFiles.read（主进程 realpath 防越界、1MB 上限、二进制拒绝）。
-// 高亮：shiki 单例 + github-light 主题，按扩展名选语言；渐进式渲染（先纯文本后上色），
+// 高亮：shiki 单例 + GitHub 深浅主题，按扩展名选语言；渐进式渲染（先纯文本后上色），
 // 高亮失败或语言不支持时保持纯文本，不阻塞阅读。
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Tree } from "antd";
 import type { DataNode, EventDataNode } from "antd/es/tree";
 import { FileText } from "lucide-react";
-import { createHighlighter, type BundledLanguage, type Highlighter, type ThemedToken } from "shiki";
+import type { ThemedToken } from "shiki";
 import { useTranslation } from "../../../i18n";
 import type { WorkspaceFileEntry, WorkspaceFileErrorCode } from "../../../../../shared/workspace-files-types";
 import { MarkdownContent } from "./ChatMessageList";
 import { releaseFocusedDescendant } from "./focus-handoff";
 import { vscodeIconForFile } from "./vscodeFileIcon";
+import { getSyntaxHighlighter, syntaxLanguageForFile, syntaxThemeForUi } from "./syntaxHighlight";
 import "./FileTreePanel.css";
 
 /** 预览最多渲染的行数：再多一次性铺 DOM 会卡 */
 const PREVIEW_MAX_LINES = 2000;
-
-/** shiki 主题：亮色 GitHub 主题，配色和应用的浅色界面匹配 */
-const HIGHLIGHT_THEME = "github-light";
-
-/** 按扩展名支持的语法（与 HIGHLIGHT_LANGS 列表保持一致） */
-const EXT_LANG: Record<string, BundledLanguage> = {
-  ts: "typescript", tsx: "tsx", mts: "typescript",
-  js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
-  json: "json", jsonc: "jsonc",
-  css: "css", scss: "scss",
-  html: "html", htm: "html",
-  md: "markdown", markdown: "markdown",
-  py: "python",
-  sh: "bash", bash: "bash", zsh: "bash",
-  yml: "yaml", yaml: "yaml",
-  xml: "xml", svg: "xml",
-  toml: "toml", sql: "sql", go: "go", rs: "rust", java: "java",
-  c: "c", h: "c", cpp: "cpp", hpp: "cpp", cc: "cpp", cxx: "cpp",
-};
-
-/** 从相对路径取语言（不认识的扩展名返回 undefined → 纯文本） */
-function langForPath(relPath: string): BundledLanguage | undefined {
-  const name = relPath.slice(relPath.lastIndexOf("/") + 1);
-  const dot = name.lastIndexOf(".");
-  if (dot <= 0) return undefined;
-  return EXT_LANG[name.slice(dot + 1).toLowerCase()];
-}
 
 /** 是否是 Markdown 文件（预览/源码可切换） */
 function isMarkdownPath(relPath: string): boolean {
@@ -71,18 +45,6 @@ function CodeIcon() {
       <path d="M30 16L38 24L30 32" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
-}
-
-// shiki 高亮器全局单例：只创建一次，语言随初始化按需懒加载
-let highlighterPromise: Promise<Highlighter> | null = null;
-function getHighlighter(): Promise<Highlighter> {
-  if (!highlighterPromise) {
-    highlighterPromise = createHighlighter({
-      themes: [HIGHLIGHT_THEME],
-      langs: [...new Set(Object.values(EXT_LANG))],
-    });
-  }
-  return highlighterPromise;
 }
 
 /** 错误码 → i18n key（树与预览共用） */
@@ -242,15 +204,22 @@ export function FilePreviewContent({
   relPath,
   scrollToLine,
   lineSeq,
+  contentOverride,
+  displayPath,
 }: {
   sessionId: string;
   relPath: string;
+  /** 仅演示使用的本地静态内容；传入后不请求工作区 API。 */
+  contentOverride?: string;
+  /** 展示用完整路径，不影响语言判断和标签 ID。 */
+  displayPath?: string;
   /** 从消息文件链接跳转过来时定位到该行（居中滚动）；缺省不做定位 */
   scrollToLine?: number;
   /** 定位序号：同标签换行号时靠它变化触发重新滚动 */
   lineSeq?: number;
 }) {
   const { t } = useTranslation();
+  const [uiTheme, setUiTheme] = useState(() => typeof document === "undefined" ? "pearl-white" : document.documentElement.dataset.uiTheme ?? "pearl-white");
   const [state, setState] = useState<
     | { phase: "loading" }
     | { phase: "error"; code: WorkspaceFileErrorCode }
@@ -265,11 +234,22 @@ export function FilePreviewContent({
   const scrollHostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => setUiTheme(root.dataset.uiTheme ?? "pearl-white"));
+    observer.observe(root, { attributes: true, attributeFilter: ["data-ui-theme"] });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     setState({ phase: "loading" });
     setTokens(null);
     // 切换文件时回到默认视图；带行号定位的打开方式下回源码视图
     setMdView(scrollToLine === undefined ? "preview" : "source");
+    if (contentOverride !== undefined) {
+      setState({ phase: "ok", content: contentOverride, size: new Blob([contentOverride]).size });
+      return;
+    }
     const api = window.workspaceFiles;
     if (!api) {
       setState({ phase: "error", code: "READ_FAILED" });
@@ -283,17 +263,6 @@ export function FilePreviewContent({
           return;
         }
         setState({ phase: "ok", content: result.content, size: result.size });
-        // 读取成功后异步上色：渐进式，失败保持纯文本
-        const lang = langForPath(relPath);
-        if (!lang) return;
-        getHighlighter()
-          .then((highlighter) => highlighter.codeToTokens(result.content, { lang, theme: HIGHLIGHT_THEME }))
-          .then((highlight) => {
-            if (!cancelled) setTokens(highlight.tokens);
-          })
-          .catch(() => {
-            // 高亮失败不影响阅读，静默保持纯文本
-          });
       })
       .catch(() => {
         if (!cancelled) setState({ phase: "error", code: "READ_FAILED" });
@@ -301,7 +270,31 @@ export function FilePreviewContent({
     return () => {
       cancelled = true;
     };
-  }, [sessionId, relPath]);
+  }, [sessionId, relPath, contentOverride]);
+
+  useEffect(() => {
+    if (state.phase !== "ok") return;
+    const lang = syntaxLanguageForFile(relPath);
+    if (!lang) return;
+    let cancelled = false;
+    setTokens(null);
+    const theme = syntaxThemeForUi(uiTheme);
+    // Only highlight the rendered preview window. Large files can be close to
+    // the read limit; tokenizing the whole file delays syntax colors needlessly.
+    const visibleCode = state.content.split("\n").slice(0, PREVIEW_MAX_LINES).join("\n");
+    getSyntaxHighlighter()
+      .then((highlighter) => highlighter.codeToTokens(visibleCode, { lang, theme }))
+      .then((highlight) => {
+        if (!cancelled) setTokens(highlight.tokens);
+      })
+      .catch((err) => {
+        // 高亮失败不影响阅读，保持纯文本；留一条 warn 便于排查（否则失败完全无声）
+        console.warn("[file-preview] 语法高亮失败，降级为纯文本", relPath, err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [state, relPath, uiTheme]);
 
   // 行号定位：文件内容就绪后把目标行滚到视口中间；lineSeq 变化（同标签换行号）时重滚
   useEffect(() => {
@@ -320,19 +313,20 @@ export function FilePreviewContent({
   }
 
   // 高亮结果与纯文本统一成"每行一个 token 列表"的结构再渲染
-  const totalLines = tokens ? tokens.length : state.content.split("\n").length;
-  const lineTokens: ThemedToken[][] = tokens ?? state.content.split("\n").map((line) => [{ content: line, offset: 0 }]);
+  const contentLines = state.content.split("\n");
+  const totalLines = contentLines.length;
+  const lineTokens: ThemedToken[][] = tokens ?? contentLines.slice(0, PREVIEW_MAX_LINES).map((line) => [{ content: line, offset: 0 }]);
   const lines = lineTokens.slice(0, PREVIEW_MAX_LINES);
 
   // Markdown 渲染预览同样限制行数，避免超大文档一次性铺满 DOM
   const renderedContent = isMarkdown && totalLines > PREVIEW_MAX_LINES
-    ? state.content.split("\n").slice(0, PREVIEW_MAX_LINES).join("\n")
+    ? contentLines.slice(0, PREVIEW_MAX_LINES).join("\n")
     : state.content;
 
   return (
     <div className="cy-file-preview" ref={scrollHostRef}>
       <div className="cy-file-preview__header">
-        <span className="cy-file-preview__path" title={relPath}>{relPath}</span>
+        <span className="cy-file-preview__path" title={displayPath ?? relPath}>{displayPath ?? relPath}</span>
         <span className="cy-file-preview__size">{(state.size / 1024).toFixed(1)} KB</span>
         {isMarkdown && (
           <span className="cy-file-preview__md-toggle" role="group" aria-label={t("rightInspector.toggle")}>

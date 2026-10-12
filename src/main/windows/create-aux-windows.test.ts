@@ -8,10 +8,13 @@ const mocks = vi.hoisted(() => ({
   maximized: false,
   readyToShow: null as (() => void) | null,
   setBounds: vi.fn(),
+  themeChoice: "pearl-white" as "pearl-white" | "system",
+  systemDark: false,
 }));
 
 vi.mock("electron", () => ({
   app: { getAppPath: () => "/app" },
+  nativeTheme: { get shouldUseDarkColors() { return mocks.systemDark; } },
   BrowserWindow: class {
     webContents = { on: vi.fn() };
     on = vi.fn();
@@ -35,7 +38,7 @@ vi.mock("electron", () => ({
 }));
 vi.mock("../env", () => ({ isDev: false }));
 vi.mock("../settings/settings-facade", () => ({
-  loadGeneralSettings: () => ({ rememberWindowState: true }),
+  loadGeneralSettings: () => ({ rememberWindowState: true, uiTheme: mocks.themeChoice }),
 }));
 vi.mock("../window-layout", () => ({
       DEFAULT_WORKSPACE_WINDOW_SIZE: { width: 1200, height: 800 },
@@ -101,6 +104,8 @@ describe("workspace window defaults and persistence", () => {
     mocks.maximized = false;
     mocks.readyToShow = null;
     mocks.setBounds.mockClear();
+    mocks.themeChoice = "pearl-white";
+    mocks.systemDark = false;
   });
 
   it("creates a centered, screen-sized workspace with persistent bounds and maximized state", () => {
@@ -116,6 +121,13 @@ describe("workspace window defaults and persistence", () => {
       name: "cyrene.workspace",
       windowStatePersistence: { bounds: true, displayMode: true },
     });
+  });
+
+  it("uses the current system appearance for the workspace background", () => {
+    mocks.themeChoice = "system";
+    mocks.systemDark = true;
+    createReactChatWindowShell();
+    expect(lastBrowserWindowOptions().backgroundColor).toBe("#141414");
   });
 
   it("upgrades only the old default window size after saved bounds are restored", () => {

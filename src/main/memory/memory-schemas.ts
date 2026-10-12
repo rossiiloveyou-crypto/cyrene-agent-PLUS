@@ -507,3 +507,160 @@ export function validateMemoryReflectionBusiness(
   // 空数组是合法的 —— 表示没有需要更新的内容
   return { status: "accepted", value: items };
 }
+
+// ── Summary Memory Schema ──
+
+export interface SummaryMemoryResult {
+  sessionSummary: string;
+  /** Empty means there is no new durable workspace fact to save. */
+  workspaceSummary: string;
+}
+
+export const SUMMARY_MEMORY_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    sessionSummary: { type: "string" },
+    workspaceSummary: { type: "string" },
+  },
+  required: ["sessionSummary", "workspaceSummary"],
+};
+
+export function parseSummaryMemoryResult(value: unknown): SummaryMemoryResult {
+  const obj = requiredObject(value, "summary memory result");
+  if (typeof obj.sessionSummary !== "string" || typeof obj.workspaceSummary !== "string") {
+    throw new Error("summary memory fields must be strings");
+  }
+  return { sessionSummary: obj.sessionSummary, workspaceSummary: obj.workspaceSummary };
+}
+
+export function validateSummaryMemoryBusiness(
+  result: SummaryMemoryResult,
+  limits: { sessionChars: number; workspaceChars: number },
+): BusinessValidationResult<SummaryMemoryResult> {
+  const sessionLength = Array.from(result.sessionSummary).length;
+  const workspaceLength = Array.from(result.workspaceSummary).length;
+  if (sessionLength === 0 || sessionLength > limits.sessionChars || workspaceLength > limits.workspaceChars) {
+    return {
+      status: "rejected",
+      error: {
+        layer: "business",
+        code: `SUMMARY_LENGTH_SESSION_${sessionLength}_WORKSPACE_${workspaceLength}`,
+        disposition: "repair",
+      },
+    };
+  }
+  return { status: "accepted", value: result };
+}
+
+// ── Wiki Memory Schema ──
+
+export interface WikiExtractionCandidate {
+  sourceId: string;
+  subject: string;
+  predicate: string;
+  value: string;
+  scope: "global" | "workspace";
+  statementKind: "assertion" | "change" | "correction" | "tentative" | "historical";
+  pageType: "self" | "person" | "concept" | "topic" | "project" | "experience";
+  tags: Array<"chat" | "learn" | "work" | "code">;
+  aliases: string[];
+  validFrom: string;
+  validTo: string;
+  evidenceQuote: string;
+}
+
+export interface WikiExtractionResult {
+  candidates: WikiExtractionCandidate[];
+}
+
+const WIKI_STATEMENT_KINDS = new Set(["assertion", "change", "correction", "tentative", "historical"]);
+const WIKI_PAGE_TYPES = new Set(["self", "person", "concept", "topic", "project", "experience"]);
+const WIKI_TAGS = new Set(["chat", "learn", "work", "code"]);
+
+export const WIKI_MEMORY_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    candidates: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          sourceId: { type: "string" },
+          subject: { type: "string" },
+          predicate: { type: "string" },
+          value: { type: "string" },
+          scope: { type: "string", enum: ["global", "workspace"] },
+          statementKind: { type: "string", enum: [...WIKI_STATEMENT_KINDS] },
+          pageType: { type: "string", enum: [...WIKI_PAGE_TYPES] },
+          tags: { type: "array", items: { type: "string", enum: [...WIKI_TAGS] } },
+          aliases: { type: "array", items: { type: "string" } },
+          validFrom: { type: "string" },
+          validTo: { type: "string" },
+          evidenceQuote: { type: "string" },
+        },
+        required: [
+          "sourceId", "subject", "predicate", "value", "scope", "statementKind",
+          "pageType", "tags", "aliases", "validFrom", "validTo", "evidenceQuote",
+        ],
+      },
+    },
+  },
+  required: ["candidates"],
+};
+
+export function parseWikiExtractionResult(value: unknown): WikiExtractionResult {
+  const obj = requiredObject(value, "wiki extraction result");
+  if (!Array.isArray(obj.candidates)) throw new Error("wiki candidates must be an array");
+  const candidates = obj.candidates.map((item, index): WikiExtractionCandidate => {
+    const candidate = requiredObject(item, `wiki candidate ${index}`);
+    const scope = requiredString(candidate.scope, "scope");
+    const statementKind = requiredString(candidate.statementKind, "statementKind");
+    const pageType = requiredString(candidate.pageType, "pageType");
+    if (scope !== "global" && scope !== "workspace") throw new Error("invalid wiki scope");
+    if (!WIKI_STATEMENT_KINDS.has(statementKind)) throw new Error("invalid wiki statement kind");
+    if (!WIKI_PAGE_TYPES.has(pageType)) throw new Error("invalid wiki page type");
+    const tags = stringArray(candidate.tags, "tags");
+    const aliases = stringArray(candidate.aliases, "aliases");
+    if (tags.some((tag) => !WIKI_TAGS.has(tag))) throw new Error("invalid wiki tag");
+    if (typeof candidate.validFrom !== "string" || typeof candidate.validTo !== "string") {
+      throw new Error("invalid wiki validity interval");
+    }
+    return {
+      sourceId: requiredString(candidate.sourceId, "sourceId"),
+      subject: requiredString(candidate.subject, "subject"),
+      predicate: requiredString(candidate.predicate, "predicate"),
+      value: requiredString(candidate.value, "value"),
+      scope,
+      statementKind: statementKind as WikiExtractionCandidate["statementKind"],
+      pageType: pageType as WikiExtractionCandidate["pageType"],
+      tags: tags as WikiExtractionCandidate["tags"],
+      aliases,
+      validFrom: candidate.validFrom.trim(),
+      validTo: candidate.validTo.trim(),
+      evidenceQuote: requiredString(candidate.evidenceQuote, "evidenceQuote"),
+    };
+  });
+  return { candidates };
+}
+
+export function validateWikiExtractionBusiness(
+  result: WikiExtractionResult,
+): BusinessValidationResult<WikiExtractionResult> {
+  if (result.candidates.length > 30 || result.candidates.some((candidate) => (
+    candidate.subject.length > 100
+      || candidate.predicate.length > 100
+      || candidate.value.length > 600
+      || candidate.evidenceQuote.length > 300
+      || candidate.aliases.length > 10
+      || candidate.aliases.some((alias) => alias.length > 100)
+  ))) {
+    return {
+      status: "rejected",
+      error: { layer: "business", code: "WIKI_EXTRACTION_LIMIT", disposition: "repair" },
+    };
+  }
+  return { status: "accepted", value: result };
+}

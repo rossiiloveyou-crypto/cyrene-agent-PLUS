@@ -1,18 +1,15 @@
 import * as fs from "fs";
 import * as path from "path";
-import {
-  DEFAULT_WINDOW_CORNER_RADIUS,
-  normalizeWindowCornerRadius,
-} from "../../shared/window-corner-radius";
-import { DEFAULT_UI_FONT, normalizeUiFont } from "../../shared/ui-font";
 import { DEFAULT_MESSAGE_TYPOGRAPHY, normalizeMessageTypography } from "../../shared/message-typography";
 import {
   DEFAULT_CUSTOM_STYLE,
   normalizeCustomStyleConfig,
   normalizeStyleId,
 } from "../../shared/style-sampling";
-import { normalizeUiTheme } from "../../shared/ui-theme";
+import { normalizeUiThemeChoice } from "../../shared/ui-theme";
+import { MAX_PARALLEL_TOOL_CALLS } from "../../shared/task-session";
 import { normalizeUiIcon } from "../../shared/ui-icon";
+import { normalizeUiLanguage } from "../../shared/ui-language";
 import {
   normalizeChatSocialContextEnabled,
   normalizeDefaultChatMode,
@@ -38,6 +35,7 @@ import {
 const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   plugins: {},
   maxParallelToolCalls: 4,
+  taskCharacterPersonaEnabled: true,
   citaEnabled: false,
   groupContextLimit: DEFAULT_GROUP_CONTEXT_LIMIT,
   citaSemanticEngine: "remote",
@@ -56,9 +54,7 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   launchAtLogin: false,
   language: "zh-CN",
   uiTheme: "pearl-white",
-  windowCornerRadius: DEFAULT_WINDOW_CORNER_RADIUS,
   uiThemeRadius: false,
-  uiFont: DEFAULT_UI_FONT,
   uiIcon: "cyrene-sun",
   messageTypography: DEFAULT_MESSAGE_TYPOGRAPHY,
   defaultChatMode: "chat",
@@ -119,6 +115,7 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   asrAliyunAppKey: "",
   asrAliyunAccessKeyId: "",
   asrAliyunAccessKeySecret: "",
+  asrMinimaxKey: "",
   asrLanguage: "zh",
   asrVadSilenceMs: 1000,
   asrVadThreshold: 0.01,
@@ -176,7 +173,7 @@ export function normalizeGeneralSettings(
   const normalizeMaxParallelToolCalls = (value: unknown): number => {
     const numberValue = typeof value === "number" ? value : Number(value);
     return Number.isFinite(numberValue)
-      ? Math.max(1, Math.min(8, Math.trunc(numberValue)))
+      ? Math.max(1, Math.min(MAX_PARALLEL_TOOL_CALLS, Math.trunc(numberValue)))
       : DEFAULT_GENERAL_SETTINGS.maxParallelToolCalls;
   };
   return {
@@ -187,6 +184,15 @@ export function normalizeGeneralSettings(
     ),
     maxParallelToolCalls: normalizeMaxParallelToolCalls(input?.maxParallelToolCalls),
     groupContextLimit: normalizeGroupContextLimit(input?.groupContextLimit),
+    taskCharacterPersonaEnabled: input?.taskCharacterPersonaEnabled === undefined
+      ? DEFAULT_GENERAL_SETTINGS.taskCharacterPersonaEnabled
+      : Boolean(input.taskCharacterPersonaEnabled),
+    taskModelProfileId: typeof input?.taskModelProfileId === "string" && input.taskModelProfileId
+      ? input.taskModelProfileId
+      : undefined,
+    taskModel: typeof input?.taskModel === "string" && input.taskModel
+      ? input.taskModel
+      : undefined,
     citaEnabled: cita.enabled,
     citaSemanticEngine: cita.semanticEngine,
     chatSocialContextEnabled: normalizeChatSocialContextEnabled(input?.chatSocialContextEnabled),
@@ -232,12 +238,10 @@ export function normalizeGeneralSettings(
       ? DEFAULT_GENERAL_SETTINGS.toastSoundEnabled
       : Boolean(input.toastSoundEnabled),
     launchAtLogin: Boolean(input?.launchAtLogin),
-    // 界面语言只认已翻译完成的中/英，非法值（含旧配置的 ja/ko）一律回落中文
-    language: input?.language === "en" ? "en" : "zh-CN",
-    uiTheme: normalizeUiTheme(input?.uiTheme),
-    windowCornerRadius: normalizeWindowCornerRadius(input?.windowCornerRadius),
+    // 界面语言只认已翻译完成的语种，非法值（含旧配置的 ja/ko）一律回落中文
+    language: normalizeUiLanguage(input?.language),
+    uiTheme: normalizeUiThemeChoice(input?.uiTheme),
     uiThemeRadius: input?.uiThemeRadius ?? true,
-    uiFont: normalizeUiFont(input?.uiFont),
     uiIcon: normalizeUiIcon(input?.uiIcon),
     messageTypography: normalizeMessageTypography(input?.messageTypography),
     defaultChatMode: normalizeDefaultChatMode(input?.defaultChatMode),
@@ -296,12 +300,13 @@ export function normalizeGeneralSettings(
     emailSmtpUser: typeof input?.emailSmtpUser === "string" ? input.emailSmtpUser : "",
     emailSmtpPass: typeof input?.emailSmtpPass === "string" ? input.emailSmtpPass : "",
     emailFromName: typeof input?.emailFromName === "string" ? input.emailFromName : "",
-    asrEngine: ["off", "aliyun", "mossland", "local"].includes(String(input?.asrEngine))
-      ? (input!.asrEngine as "off" | "aliyun" | "mossland" | "local")
+    asrEngine: ["off", "aliyun", "mossland", "minimax", "local"].includes(String(input?.asrEngine))
+      ? (input!.asrEngine as "off" | "aliyun" | "mossland" | "minimax" | "local")
       : "off",
     asrAliyunAppKey: typeof input?.asrAliyunAppKey === "string" ? input.asrAliyunAppKey : "",
     asrAliyunAccessKeyId: typeof input?.asrAliyunAccessKeyId === "string" ? input.asrAliyunAccessKeyId : "",
     asrAliyunAccessKeySecret: typeof input?.asrAliyunAccessKeySecret === "string" ? input.asrAliyunAccessKeySecret : "",
+    asrMinimaxKey: typeof input?.asrMinimaxKey === "string" ? input.asrMinimaxKey : "",
     asrLanguage: ["zh", "en", "auto"].includes(String(input?.asrLanguage))
       ? (input!.asrLanguage as "zh" | "en" | "auto")
       : "zh",

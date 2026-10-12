@@ -25,7 +25,7 @@
   outline: none;
   color: var(--rb-text-primary, #29262d);
   background:
-    radial-gradient(ellipse at 50% 38%, rgb(255 230 240 / 66%), transparent 52%),
+    radial-gradient(ellipse at 50% 38%, color-mix(in srgb, var(--rb-accent) 12%, transparent), transparent 52%),
     var(--rb-surface-workspace, #fff);
   box-shadow: 0 30px 90px rgb(30 22 34 / 25%), 0 4px 16px rgb(30 22 34 / 10%);
   app-region: no-drag;
@@ -39,7 +39,7 @@
   gap: 11px;
   padding: 18px 19px 16px;
   border-bottom: 1px solid color-mix(in srgb, var(--rb-border-default, #e8e5e8) 72%, transparent);
-  background: rgb(255 255 255 / 58%);
+  background: color-mix(in srgb, var(--rb-surface-elevated) 78%, transparent);
 }
 
 .cy-call-preview__heading-icon {
@@ -83,7 +83,7 @@
   transition: color 140ms ease, background-color 140ms ease;
 }
 
-.cy-call-preview__close:hover { color: var(--rb-text-primary, #29262d); background: rgb(40 35 45 / 5%); }
+.cy-call-preview__close:hover { color: var(--rb-text-primary, #29262d); background: var(--rb-surface-hover); }
 
 .cy-call-preview__stage {
   position: relative;
@@ -117,7 +117,7 @@
   border: 1px solid rgb(93 181 139 / 18%);
   border-radius: 999px;
   color: #4d9b72;
-  background: rgb(255 255 255 / 68%);
+  background: color-mix(in srgb, var(--rb-surface-elevated) 86%, transparent);
   font: 500 11px/1 var(--rb-font-sans, inherit);
 }
 
@@ -171,7 +171,7 @@
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / 94%);
   border-radius: 44px;
-  background: linear-gradient(145deg, #fff 5%, #f7dce8 50%, #eadff9 100%);
+  background: linear-gradient(145deg, var(--rb-surface-elevated) 5%, color-mix(in srgb, var(--rb-accent) 20%, var(--rb-surface-elevated)) 50%, color-mix(in srgb, var(--rb-accent) 12%, var(--rb-surface-workspace)) 100%);
   box-shadow: 0 18px 42px rgb(192 122 162 / 24%), 0 0 0 8px rgb(255 255 255 / 62%);
   cursor: pointer;
   transition: transform 180ms ease, box-shadow 180ms ease;
@@ -253,7 +253,7 @@
   cursor: pointer;
   transition: color 140ms ease, background-color 140ms ease;
 }
-.cy-call-preview__back:hover { color: var(--rb-accent, #ff5b8a); background: rgb(255 91 138 / 7%); }
+.cy-call-preview__back:hover { color: var(--rb-accent, #ff5b8a); background: color-mix(in srgb, var(--rb-accent) 12%, var(--rb-surface-elevated)); }
 .cy-call-preview__back:focus-visible { outline: 2px solid var(--rb-accent, #ff5b8a); outline-offset: 2px; }
 .cy-call-preview__conversation { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 17px; overflow-y: auto; padding: 5px 3px 15px; scrollbar-width: thin; scrollbar-color: rgb(210 198 207 / 65%) transparent; }
 .cy-call-preview__message { display: grid; max-width: 84%; gap: 5px; }
@@ -261,9 +261,9 @@
 .cy-call-preview__message.is-cyrene { align-self: flex-start; justify-items: start; }
 .cy-call-preview__message-speaker { padding: 0 3px; color: var(--rb-text-secondary, #85818a); font: 450 10px/1.2 var(--rb-font-sans, inherit); }
 .cy-call-preview__message p { margin: 0; padding: 11px 14px; border-radius: 15px; font: 400 13px/1.65 var(--rb-font-sans, inherit); overflow-wrap: anywhere; }
-.cy-call-preview__message.is-you p { border: 1px solid rgb(255 91 138 / 11%); border-bottom-right-radius: 5px; color: #51414a; background: linear-gradient(145deg, #fff0f6, #fce7f0); }
-.cy-call-preview__message.is-cyrene p { border: 1px solid color-mix(in srgb, var(--rb-border-default, #e8e5e8) 82%, white); border-bottom-left-radius: 5px; color: var(--rb-text-primary, #29262d); background: rgb(255 255 255 / 82%); box-shadow: 0 3px 12px rgb(50 35 50 / 4%); }
-.cy-call-preview__message time { padding: 0 3px; color: #aaa4ac; font: 400 10px/1 var(--rb-font-sans, inherit); }
+.cy-call-preview__message.is-you p { border: 1px solid color-mix(in srgb, var(--rb-accent) 32%, var(--rb-border-default)); border-bottom-right-radius: 5px; color: var(--rb-text-primary); background: color-mix(in srgb, var(--rb-accent) 18%, var(--rb-surface-elevated)); }
+.cy-call-preview__message.is-cyrene p { border: 1px solid var(--rb-border-default); border-bottom-left-radius: 5px; color: var(--rb-text-primary, #29262d); background: var(--rb-surface-elevated); box-shadow: var(--rb-shadow-card); }
+.cy-call-preview__message time { padding: 0 3px; color: var(--rb-text-secondary); font: 400 10px/1 var(--rb-font-sans, inherit); }
 .cy-call-preview__conversation-note { display: flex; flex: none; align-items: center; justify-content: center; gap: 6px; margin: 12px 0 0; padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--rb-border-default, #e8e5e8) 70%, transparent); color: var(--rb-text-secondary, #96919a); font: 400 10px/1.4 var(--rb-font-sans, inherit); }
 
 .cy-call-preview__footer {
@@ -275,11 +275,11 @@
   gap: 12px;
   padding: 13px 18px;
   border-top: 1px solid color-mix(in srgb, var(--rb-border-default, #e8e5e8) 72%, transparent);
-  background: rgb(255 255 255 / 65%);
+  background: color-mix(in srgb, var(--rb-surface-elevated) 82%, transparent);
 }
 
 .cy-call-preview__mic-state { display: flex; min-width: 0; align-items: center; gap: 9px; color: var(--rb-text-secondary, #85818a); font: 400 11px/1.4 var(--rb-font-sans, inherit); }
-.cy-call-preview__mic-icon { display: grid; width: 34px; height: 34px; flex: none; place-items: center; border: 1px solid var(--rb-border-default, #e8e5e8); border-radius: 12px; color: #817985; background: rgb(255 255 255 / 85%); }
+.cy-call-preview__mic-icon { display: grid; width: 34px; height: 34px; flex: none; place-items: center; border: 1px solid var(--rb-border-default, #e8e5e8); border-radius: 12px; color: var(--rb-text-secondary); background: var(--rb-surface-elevated); }
 .cy-call-preview__end-preview { display: inline-flex; height: 38px; flex: none; align-items: center; justify-content: center; gap: 8px; padding: 0 14px; border: 0; border-radius: 999px; color: #fff; background: var(--rb-accent, #ff5b8a); box-shadow: 0 5px 14px rgb(255 91 138 / 23%); font: 500 12px/1 var(--rb-font-sans, inherit); cursor: pointer; transition: background-color 140ms ease, transform 140ms ease, box-shadow 140ms ease; }
 .cy-call-preview__end-preview:hover { transform: translateY(-1px); background: color-mix(in srgb, var(--rb-accent, #ff5b8a) 88%, #e83d75); box-shadow: 0 7px 17px rgb(255 91 138 / 28%); }
 

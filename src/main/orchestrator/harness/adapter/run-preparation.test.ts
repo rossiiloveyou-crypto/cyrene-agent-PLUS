@@ -39,7 +39,7 @@ describe("harness run preparation", () => {
     runStore.get.mockReset();
   });
 
-  it("materializes the startup transcript before creating the run store", async () => {
+  it("materializes the startup transcript while creating metadata-only run state", async () => {
     const prepared = await prepareHarnessRun({
       runId: "run-preparation",
       conversationId: "thread-1",
@@ -53,11 +53,11 @@ describe("harness run preparation", () => {
     expect(trace).toEqual(["materialize", "create"]);
     expect(prepared.runId).toBe("run-preparation");
     expect(prepared.systemPrompt).toBe("stable");
-    expect(runStore.create).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prepared.runMessages).toContainEqual({ role: "user", content: "materialized" });
+    expect(runStore.create).toHaveBeenCalledWith({
       conversationId: "thread-1",
       runId: "run-preparation",
-      messages: expect.arrayContaining([{ role: "user", content: "materialized" }]),
-    }));
+    });
   });
 
   it("does not inspect interrupted runs for an ordinary new turn", async () => {

@@ -96,12 +96,48 @@ describe("conversation transcript projection", () => {
     expect(buildFullModelContext(entries, noRuns).messages[0].content).toBe("hello");
   });
 
-  it("最新压缩点替换模型前缀但 UI 仍保留完整历史", () => {
+  it("最新压缩点替换模型前缀但 UI 仍保留完整历史并插入压缩标记", () => {
     nextSeq = 0;
     const entries = compactedFixture();
     expect(buildModelContextFromCompactedView(entries, noRuns).messages.map((m) => m.content))
       .toEqual(["summary", "recent user", "recent answer"]);
-    expect(reduceTranscriptProjection(entries).messages).toHaveLength(4);
+    const ui = reduceTranscriptProjection(entries).messages;
+    expect(ui).toHaveLength(5);
+    // 标记落在被压缩前缀（u1/a1）之后、新消息（u2）之前，且不进模型上下文。
+    expect(ui[2]).toMatchObject({
+      id: "checkpoint-1",
+      role: "model",
+      content: "",
+      compaction: { trigger: "automatic" },
+    });
+  });
+
+  it("多次压缩的标记在 UI 并存，模型上下文只认最新检查点", () => {
+    nextSeq = 0;
+    const entries = compactedFixture();
+    // 第二次压缩：以 checkpoint-1 为基线再压掉 u2/a2
+    const secondSeq = ++nextSeq;
+    entries.push({
+      seq: secondSeq,
+      id: "checkpoint-2",
+      at: secondSeq,
+      kind: "compaction_checkpoint",
+      payload: {
+        baseThroughSeq: secondSeq - 1,
+        sourceThroughSeq: secondSeq - 1,
+        sourceDigest: "digest-2",
+        replacement: { role: "system", content: "second summary" },
+        trigger: "manual",
+      },
+    });
+    entries.push(user("u3", "after second"), assistant("a3", "third answer"));
+    // 模型上下文：只剩第二份摘要 + 后续消息
+    expect(buildModelContextFromCompactedView(entries, noRuns).messages.map((m) => m.content))
+      .toEqual(["second summary", "after second", "third answer"]);
+    // UI 投影：两条标记各就各位，历史完整保留
+    const ui = reduceTranscriptProjection(entries).messages;
+    expect(ui.filter((item) => item.compaction).map((item) => [item.id, item.compaction?.trigger]))
+      .toEqual([["checkpoint-1", "automatic"], ["checkpoint-2", "manual"]]);
   });
 
   it.each([
@@ -148,6 +184,8 @@ describe("conversation transcript projection", () => {
       });
     expect(buildModelContextFromCompactedView(entries, noRuns).messages.map((message) => message.content))
       .toEqual(mutation === "keep_user" ? ["first"] : ["first", "answer"]);
+    // 检查点失效后，UI 投影里的压缩标记也随覆盖前缀一起消失。
+    expect(reduceTranscriptProjection(entries).messages.some((item) => item.compaction)).toBe(false);
   });
 
   it("compaction keeps uncertain effects from the compacted canonical prefix", () => {
@@ -172,10 +210,25 @@ describe("conversation transcript projection", () => {
     ];
     const runReader: TranscriptRunReader = {
       get: () => ({
+        schemaVersion: 1,
+        conversationId: "c1",
+        runId: "run-1",
+        status: "interrupted",
+        createdAt: 1,
+        updatedAt: 1,
+        messages: [],
+        state: { todoItems: [], uncertainEffects: [] },
+        toolOutputs: [],
         toolCalls: [{
           toolCallId: "mail-1", toolName: "send_email", sideEffect: "non_idempotent_side_effect",
           status: "started", updatedAt: 1,
         }],
+        rounds: 1,
+        cache: { cacheEpoch: 1, epochReason: "run_start" },
+        request: {
+          provider: "openai", model: "test", contextWindowTokens: 128_000,
+          promptFingerprint: "prompt", toolSchemaFingerprint: "tools",
+        },
       }),
     };
     expect(buildFullModelContext(entries, runReader).uncertainEffects)
@@ -248,6 +301,41 @@ describe("conversation transcript projection", () => {
       payload: { role: "assistant", content: "canonical" },
     };
     expect(reduceTranscriptProjection([canonical], seed).messages[0].content).toBe("pending display");
+  });
+
+  it("seed 增量路径产出压缩标记，rewind 失效后随截断消失", () => {
+    nextSeq = 0;
+    const seed = reduceTranscriptProjection([user("u1", "first"), assistant("a1", "answer")]);
+    const checkpointSeq = ++nextSeq;
+    const checkpoint: TranscriptEntry = {
+      seq: checkpointSeq,
+      id: "checkpoint-1",
+      at: checkpointSeq,
+      kind: "compaction_checkpoint",
+      payload: {
+        baseThroughSeq: 0,
+        sourceThroughSeq: checkpointSeq - 1,
+        sourceDigest: "digest",
+        replacement: { role: "system", content: "summary" },
+        trigger: "manual",
+      },
+    };
+    const mid = reduceTranscriptProjection([checkpoint, user("u2", "second")], seed);
+    expect(mid.messages[2]).toMatchObject({
+      id: "checkpoint-1",
+      compaction: { trigger: "manual" },
+    });
+    // rewind 切到 u1（检查点覆盖前缀之内）：节点被截断，标记随前缀一起消失。
+    const rewindSeq = ++nextSeq;
+    const rewound = reduceTranscriptProjection([{
+      seq: rewindSeq,
+      id: "rewind-1",
+      at: rewindSeq,
+      kind: "turn_rewind",
+      turnId: "u1",
+      payload: { anchorUserTurnId: "u1", disposition: "keep_user", reason: "regenerate" },
+    }], mid);
+    expect(rewound.messages.some((item) => item.compaction)).toBe(false);
   });
 
   it("delivery receipt failure adds an internal context note without changing history", () => {

@@ -126,6 +126,31 @@ function replayRawAssistant(rawAssistant: unknown, includeEncryptedReasoning: bo
   }
 }
 
+function assistantFallbackItems(message: ChatMessage, replayed: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const fallback: Array<Record<string, unknown>> = [];
+  const text = typeof message.content === "string" ? message.content : "";
+  const replayedText = replayed
+    .filter((item) => item.type === "message")
+    .flatMap((item) => Array.isArray(item.content) ? item.content : [])
+    .filter((block) => block && typeof block === "object")
+    .map((block) => {
+      const record = block as Record<string, unknown>;
+      return record.type === "output_text" && typeof record.text === "string" ? record.text : "";
+    })
+    .join("");
+  if (text && !replayedText.includes(text)) fallback.push({ role: "assistant", content: text });
+
+  const replayedCallIds = new Set(replayed
+    .filter((item) => item.type === "function_call")
+    .map((item) => item.call_id)
+    .filter((id): id is string => typeof id === "string"));
+  for (const call of message.toolCalls ?? []) {
+    if (replayedCallIds.has(call.id)) continue;
+    fallback.push({ type: "function_call", call_id: call.id, name: call.name, arguments: call.arguments });
+  }
+  return fallback;
+}
+
 /**
  * 统一 ChatMessage[] → Responses input items + instructions。
  * system 聚合进 instructions；assistant 优先 rawAssistant 原样回放，
@@ -156,17 +181,14 @@ function toWireInput(
       });
       continue;
     }
-    // assistant：rawAssistant 存在 → 原顺序回放（function_call items 已含工具调用）
+    // assistant：优先原顺序回放可识别的 Responses item，统一字段只补底稿未覆盖的内容。
     if (m.rawAssistant !== undefined) {
-      input.push(...replayRawAssistant(m.rawAssistant, includeEncryptedReasoning));
+      const replayed = replayRawAssistant(m.rawAssistant, includeEncryptedReasoning);
+      input.push(...replayed, ...assistantFallbackItems(m, replayed));
       continue;
     }
-    // 退化构造：正文 + 工具调用分别落 input items
-    const text = typeof m.content === "string" ? m.content : "";
-    if (text) input.push({ role: "assistant", content: [{ type: "input_text", text }] });
-    for (const tc of m.toolCalls ?? []) {
-      input.push({ type: "function_call", call_id: tc.id, name: tc.name, arguments: tc.arguments });
-    }
+    // SDK easy input message 接受 assistant + string content；input_text 仅适用于 user 输入。
+    input.push(...assistantFallbackItems(m, []));
   }
 
   return { instructions: systemParts.length > 0 ? systemParts.join("\n\n") : undefined, input };

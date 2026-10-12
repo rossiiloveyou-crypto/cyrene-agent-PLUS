@@ -18,6 +18,8 @@ export interface ResolveRunCapabilitiesInput {
   skillModeOverrides?: SkillModeOverrides;
   /** Chat 模式工具增强总开关（general-settings.chatToolsEnabled）。 */
   chatToolsEnabled?: boolean;
+  /** 本轮是否带有可供模型读取的文件附件。 */
+  hasFileAttachments?: boolean;
   toolRegistry: { getEnabledToolsForMode(mode: ConversationMode, overrides?: ToolModeOverrides): ToolDefinition[] };
   skillRegistry: { getEnabledForMode(mode: SkillMode, overrides?: SkillModeOverrides): SkillEntry[] };
 }
@@ -27,11 +29,12 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
     // Chat 工具增强：总开关开启时仅放行 Chat tab 显式勾选（override.chat===true）
     // 的工具——严格 opt-in，不走"未声明 modes 即全可见"的默认规则，
     // 防止 fs/git 等未声明 modes 的工具意外漏进闲聊会话。Skill 恒不暴露。
-    // 例外：chatBuiltin 内置人格工具（朋友圈三件套）默认放行，
-    // 不依赖总开关与 opt-in 勾选；override.chat === false 仍可显式关闭。
+    // chatBuiltin 内置工具不依赖总开关与 opt-in 勾选；override.chat === false
+    // 仍可关闭。文件读取工具还要求本轮确实附带文件。
     const builtinTools = input.toolRegistry
       .getEnabledToolsForMode("chat", input.toolModeOverrides)
-      .filter((tool) => tool.chatBuiltin === true);
+      .filter((tool) => tool.chatBuiltin === true
+        && (!tool.requiresFileAttachments || input.hasFileAttachments === true));
     if (!input.chatToolsEnabled) {
       const tools = filterToolsBySearchBackend(builtinTools, input.activeSearchBackend);
       return { mode: input.mode, tools, toolIds: new Set(tools.map((tool) => tool.id)), skills: [], skillIds: new Set() };

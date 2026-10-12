@@ -157,6 +157,12 @@ export async function startPluginRuntime(deps: PluginRuntimeDeps): Promise<Plugi
   deps.ipc.handle(IPC.PLUGINS_MARKET_LIST, (_event, preferred: unknown) =>
     market.listMarket(typeof preferred === "string" ? preferred : undefined),
   );
+  deps.ipc.handle(IPC.PLUGINS_MARKET_DETAILS, (_event, id: unknown, preferred: unknown) => {
+    if (typeof id !== "string" || !id) {
+      return { ok: false, error: "id 必须是非空字符串" };
+    }
+    return market.getMarketDetails(id, typeof preferred === "string" ? preferred : undefined);
+  });
   deps.ipc.handle(IPC.PLUGINS_MARKET_INSTALL, (_event, id: unknown) => {
     if (typeof id !== "string" || !id) {
       return { ok: false, error: "id 必须是非空字符串" };

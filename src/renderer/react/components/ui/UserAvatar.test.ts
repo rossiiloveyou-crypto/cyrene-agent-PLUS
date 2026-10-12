@@ -33,7 +33,7 @@ describe("UserAvatar profile dialog", () => {
       user: {
         getProfile: vi.fn(async () => ({
           nickname: "小昔", gender: "female", callPreference: "阿澄", birthday: "2000-06-18",
-          defaultCity: "上海", timezone: "Asia/Shanghai",
+          defaultCity: "上海", timezone: "Asia/Shanghai", replyLanguage: "en",
         })),
         getAvatar: vi.fn(async () => null),
         onProfileChanged: vi.fn(() => () => {}),
@@ -46,7 +46,14 @@ describe("UserAvatar profile dialog", () => {
     const host = await renderAvatar();
     const trigger = host.querySelector<HTMLButtonElement>(".cy-user-avatar__trigger");
     expect(trigger).not.toBeNull();
-    await act(async () => { trigger!.click(); });
+    await act(async () => {
+      trigger!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    });
+
+    const profileMenuItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+      .find((item) => item.textContent?.includes("我的信息"));
+    expect(profileMenuItem).toBeDefined();
+    await act(async () => { profileMenuItem!.click(); });
 
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
@@ -69,7 +76,7 @@ describe("UserAvatar profile dialog", () => {
     await act(async () => { save!.click(); });
     expect((window as typeof window & { user: { saveProfile: ReturnType<typeof vi.fn> } }).user.saveProfile).toHaveBeenCalledWith({
       nickname: "小昔", gender: "female", callPreference: "阿澄", birthday: "2000-06-18",
-      defaultCity: "上海", timezone: "Asia/Tokyo",
+      defaultCity: "上海", timezone: "Asia/Tokyo", replyLanguage: "en",
     });
   });
 });

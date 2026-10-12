@@ -21,6 +21,11 @@ import type {
 import type { HarnessConfig } from "./types";
 import { AGENT_COMPACTION_PROMPT } from "./compaction";
 import { isExplicitStreamUnsupported } from "../vendors/stream-support";
+import { AgentRuntimeError } from "../agent-runtime-error";
+import { classifyModelFailure } from "../vendors/model-error-classifier";
+import { runModelRequestWithRetry } from "../vendors/model-retry-runner";
+import { readRetryAfterMs } from "../vendors/model-retry-policy";
+import type { ModelRetryStatus } from "../../../shared/model-retry";
 import {
   composePromptLayers,
   normalizeToolSpecsForCache,
@@ -57,6 +62,7 @@ export async function callLLM(
   signal?: AbortSignal,
   onReasoningDelta?: (delta: string) => void,
   onTextDelta?: (delta: string) => void,
+  onRetryStatus?: (status: ModelRetryStatus) => void,
 ): Promise<ChatResponse> {
   const adapter = getAdapterForConfig(vendorConfig);
   const composed = composePromptLayers(promptLayers, messages);
@@ -73,7 +79,6 @@ export async function callLLM(
   // Harness 工具循环整条链漏发；在这里统一补上，下方流式与非流式兜底共用同一份 hints。
   const chatRequest = adapter.applyCacheHints?.(baseRequest, vendorConfig) ?? baseRequest;
 
-  let receivedStreamDelta = false;
   const recordResponseUsage = (response: ChatResponse): ChatResponse => {
     recordRequest(vendorConfig.model);
     if (!response.usage) return response;
@@ -87,45 +92,82 @@ export async function callLLM(
     );
     return response;
   };
-  try {
-    return recordResponseUsage(await streamChatWithSdk({
-      adapter,
-      request: chatRequest,
-      config: vendorConfig,
-      timeoutMs: config.totalTimeoutMs,
-      signal,
-      onDelta: (delta) => {
-        receivedStreamDelta = true;
-        if (delta.type === "reasoning_delta" && delta.delta) onReasoningDelta?.(delta.delta);
-        if (delta.type === "text_delta" && delta.delta) onTextDelta?.(delta.delta);
-      },
-    }));
-  } catch (error) {
-    if (receivedStreamDelta || !isExplicitStreamUnsupported(error)) throw error;
-  }
-
-  // 非流式兜底
   const fallbackRequest: ChatRequest = { ...chatRequest, stream: false };
   const http = adapter.buildRequest(fallbackRequest, vendorConfig);
-  const response = await fetch(http.url, {
-    method: "POST",
-    headers: http.headers,
-    body: http.body,
+  const requestNonStreaming = async (attemptSignal: AbortSignal): Promise<ChatResponse> => {
+    let response: Response;
+    try {
+      response = await fetch(http.url, {
+        method: "POST",
+        headers: http.headers,
+        body: http.body,
+        signal: attemptSignal,
+      });
+    } catch (error) {
+      if (attemptSignal.aborted) throw error;
+      const failure = classifyModelFailure({ provider: adapter.id, model: vendorConfig.model, error });
+      throw new AgentRuntimeError("E_MODEL_REQUEST_FAILED", "模型服务请求失败。", {
+        cause: error,
+        modelFailure: { ...failure, category: failure.category === "UNKNOWN" ? "NETWORK" : failure.category },
+        retryAfterMs: readRetryAfterMs(error),
+      });
+    }
+    if (!response.ok) {
+      const rawBody = await response.text().catch(() => "");
+      console.error(
+        "[image-send] LLM 请求被拒:",
+        `\n  model id: ${vendorConfig.model}`,
+        `\n  baseUrl: ${http.url}`,
+        `\n  error: HTTP ${response.status} ${rawBody.slice(0, 500) || "(无响应体)"}`,
+      );
+      let errorData: unknown;
+      try { errorData = JSON.parse(rawBody || "{}"); } catch { errorData = undefined; }
+      throw new AgentRuntimeError("E_MODEL_REQUEST_FAILED", `模型请求失败：HTTP ${response.status}`, {
+        modelFailure: classifyModelFailure({ provider: adapter.id, model: vendorConfig.model, status: response.status, error: errorData }),
+        retryAfterMs: readRetryAfterMs(response.headers),
+      });
+    }
+    return adapter.parseResponse(await response.json());
+  };
+
+  let forceNonStreaming = false;
+  const response = await runModelRequestWithRetry(async (attempt) => {
+    if (forceNonStreaming) return requestNonStreaming(attempt.signal);
+    let receivedStreamDelta = false;
+    try {
+      return await streamChatWithSdk({
+        adapter,
+        request: chatRequest,
+        config: vendorConfig,
+        timeoutMs: config.totalTimeoutMs,
+        signal: attempt.signal,
+        onDelta: (delta) => {
+          receivedStreamDelta = true;
+          attempt.onStreamActivity();
+          if (delta.type === "reasoning_delta" && delta.delta) {
+            attempt.onVisibleDelta();
+            onReasoningDelta?.(delta.delta);
+          }
+          if (delta.type === "text_delta" && delta.delta) {
+            attempt.onVisibleDelta();
+            onTextDelta?.(delta.delta);
+          }
+        },
+      });
+    } catch (error) {
+      if (receivedStreamDelta || !isExplicitStreamUnsupported(error)) throw error;
+      forceNonStreaming = true;
+      return requestNonStreaming(attempt.signal);
+    }
+  }, {
+    provider: adapter.id,
+    model: vendorConfig.model,
+    maxRetries: config.modelRequestMaxRetries ?? 5,
+    idleTimeoutMs: config.modelRequestIdleTimeoutMs ?? 60_000,
     signal,
+    onStatus: onRetryStatus,
   });
-  if (!response.ok) {
-    // [image-send] 链路日志④：服务端拒绝时带上模型名、请求地址与完整错误体（Anthropic 400 会带具体 reason）。
-    const rawBody = await response.text().catch(() => "");
-    console.error(
-      "[image-send] LLM 请求被拒:",
-      `\n  model id: ${vendorConfig.model}`,
-      `\n  baseUrl: ${http.url}`,
-      `\n  error: HTTP ${response.status} ${rawBody.slice(0, 500) || "(无响应体)"}`,
-    );
-    const errorData = JSON.parse(rawBody || "{}") as { error?: { message?: string } };
-    throw new Error(errorData.error?.message || `模型请求失败：HTTP ${response.status}`);
-  }
-  return recordResponseUsage(adapter.parseResponse(await response.json()));
+  return recordResponseUsage(response);
 }
 
 /** 历史摘要（用于 mid-loop compaction）。 */
@@ -135,6 +177,11 @@ export async function summarizeHistory(
   history: ChatMessage[],
   tools: ToolSpec[],
   signal?: AbortSignal,
+  retryOptions: {
+    maxRetries?: number;
+    idleTimeoutMs?: number;
+    onStatus?: (status: ModelRetryStatus) => void;
+  } = {},
 ): Promise<string> {
   const adapter = getAdapterForConfig(vendorConfig);
 
@@ -154,25 +201,48 @@ export async function summarizeHistory(
   };
 
   const http = adapter.buildRequest(chatRequest, vendorConfig);
-  const response = await fetch(http.url, {
-    method: "POST",
-    headers: http.headers,
-    body: http.body,
+  return runModelRequestWithRetry(async ({ signal: attemptSignal }) => {
+    let response: Response;
+    try {
+      response = await fetch(http.url, {
+        method: "POST",
+        headers: http.headers,
+        body: http.body,
+        signal: attemptSignal,
+      });
+    } catch (error) {
+      if (attemptSignal.aborted) throw error;
+      const failure = classifyModelFailure({ provider: adapter.id, model: vendorConfig.model, error });
+      throw new AgentRuntimeError("E_MODEL_REQUEST_FAILED", "模型服务请求失败。", {
+        cause: error,
+        modelFailure: { ...failure, category: failure.category === "UNKNOWN" ? "NETWORK" : failure.category },
+        retryAfterMs: readRetryAfterMs(error),
+      });
+    }
+
+    if (!response.ok) {
+      const rawBody = await response.text().catch(() => "");
+      console.error(
+        "[image-send] 摘要请求被拒:",
+        `\n  model id: ${vendorConfig.model}`,
+        `\n  baseUrl: ${http.url}`,
+        `\n  error: HTTP ${response.status} ${rawBody.slice(0, 500) || "(无响应体)"}`,
+      );
+      let errorData: unknown;
+      try { errorData = JSON.parse(rawBody || "{}"); } catch { errorData = undefined; }
+      throw new AgentRuntimeError("E_MODEL_REQUEST_FAILED", `摘要请求失败：HTTP ${response.status}`, {
+        modelFailure: classifyModelFailure({ provider: adapter.id, model: vendorConfig.model, status: response.status, error: errorData }),
+        retryAfterMs: readRetryAfterMs(response.headers),
+      });
+    }
+
+    return adapter.parseResponse(await response.json()).text;
+  }, {
+    provider: adapter.id,
+    model: vendorConfig.model,
+    maxRetries: retryOptions.maxRetries ?? 5,
+    idleTimeoutMs: retryOptions.idleTimeoutMs ?? 60_000,
     signal,
+    onStatus: retryOptions.onStatus,
   });
-
-  if (!response.ok) {
-    // 摘要请求被拒：与主链路失败日志同格式，带上模型名与请求地址。
-    const rawBody = await response.text().catch(() => "");
-    console.error(
-      "[image-send] 摘要请求被拒:",
-      `\n  model id: ${vendorConfig.model}`,
-      `\n  baseUrl: ${http.url}`,
-      `\n  error: HTTP ${response.status} ${rawBody.slice(0, 500) || "(无响应体)"}`,
-    );
-    throw new Error(`摘要请求失败：HTTP ${response.status}`);
-  }
-
-  const result = adapter.parseResponse(await response.json());
-  return result.text;
 }

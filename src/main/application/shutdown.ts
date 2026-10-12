@@ -59,6 +59,18 @@ export interface CreateShutdownCoordinatorOptions {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+/** 退出耗时埋点：整体超过该阈值才输出一行汇总，避免正常退出刷屏。 */
+const TIMING_LOG_THRESHOLD_MS = 500;
+/** 单项清理超过该阈值才计入「慢资源」明细。 */
+const SLOW_RESOURCE_MS = 200;
+
+interface ShutdownTiming {
+  /** 各阶段实际耗时（含阶段内并行等待）。 */
+  phases: Array<{ phase: ShutdownPhase; ms: number }>;
+  /** 单项清理耗时明细，仅记录慢资源。 */
+  slow: Array<{ id: string; ms: number }>;
+}
+
 export function createShutdownCoordinator(options: CreateShutdownCoordinatorOptions): ShutdownCoordinator {
   const readiness = options.readiness;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -75,22 +87,37 @@ export function createShutdownCoordinator(options: CreateShutdownCoordinatorOpti
   let firstRequest: { reason: string; finalAction(): void } | null = null;
 
   // 依次执行各阶段；同一阶段内并行，单项失败记录后继续，不跳过后续阶段。
-  async function runPhases(signal: AbortSignal, pendingIds: Set<string>): Promise<void> {
+  async function runPhases(signal: AbortSignal, pendingIds: Set<string>, timing: ShutdownTiming): Promise<void> {
     for (const phase of SHUTDOWN_PHASE_ORDER) {
       if (signal.aborted) break;
       const entries = [...registrations.values()].filter((entry) => entry.phase === phase);
       if (entries.length === 0) continue;
       for (const entry of entries) pendingIds.add(entry.id);
+      const phaseStartedAt = performance.now();
       await Promise.allSettled(entries.map(async (entry) => {
+        const startedAt = performance.now();
         try {
           await entry.dispose(signal);
         } catch (error) {
           log(`shutdown: dispose failed for ${entry.id} (${phase})`, error);
         } finally {
+          const ms = performance.now() - startedAt;
+          if (ms >= SLOW_RESOURCE_MS) timing.slow.push({ id: entry.id, ms });
           pendingIds.delete(entry.id);
         }
       }));
+      timing.phases.push({ phase, ms: performance.now() - phaseStartedAt });
     }
+  }
+
+  /** 退出耗时汇总：仅在整体偏慢时输出一行，含各阶段耗时与慢资源明细。 */
+  function logShutdownTiming(totalMs: number, timing: ShutdownTiming): void {
+    if (totalMs < TIMING_LOG_THRESHOLD_MS) return;
+    const phases = timing.phases.map((item) => `${item.phase}=${Math.round(item.ms)}ms`).join(" ");
+    const slow = timing.slow.length > 0
+      ? ` | slow: ${timing.slow.map((item) => `${item.id}=${Math.round(item.ms)}ms`).join(", ")}`
+      : "";
+    console.log(`[ShutdownTiming] cleanup ${Math.round(totalMs)}ms | ${phases}${slow}`);
   }
 
   function finalize(): void {
@@ -139,6 +166,8 @@ export function createShutdownCoordinator(options: CreateShutdownCoordinatorOpti
 
       const controller = new AbortController();
       const pendingIds = new Set<string>();
+      const timing: ShutdownTiming = { phases: [], slow: [] };
+      const cleanupStartedAt = performance.now();
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<void>((resolve) => {
         timeoutHandle = setTimeoutFn(() => {
@@ -148,8 +177,9 @@ export function createShutdownCoordinator(options: CreateShutdownCoordinatorOpti
         }, timeoutMs);
       });
 
-      shutdownPromise = Promise.race([runPhases(controller.signal, pendingIds), deadline]).then(() => {
+      shutdownPromise = Promise.race([runPhases(controller.signal, pendingIds, timing), deadline]).then(() => {
         if (timeoutHandle !== undefined) clearTimeoutFn(timeoutHandle);
+        logShutdownTiming(performance.now() - cleanupStartedAt, timing);
         finalize();
       });
       return shutdownPromise;

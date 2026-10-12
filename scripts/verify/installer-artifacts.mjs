@@ -3,7 +3,8 @@
 // 的 directories.output，默认 release/）：
 //   1. Cyrene-Setup-<version>.exe 存在且体积合理
 //   2. latest.yml 的 version 与 package.json 一致，path 指向同一安装器，sha512 存在
-//   3. win-unpacked/resources 内截图辅助程序、mpv、MinGit、skills 快照齐全
+//   3. 安装器同名 .blockmap（差分更新指纹表）存在且非空
+//   4. win-unpacked/resources 内截图辅助程序、mpv、MinGit、skills 快照齐全
 // 用法：node scripts/verify/installer-artifacts.mjs [--expect-version x.y.z]
 //   --expect-version：标签构建时传入标签版本，校验「产物版本与标签一致」
 import { stat } from "node:fs/promises";
@@ -59,7 +60,14 @@ export async function verifyInstallerArtifacts(options = {}) {
     throw new Error("latest.yml 缺少 sha512 校验值");
   }
 
-  // 3. win-unpacked 内的随包二进制（与安装器内容一致，免去装机检查）
+  // 3. 差分更新指纹表：electron-updater 差分下载依据，缺失时升级会静默回退全量下载
+  const blockmapPath = `${installerPath}.blockmap`;
+  const blockmapStat = await stat(blockmapPath);
+  if (blockmapStat.size <= 0) {
+    throw new Error(`blockmap 体积异常（${blockmapStat.size} bytes）：${blockmapPath}`);
+  }
+
+  // 4. win-unpacked 内的随包二进制（与安装器内容一致，免去装机检查）
   const resourcesDir = path.join(outputDir, "win-unpacked", "resources");
   const screenshot = await verifyScreenshotHelper(path.join(resourcesDir, "bin", "cyrene-screenshot.exe"));
   const mpv = await verifyMpvHelper(path.join(resourcesDir, "bin", "mpv", "mpv.exe"));

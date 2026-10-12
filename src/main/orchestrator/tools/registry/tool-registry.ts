@@ -7,6 +7,20 @@ import type { MemoryCandidate } from "../../../memory/memory-types";
 import type { ToolRiskLevel } from "../../../permission";
 import type { ToolContext } from "./tool-context";
 import type { ConversationMode } from "../../../../shared/chat-types";
+import { isVectorMemoryEnabled, isWikiMemoryEnabled } from "../../../memory/memory-mode";
+import { canReadWikiMemory } from "../../../memory/wiki-memory-health";
+import { isKnowledgeBaseAvailable } from "../../../knowledge-base/knowledge-base-service";
+
+const MEMORY_TOOL_IDS = new Set(["user_memory", "read_memory", "write_memory", "recall_history"]);
+const WIKI_TOOL_IDS = new Set(["wiki_search", "wiki_read_page"]);
+const KNOWLEDGE_TOOL_IDS = new Set(["knowledge_search", "knowledge_read"]);
+
+function isToolAvailable(tool: ToolDefinition): boolean {
+  return tool.enabled && !tool.deprecated &&
+    (isVectorMemoryEnabled() || !MEMORY_TOOL_IDS.has(tool.id)) &&
+    ((isWikiMemoryEnabled() && canReadWikiMemory()) || !WIKI_TOOL_IDS.has(tool.id)) &&
+    (isKnowledgeBaseAvailable() || !KNOWLEDGE_TOOL_IDS.has(tool.id));
+}
 
 /** 工具效果类型：决定工具对系统状态的影响分类。未配置默认 "unknown"。 */
 export type ToolEffectKind =
@@ -54,7 +68,7 @@ export function controlledInputKind(policy: ControlledInputPolicy): string | und
 }
 
 export interface ToolDefinition {
-  id: string;           // 工具唯一标识，如 "imported_docs"
+  id: string;           // 工具唯一标识，如 "user_memory"
   name: string;         // 展示名，如 "导入文档"
   description: string;  // 一句话描述，供 LLM Router 的 Prompt 使用
   /** 工具目录里展示的一句话用途（可选）。未填时回落 description 第一行。
@@ -77,6 +91,8 @@ export interface ToolDefinition {
    *  显式勾选，默认对 chat 会话可见（用户 override.chat === false 仍可关闭）。
    *  语义是"这是昔涟人格的一部分"——朋友圈等生活能力不应要求用户先翻工具开关。 */
   chatBuiltin?: boolean;
+  /** Chat 内只有本轮带附件时才开放的内置只读工具。 */
+  requiresFileAttachments?: boolean;
   // MCP 兼容字段：参数 schema，后续接 MCP 时直接复用
   inputSchema: {
     type: "object";
@@ -89,6 +105,8 @@ export interface ToolDefinition {
   ledgerPolicy?: "success_terminal" | "bypass";
   /** 标记为已废弃：从新运行的模型可用工具列表中隐藏，但保留注册用于旧会话兼容。 */
   deprecated?: boolean;
+  /** Browser tools are exposed only in the matching run-local control phase. */
+  browserControlPhase?: "entry" | "active";
   /** 工具效果类型。未配置默认 "unknown"，不静默放行。 */
   effectKind?: ToolEffectKind;
   /** 动态效果解析器（覆盖 effectKind）。用于 run_shell 等根据参数判断效果的工具。 */
@@ -131,7 +149,7 @@ export class ToolRegistry {
   }
 
   getEnabledTools(): ToolDefinition[] {
-    return Array.from(this.tools.values()).filter(t => t.enabled && !t.deprecated);
+    return Array.from(this.tools.values()).filter(isToolAvailable);
   }
 
   /** 按会话模式过滤的启用工具列表。
@@ -142,7 +160,7 @@ export class ToolRegistry {
    *  未声明 modes 且无覆盖的工具默认全模式可见——保持现有行为不变。 */
   getEnabledToolsForMode(mode: ConversationMode, overrides?: ToolModeOverrides): ToolDefinition[] {
     return Array.from(this.tools.values()).filter((t) => {
-      if (!t.enabled || t.deprecated) return false;
+      if (!isToolAvailable(t)) return false;
       const override = overrides?.[t.id]?.[mode];
       if (override !== undefined) return override;
       return !t.modes || t.modes.includes(mode);
@@ -195,37 +213,6 @@ function formatMemoryResult(result: unknown): string {
 }
 
 toolRegistry.register({
-  id: 'imported_docs',
-  name: '导入文档',
-  description:
-    '在用户上传导入的文档/小说/文件范围内做语义检索，返回相关片段。\n\n' +
-    '何时用：\n' +
-    '- 用户提到「文件」「文档」「小说」，或消息包含「已上传文件」标记\n' +
-    '- 用户问的内容可能在导入的文档里\n' +
-    '- 用户要「在文档里找 xxx」「小说里有没有写到 yyy」\n\n' +
-    '不要用于：\n' +
-    '- 本机任意路径的文件（那是 read_file）\n' +
-    '- 用户的历史对话记忆（那是 user_memory）\n' +
-    '- 联网信息（那是 web_search）\n\n' +
-    '参数：query (必填，搜索关键词)，topK (可选，返回条数，默认5)。',
-  enabled: true,
-  effectKind: "read",
-  verificationPolicy: "none",
-  inputSchema: {
-    type: 'object',
-    properties: {
-      query: { type: 'string', description: '搜索关键词' },
-      topK:  { type: 'number', description: '返回条数，默认5' },
-    },
-    required: ['query'],
-  },
-  execute: async (args) => {
-    const results = await searchMemory(String(args.query), 'imported_doc', Number(args.topK) || 5);
-    return results.map((r: unknown) => String(r)).join('\n');
-  },
-});
-
-toolRegistry.register({
   id: 'user_memory',
   name: '用户记忆',
   description:
@@ -236,7 +223,7 @@ toolRegistry.register({
     '- 需要确认用户曾经提过的具体信息\n\n' +
     '不要用于：\n' +
     '- 当前对话最近几轮能看到的内容\n' +
-    '- 导入文档内容（那是 imported_docs）\n' +
+    '- 当前附件文件（应通过附件路径读取）\n' +
     '- 用户从没提过的信息（查不到就老实说不知道）\n\n' +
     '参数：query (必填，搜索关键词)，topK (可选，返回条数，默认5)。',
   enabled: true,
@@ -251,6 +238,7 @@ toolRegistry.register({
     required: ['query'],
   },
   execute: async (args, ctx) => {
+    if (!isVectorMemoryEnabled()) return "[用户记忆] 当前模式不使用向量记忆";
     // 只召回当前会话所属记忆域：群聊里问"我喜欢什么"不该捞出桌面的私聊记忆。
     const scopeId = resolveScopeId(ctx?.conversationId);
     const results = await searchMemory(String(args.query), 'user_memory', Number(args.topK) || 5, { scopeId });
@@ -381,7 +369,7 @@ toolRegistry.register({
     '- 需要核对记忆内容是否准确/过时（用户说「你记错了」）\n\n' +
     '不要用于：\n' +
     '- 语义模糊的主题查询（「我喜欢的颜色」→ 用 user_memory 更省 token）\n' +
-    '- 导入文档内容（那是 imported_docs）\n\n' +
+    '- 当前附件文件（应通过附件路径读取）\n\n' +
     '参数：无参 = 概览（L0/L1 全量 + L2 目录最新 50 条）；id (可选，L2 条目 id) = 读该条全文。',
   enabled: true,
   effectKind: "read",
@@ -393,6 +381,7 @@ toolRegistry.register({
     },
   },
   execute: async (args, ctx) => {
+    if (!isVectorMemoryEnabled()) return "[通读记忆] 当前模式不使用向量记忆";
     // 懒加载避开注册期副作用（与 fs-tools 的 loadVisionConfigLazy 同模式）。
     // ⚠️ 用动态 import 而不是 require()：require 在 ESM 打包产物与 vitest 下都不可拦截，
     //    这条路径会因此完全无法单测（P2 实测撞到）。
@@ -476,6 +465,7 @@ toolRegistry.register({
     required: ['layer', 'content'],
   },
   execute: async (args, ctx) => {
+    if (!isVectorMemoryEnabled()) return "[更新记忆] 当前模式不使用向量记忆";
     const candidate = buildWriteCandidate({
       layer: String(args.layer || ""),
       content: String(args.content || ""),

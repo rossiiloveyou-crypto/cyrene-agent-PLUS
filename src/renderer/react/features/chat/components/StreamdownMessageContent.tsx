@@ -14,7 +14,8 @@ import { chatStore } from "../pages/chat-page-bridge";
 import { copyTextToClipboard } from "./CopyButton";
 import { FileContextMenu, clampMenuPosition, type FileContextMenuItem } from "./FileContextMenu";
 import { FileLinkContext } from "./FileLinkContext";
-import { FileIcon } from "./file-icon";
+import { FileIcon, hasFileIconMapping } from "./file-icon";
+import { DEMO_FILE_PREVIEW_REL_PATH } from "./demoFilePreview";
 import { MermaidBlock } from "./MermaidBlock";
 import { SvgCardBlock } from "./SvgCardBlock";
 import { parseFileLinkHref, relativePathInsideWorkspace } from "./file-link";
@@ -56,40 +57,210 @@ function StreamdownPre({ children }: { children?: ReactNode }) {
   if (info.lang === "mermaid") return <MermaidBlock code={info.code} streaming={streaming} />;
   if (info.lang === "svg") return <SvgCardBlock code={info.code} streaming={streaming} />;
   return (
-    <CodeHighlighter lang={info.lang || "text"} prismLightMode={false}>
+    <CodeHighlighter
+      className="cy-message-code-block"
+      lang={info.lang || "text"}
+      prismLightMode={false}
+      styles={{
+        root: {
+          color: "var(--rb-text-primary)",
+          background: "var(--rb-code-bg)",
+        },
+        header: {
+          color: "var(--rb-text-primary)",
+          background: "var(--rb-bg-2)",
+        },
+        code: {
+          color: "var(--rb-text-primary)",
+          background: "transparent",
+          borderColor: "var(--rb-border-default)",
+        },
+      }}
+    >
       {info.code}
     </CodeHighlighter>
   );
 }
 
+/** 演示会话中的文件名代码片段：复用项目后缀映射，仅展示图标，不改变交互。 */
+function StreamdownInlineCode({
+  children,
+  className,
+  ...props
+}: React.ComponentProps<"code">) {
+  const { sessionId, openFile } = useContext(FileLinkContext);
+  const fileName = typeof children === "string" ? children : "";
+  const isDemoFileName =
+    sessionId === "preview-code" &&
+    !className &&
+    /^[\w.-]+\.[a-z\d]{1,10}$/i.test(fileName) &&
+    hasFileIconMapping(fileName);
+
+  if (!isDemoFileName || !openFile) return <code className={className} {...props}>{children}</code>;
+
+  return (
+    <code className="cy-demo-file-code" {...props}>
+      <button
+        type="button"
+        className="cy-demo-file-action"
+        title={`预览 ${fileName}`}
+        aria-label={`预览文件 ${fileName}`}
+        onClick={() => openFile(DEMO_FILE_PREVIEW_REL_PATH)}
+      >
+        <FileIcon fileName={fileName} className="cy-demo-file-code__icon" />
+        {children}
+      </button>
+    </code>
+  );
+}
+
+/** 表格与列表中的普通文本也按文件名匹配；只在演示会话中添加装饰图标。 */
+function renderDemoFileNames(node: ReactNode, openFile?: (relPath: string) => void): ReactNode {
+  if (typeof node === "string") {
+    const parts: ReactNode[] = [];
+    const pattern = /[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,10}/g;
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(node)) !== null) {
+      const fileName = match[0];
+      const start = match.index;
+      const end = start + fileName.length;
+      const hasFilenameBoundary =
+        (start === 0 || !/[A-Za-z0-9_./\\-]/.test(node[start - 1])) &&
+        (end === node.length || !/[A-Za-z0-9_./\\-]/.test(node[end]));
+      if (!hasFilenameBoundary || !hasFileIconMapping(fileName)) continue;
+
+      parts.push(node.slice(cursor, start));
+      parts.push(
+        <button
+          type="button"
+          className="cy-demo-file-name"
+          key={`file-${start}`}
+          title={`预览 ${fileName}`}
+          aria-label={`预览文件 ${fileName}`}
+          onClick={openFile ? () => openFile(DEMO_FILE_PREVIEW_REL_PATH) : undefined}
+          disabled={!openFile}
+        >
+          <FileIcon fileName={fileName} className="cy-demo-file-name__icon" />
+          {fileName}
+        </button>,
+      );
+      cursor = end;
+    }
+
+    if (cursor === 0) return node;
+    parts.push(node.slice(cursor));
+    return <>{parts}</>;
+  }
+
+  if (Array.isArray(node)) return node.map((child) => renderDemoFileNames(child, openFile));
+  if (!isValidElement<{ children?: ReactNode }>(node)) return node;
+  if (
+    node.type === "code" ||
+    node.type === "a" ||
+    node.type === StreamdownInlineCode ||
+    (typeof node.type !== "string" && node.type !== React.Fragment)
+  ) {
+    return node;
+  }
+  if (node.props.children === undefined) return node;
+  return React.cloneElement(node, {}, renderDemoFileNames(node.props.children, openFile));
+}
+
+function DemoFileNameListItem(props: React.ComponentProps<"li">) {
+  const { sessionId, openFile } = useContext(FileLinkContext);
+  return (
+    <li {...props}>
+      {sessionId === "preview-code" ? renderDemoFileNames(props.children, openFile) : props.children}
+    </li>
+  );
+}
+
+function DemoFileNameTableCell(props: React.ComponentProps<"td">) {
+  const { sessionId, openFile } = useContext(FileLinkContext);
+  return (
+    <td {...props}>
+      {sessionId === "preview-code" ? renderDemoFileNames(props.children, openFile) : props.children}
+    </td>
+  );
+}
+
+function DemoFileNameTableHeader(props: React.ComponentProps<"th">) {
+  const { sessionId, openFile } = useContext(FileLinkContext);
+  return (
+    <th {...props}>
+      {sessionId === "preview-code" ? renderDemoFileNames(props.children, openFile) : props.children}
+    </th>
+  );
+}
+
 /** 网站链接（http/https）行内卡片：favicon + 文本 + 域名，favicon 失败降级地球图标 */
 function WebLinkAnchor({ href, children }: { href: string; children?: ReactNode }) {
+  const { t } = useTranslation();
+  const { openWebLink } = useContext(FileLinkContext);
   const [iconFailed, setIconFailed] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   let domain = "";
   try {
     domain = new URL(href).hostname.replace(/^www\./, "");
   } catch {
     domain = "";
   }
+  const open = useCallback((destination: "cyrene" | "external") => {
+    setMenu(null);
+    if (openWebLink) {
+      void openWebLink(href, destination);
+    } else if (destination === "external") {
+      void window.system?.openExternal(href);
+    }
+  }, [href, openWebLink]);
+  const openContextMenu = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const { x, y } = clampMenuPosition(event.clientX, event.clientY);
+    setMenu({ x, y });
+  }, []);
+  const menuItems: FileContextMenuItem[] = menu ? [
+    ...(openWebLink ? [{ key: "cyrene", label: t("browserPanel.openInCyrene"), run: () => open("cyrene") }] : []),
+    { key: "external", label: t("browserPanel.openExternal"), run: () => open("external") },
+  ] : [];
   return (
-    <a className="cy-web-link" href={href} target="_blank" rel="noreferrer" title={href}>
-      {iconFailed || !domain ? (
-        <svg className="cy-web-link__icon" viewBox="0 0 16 16" aria-hidden="true">
-          <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.2" />
-          <path d="M1.8 8h12.4M8 1.8c2.6 2.6 2.6 7.8 0 12.4M8 1.8c-2.6 2.6-2.6 7.8 0 12.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
-        </svg>
-      ) : (
-        <img
-          className="cy-web-link__favicon"
-          src={`https://${domain}/favicon.ico`}
-          alt=""
-          loading="lazy"
-          onError={() => setIconFailed(true)}
-        />
-      )}
-      <span className="cy-web-link__text">{children}</span>
-      {domain && <span className="cy-web-link__domain">{domain}</span>}
-    </a>
+    <>
+      <a
+        className="cy-web-link"
+        href={href}
+        title={href}
+        onClick={(event) => {
+          event.preventDefault();
+          open(openWebLink ? "cyrene" : "external");
+        }}
+        onAuxClick={(event) => {
+          if (event.button !== 1 || !openWebLink) return;
+          event.preventDefault();
+          open("cyrene");
+        }}
+        onContextMenu={openContextMenu}
+      >
+        {iconFailed || !domain ? (
+          <svg className="cy-web-link__icon" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <path d="M1.8 8h12.4M8 1.8c2.6 2.6 2.6 7.8 0 12.4M8 1.8c-2.6 2.6-2.6 7.8 0 12.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          </svg>
+        ) : (
+          <img
+            className="cy-web-link__favicon"
+            src={`https://${domain}/favicon.ico`}
+            alt=""
+            loading="lazy"
+            onError={() => setIconFailed(true)}
+          />
+        )}
+        <span className="cy-web-link__text">{children}</span>
+        {domain && <span className="cy-web-link__domain">{domain}</span>}
+      </a>
+      {menu && <FileContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} />}
+    </>
   );
 }
 
@@ -183,7 +354,11 @@ const messagePlugins = { math: mathPlugin };
 const chatControls: ControlsConfig = { table: false };
 const messageComponents: Components = {
   a: (props) => <StreamdownAnchor {...props} />,
+  code: (props) => <StreamdownInlineCode {...props} />,
+  li: (props) => <DemoFileNameListItem {...props} />,
   pre: (props) => <StreamdownPre {...props} />,
+  td: (props) => <DemoFileNameTableCell {...props} />,
+  th: (props) => <DemoFileNameTableHeader {...props} />,
 };
 const rehypePlugins: PluggableList = [
   defaultRehypePlugins.raw,

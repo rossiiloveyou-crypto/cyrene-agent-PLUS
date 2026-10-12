@@ -5,9 +5,9 @@
 
 import type { ApiTransport } from "../../../shared/api-endpoint";
 import type { ReasoningPreference } from "../../../shared/reasoning";
-import type { UiTheme } from "../../../shared/ui-theme";
-import type { UiFont } from "../../../shared/ui-font";
+import type { UiThemeChoice } from "../../../shared/ui-theme";
 import type { UiIcon } from "../../../shared/ui-icon";
+import type { UiLanguage } from "../../../shared/ui-language";
 import type {
   DefaultChatMode,
   MobileMessageSegmentationMode,
@@ -59,11 +59,14 @@ export interface ModelSettings {
   // 按厂商缓存：切回该厂商时，从这里恢复 baseUrl / model / apiKey
   perProvider?: Record<string, ProviderProfile>;
   runtimeSync: "off" | "local" | "llm";
+  memoryMode: "vector" | "summary" | "wiki" | "off";
   stickerEnabled: boolean;
   stickerSize: "small" | "standard" | "large";
   stickerSimilarityThreshold: number;
   /** 整个聊天请求的超时（秒）。30-1800，默认 300。 */
   chatRequestTimeoutSec: number;
+  /** 主模型请求的额外重试次数；0–10，默认 5。 */
+  modelRequestMaxRetries: number;
   /** CITA 结构化输出重试总预算（秒）。4-30，默认 8。 */
   citaRepairBudgetSec: number;
   vision?: {
@@ -92,6 +95,8 @@ export interface ModelPreset {
   baseUrl: string;
   /** 已由厂商官方确认的 Anthropic 兼容 Base URL；没有就不猜。 */
   anthropicBaseUrl?: string;
+  /** 已由厂商官方确认的 Responses API Base URL。 */
+  responsesBaseUrl?: string;
   /** 预设首次使用时选中的明确协议；用户之后可以手动修改。 */
   transport: ApiTransport;
   mainModels: string[];
@@ -132,11 +137,9 @@ export interface GeneralSettings {
   /** 提醒中心音效总开关：关闭后所有 toast 静音 */
   toastSoundEnabled: boolean;
   launchAtLogin: boolean;
-  language: "zh-CN";
-  uiTheme: UiTheme;
-  windowCornerRadius: number;
+  language: UiLanguage;
+  uiTheme: UiThemeChoice;
   uiThemeRadius: boolean;
-  uiFont: UiFont;
   uiIcon: UiIcon;
   defaultChatMode: DefaultChatMode;
   currentStyleId?: string;
@@ -153,7 +156,7 @@ export interface GeneralSettings {
 }
 
 export interface UserApi {
-  getProfile: () => Promise<{ nickname: string; callPreference: string; birthday: string; timezone: string; avatarPath: string; defaultCity: string; gender: string }>;
+  getProfile: () => Promise<{ nickname: string; callPreference: string; birthday: string; timezone: string; avatarPath: string; defaultCity: string; gender: string; replyLanguage: string }>;
   saveProfile: (profile: Record<string, unknown>) => Promise<unknown>;
   uploadAvatar: () => Promise<{ avatarPath: string } | null>;
   getAvatar: () => Promise<string | null>;
@@ -181,12 +184,6 @@ export interface MemoryPanelPayload {
     weight: number;
     createdAt: number;
   }>;
-  importedDocs: Array<{
-    importId: string | null;
-    fileName: string;
-    chunkCount: number;
-    lastImportedAt: number;
-  }>;
   reflections: Array<{
     id: string;
     title: string;
@@ -203,7 +200,13 @@ export interface ObsidianVaultConfig {
 
 export interface MemoryPanelApi {
   getData: () => Promise<MemoryPanelPayload>;
-  deleteImportedDoc: (importId: string, fileName?: string) => Promise<{ ok: boolean; deleted: number }>;
+  getSummaryMemory: () => Promise<MemorySummaryPayload | null>;
+  listWikiPages: (request?: import("../../../shared/wiki-memory-types").WikiPageListRequest) => Promise<import("../../../shared/wiki-memory-types").WikiPageListResult>;
+  searchWiki: (request: import("../../../shared/wiki-memory-types").WikiSearchRequest) => Promise<import("../../../shared/wiki-memory-types").WikiPageListResult>;
+  readWikiPage: (pageId: string) => Promise<import("../../../shared/wiki-memory-types").WikiPageDetail | null>;
+  listWikiConflicts: () => Promise<import("../../../shared/wiki-memory-types").WikiConflict[]>;
+  correctWikiClaim: (request: import("../../../shared/wiki-memory-types").WikiClaimCorrection) => Promise<import("../../../shared/wiki-memory-types").WikiMutationResult>;
+  deleteWikiClaim: (request: import("../../../shared/wiki-memory-types").WikiClaimDeletion) => Promise<import("../../../shared/wiki-memory-types").WikiMutationResult>;
   saveL0: (patch: Record<string, unknown>) => Promise<{ ok: boolean }>;
   saveL1: (patch: Record<string, unknown>) => Promise<{ ok: boolean }>;
   exportToObsidianVault: () => Promise<{
@@ -338,6 +341,18 @@ export interface DeleteAllMemoryResult {
   restartRequired: boolean;
 }
 
+export interface MemorySummaryPayload {
+  sessionId: string;
+  sessionPath: string;
+  workspacePath?: string;
+  sessionContent: string;
+  workspaceContent?: string;
+  sessionTruncated: boolean;
+  workspaceTruncated: boolean;
+  stablePrompt: string;
+  runtimeContext: string;
+}
+
 /**
  * renderer 侧的 MCP server 配置视图。
  * 与主进程 McpServerConfig 对应（effectKindOverrides 等高级字段对 UI 不可见）。
@@ -370,9 +385,6 @@ export interface SettingsApi {
   openCustomStylePrompt?: () => Promise<{ ok: boolean; filePath?: string; error?: string }>;
   getTimeoutSettings: () => Promise<TimeoutSettings>;
   saveTimeoutSettings: (config: Partial<TimeoutSettings>) => Promise<TimeoutSettings>;
-  pickUiFont: () => Promise<string | null>;
-  importUiFont: (sourcePath: string) => Promise<UiFont>;
-  resetUiFont: () => Promise<UiFont>;
   openSidebar: () => void;
   closeSidebar: () => void;
   openTasks: () => void;

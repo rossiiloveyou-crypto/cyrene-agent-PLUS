@@ -5,7 +5,7 @@ import type {
   MomentCreatePostInput,
   MomentFeedItem,
 } from "../../../../shared/moments-types";
-import { useTranslation } from "../../i18n";
+import { translateCharacterName, useTranslation } from "../../i18n";
 import { useUserAvatar } from "../../hooks/useUserAvatar";
 import { useUserNickname } from "../../hooks/useUserNickname";
 import { MomentComposer } from "./MomentComposer";
@@ -21,6 +21,7 @@ import {
 } from "./moments-utils";
 import { getCharacterAvatar } from "../../character-avatars";
 import { resolveAsset } from "../../../../shared/renderer-base";
+import { useCyreneAvatar } from "../../hooks/useCyreneAvatar";
 import momentsIconUrl from "../../assets/moments.png?url";
 import "./MomentsPanel.css";
 
@@ -211,8 +212,6 @@ export function MomentsPanel() {
   );
 }
 
-const CYRENE_AVATAR_URL = resolveAsset("avatars/cyrene-avatar.png");
-
 const NOTICE_ACTION_KEYS: Record<MomentNoticeItem["kind"], string> = {
   like: "moments.notice.actionLike",
   comment: "moments.notice.actionComment",
@@ -222,10 +221,11 @@ const NOTICE_ACTION_KEYS: Record<MomentNoticeItem["kind"], string> = {
 /** 通知行：头像 + 「谁 对你做了什么」 + 内容摘录 + 相对时间，点击跳转到对应动态 */
 function NoticeRow({ notice, onClick }: { notice: MomentNoticeItem; onClick: (notice: MomentNoticeItem) => void }) {
   const { t } = useTranslation();
+  const cyreneAvatarUrl = useCyreneAvatar();
   const isCyrene = notice.actor === "cyrene";
   // 昔涟走专属头像，角色走头像池（朋友圈专用小头像），两者都不是（理论不会出现）则无头像
-  const avatarUrl = isCyrene ? CYRENE_AVATAR_URL : getCharacterAvatar(notice.actor);
-  const displayName = isCyrene ? t("moments.cyreneName") : notice.actor;
+  const avatarUrl = isCyrene ? cyreneAvatarUrl : getCharacterAvatar(notice.actor);
+  const displayName = isCyrene ? t("moments.cyreneName") : translateCharacterName(notice.actor, t);
   return (
     <button
       type="button"

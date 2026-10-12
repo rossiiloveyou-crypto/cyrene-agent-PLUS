@@ -68,7 +68,7 @@ export interface UncertainEffect {
   fingerprint: string;
   toolName: string;
   message: string;
-  repeatAuthorization?: { source: "user"; grantedAt: number };
+  repeatAuthorization?: { id: string; source: "user"; grantedAt: number };
 }
 
 // ── Agent State（Agent 运行期可恢复状态）────────────────
@@ -120,6 +120,10 @@ export interface HarnessConfig {
   maxParallelToolCalls: number;
   /** 工具轮上限；0 表示不限。达到上限后不再发起下一次模型请求。 */
   maxRounds: number;
+  /** 主模型调用的额外重试次数；旧调用回退到 5。 */
+  modelRequestMaxRetries?: number;
+  /** 单次模型请求连续无协议增量超时（毫秒）；旧调用回退到 60 秒。 */
+  modelRequestIdleTimeoutMs?: number;
   /** 总超时（毫秒） */
   totalTimeoutMs: number;
   /** 用户等待超时（毫秒，ask_user 等待期间不计入执行超时） */
@@ -142,6 +146,8 @@ export interface HarnessConfig {
 export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
   maxParallelToolCalls: 4,
   maxRounds: 0,
+  modelRequestMaxRetries: 5,
+  modelRequestIdleTimeoutMs: 60_000,
   totalTimeoutMs: 0,
   userWaitTimeoutMs: 120_000,
   contextWindowTokens: 256_000,
@@ -154,6 +160,7 @@ export const DEFAULT_HARNESS_CONFIG: HarnessConfig = {
 // ── Harness 事件（给 UI / 桥层）──────────────────────────
 
 export type HarnessEvent =
+  | { type: "model_retry"; status: import("../../../shared/model-retry").ModelRetryStatus }
   | { type: "round_start"; roundId: string }
   | { type: "round_end"; roundId: string }
   | { type: "candidate_text_delta"; roundId: string; delta: string }
@@ -265,6 +272,8 @@ export interface HarnessInput {
   initialState?: AgentState;
   /** 普通工具列表（从 registry 获取） */
   tools: ToolDefinition[];
+  /** 当前 run 是否持有浏览器租约；用于按轮生成浏览器工具清单。 */
+  browserControlState?: () => "active" | "inactive";
   /** 厂商适配器 ID（用于 LLM 调用） */
   vendorConfig: import("../vendors/types").VendorConfig;
   /** 配置 */
@@ -316,6 +325,10 @@ export interface HarnessInput {
   transcriptSink?: import("../transcript-sink").TranscriptSink;
   /** 父会话注入的前台子任务执行器；子 Harness 不会继续注入它。 */
   taskExecutor?: (request: import("../task-runtime").TaskExecuteRequest) => Promise<import("../task-runtime").TaskExecuteResult>;
+  /** 父会话注入的子代理关闭器；子 Harness 不会继续注入它。 */
+  closeTaskExecutor?: (request: import("../task-runtime").TaskCloseRequest) => import("../task-runtime").TaskCloseResult | Promise<import("../task-runtime").TaskCloseResult>;
+  /** 当前父会话仍开启上下文的黄金裔子代理；只用于主 Agent 的 task 工具提示。 */
+  openTaskCompanions?: string[];
 }
 
 export interface HarnessResult {
@@ -342,6 +355,7 @@ export interface HarnessResult {
    */
   terminal?: CyreneRunTerminalResult;
   /** 总执行轮数 */
+  modelFailure?: import("../../../shared/model-error").ModelFailureInfo;
   rounds: number;
 }
 

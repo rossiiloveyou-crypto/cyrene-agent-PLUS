@@ -11,7 +11,12 @@ export interface MosslandAsrConfig {
   apiKey: string;
 }
 
-export type AsrConfig = AliyunAsrConfig | MosslandAsrConfig;
+export interface MiniMaxAsrConfig {
+  engine: "minimax";
+  apiKey: string;
+}
+
+export type AsrConfig = AliyunAsrConfig | MosslandAsrConfig | MiniMaxAsrConfig;
 
 let asrConfigGetter: (() => AsrConfig | null) | null = null;
 

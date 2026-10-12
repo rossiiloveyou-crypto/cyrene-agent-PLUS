@@ -43,13 +43,14 @@ import {
 } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import type { ApiTransport } from "../../../../shared/api-endpoint";
+import { MAX_PARALLEL_TOOL_CALLS } from "../../../../shared/task-session";
 import { resolveApiEndpoint } from "../../../../shared/api-endpoint";
 import type { ReasoningEffort, ReasoningPreference } from "../../../../shared/reasoning";
 import { normalizeManualReasoningConfig, type ManualReasoningConfig, type ManualReasoningStyle } from "../../../../shared/manual-reasoning";
 import type { TimeoutSettings } from "../../../../shared/timeout-types";
 import { DEFAULT_TIMEOUT_SETTINGS } from "../../../../shared/timeout-types";
 import { CUSTOM_ENDPOINT_PROVIDERS, getCustomEndpointMode, type CustomEndpointMode } from "../../../settings/custom-endpoint-state";
-import { MODEL_PRESETS } from "../../../settings/api/presets";
+import { MODEL_PRESETS, presetTransportUrl } from "../../../settings/api/presets";
 import type { ModelPreset } from "../../../settings/shared/types";
 import { useTranslation } from "../../i18n";
 import { SettingsInput, SettingsPasswordInput, SettingsSwitch } from "../../components/ui/SettingsControls";
@@ -80,6 +81,7 @@ interface ModelProfile {
 
 interface RuntimeValues {
   modelRequestTimeoutSec: number | null;
+  modelRequestMaxRetries: number | null;
   userChoiceTimeoutSec: number | null;
   maxParallelToolCalls: number | null;
   testTimeout: number | null;
@@ -109,6 +111,7 @@ const iconByProvider: Record<string, ProviderIconSet> = {
 
 const runtimeDefaults: RuntimeValues = {
   modelRequestTimeoutSec: 60,
+  modelRequestMaxRetries: 5,
   userChoiceTimeoutSec: DEFAULT_TIMEOUT_SETTINGS.userChoiceTimeout / 1000,
   maxParallelToolCalls: 4,
   testTimeout: DEFAULT_TIMEOUT_SETTINGS.testTimeout,
@@ -144,8 +147,7 @@ function profilePreset(provider: string): ModelPreset {
 }
 
 function transportUrl(preset: ModelPreset, transport: ApiTransport): string {
-  if (transport === "anthropic" && preset.anthropicBaseUrl) return preset.anthropicBaseUrl;
-  return preset.baseUrl;
+  return presetTransportUrl(preset, transport);
 }
 
 // 编辑视图不变量：旧档案（无 models）进编辑页 = 以当前模型构成的单元素清单，不能显示空列表
@@ -165,6 +167,26 @@ interface ModelOptionDraft {
   multimodal: boolean;
   contextWindowTokens: string;
   manualReasoning?: ManualReasoningConfig;
+}
+
+interface ModelProfileDraft {
+  provider: string;
+  displayName: string;
+  baseUrl: string;
+  model: string;
+  models: string[];
+  apiKey: string;
+  transport: ApiTransport;
+  reasoning?: ReasoningPreference;
+  modelOptions: Record<string, ModelOptionDraft>;
+}
+
+function modelProfileDraftSignature(draft: ModelProfileDraft): string {
+  return JSON.stringify({
+    ...draft,
+    models: [...draft.models],
+    modelOptions: Object.fromEntries(draft.models.map((item) => [item, draft.modelOptions[item]])),
+  });
 }
 
 const MANUAL_EFFORTS: ReasoningEffort[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
@@ -194,6 +216,7 @@ export function ModelSettingsPanel() {
   const [profiles, setProfiles] = useState<ModelProfile[]>([]);
   const [defaultProfileId, setDefaultProfileId] = useState<string>();
   const [activeId, setActiveId] = useState<string>();
+  const [savedDraftSignature, setSavedDraftSignature] = useState<string>();
   const [provider, setProvider] = useState(MODEL_PRESETS[0].providerName);
   const [displayName, setDisplayName] = useState(MODEL_PRESETS[0].shortName);
   const [baseUrl, setBaseUrl] = useState(MODEL_PRESETS[0].baseUrl);
@@ -238,6 +261,18 @@ export function ModelSettingsPanel() {
   const preset = useMemo(() => findPreset(provider), [provider]);
   const customMode = getCustomEndpointMode(provider);
   const endpointPreview = baseUrl.trim() ? resolveApiEndpoint(baseUrl, transport).url : "";
+  const currentDraftSignature = modelProfileDraftSignature({
+    provider,
+    displayName,
+    baseUrl,
+    model,
+    models,
+    apiKey,
+    transport,
+    reasoning,
+    modelOptions,
+  });
+  const hasUnsavedProfileChanges = !activeId || (savedDraftSignature !== undefined && currentDraftSignature !== savedDraftSignature);
   const providerOptions = MODEL_PRESETS.filter((item) => !item.hiddenInPresetList).map((item) => ({
     value: item.providerName,
     label: <span className="cy-model-provider-option">{providerIcon(item.providerName, 20)}<span>{item.shortName}</span></span>,
@@ -264,6 +299,7 @@ export function ModelSettingsPanel() {
         const generalValues = general && typeof general === "object" ? general as Record<string, unknown> : {};
         setRuntime({
           modelRequestTimeoutSec: timeout.modelRequestTimeoutSec ?? runtimeDefaults.modelRequestTimeoutSec,
+          modelRequestMaxRetries: typeof config.modelRequestMaxRetries === "number" ? config.modelRequestMaxRetries : runtimeDefaults.modelRequestMaxRetries,
           userChoiceTimeoutSec: Math.round(timeout.userChoiceTimeout / 1000),
           maxParallelToolCalls: typeof generalValues.maxParallelToolCalls === "number" ? generalValues.maxParallelToolCalls : runtimeDefaults.maxParallelToolCalls,
           testTimeout: timeout.testTimeout ?? runtimeDefaults.testTimeout,
@@ -288,23 +324,38 @@ export function ModelSettingsPanel() {
   function applyProfile(profile: ModelProfile) {
     const nextPreset = profilePreset(profile.provider);
     const nextTransport = profile.explicitTransport ?? nextPreset.transport;
+    const nextDisplayName = profile.displayName ?? nextPreset.shortName;
+    const nextBaseUrl = profile.baseUrl || transportUrl(nextPreset, nextTransport);
     setProvider(profile.provider);
-    setDisplayName(profile.displayName ?? nextPreset.shortName);
-    setBaseUrl(profile.baseUrl || transportUrl(nextPreset, nextTransport));
+    setDisplayName(nextDisplayName);
+    setBaseUrl(nextBaseUrl);
     const nextModels = editableModelsOf(profile);
     setModels(nextModels);
-    setModelOptions(Object.fromEntries(nextModels.map((item) => {
+    const nextModelOptions = Object.fromEntries(nextModels.map((item) => {
       const option = profile.modelOptions?.[item];
       return [item, {
         multimodal: option?.multimodal ?? profile.multimodal ?? true,
         contextWindowTokens: String(option?.contextWindowTokens ?? profile.contextWindowTokens ?? 256000),
         manualReasoning: option?.manualReasoning,
       }];
-    })));
+    }));
+    setModelOptions(nextModelOptions);
     setModel(profile.model ?? "");
-    setApiKey(profile.apiKey === LOCAL_ENDPOINT_AUTH_FALLBACK ? "" : profile.apiKey ?? "");
+    const nextApiKey = profile.apiKey === LOCAL_ENDPOINT_AUTH_FALLBACK ? "" : profile.apiKey ?? "";
+    setApiKey(nextApiKey);
     setTransport(nextTransport);
     setReasoning(profile.reasoning);
+    setSavedDraftSignature(modelProfileDraftSignature({
+      provider: profile.provider,
+      displayName: nextDisplayName,
+      baseUrl: nextBaseUrl,
+      model: profile.model ?? "",
+      models: nextModels,
+      apiKey: nextApiKey,
+      transport: nextTransport,
+      reasoning: profile.reasoning,
+      modelOptions: nextModelOptions,
+    }));
     setNewModel("");
     setStatus(undefined);
   }
@@ -312,9 +363,10 @@ export function ModelSettingsPanel() {
   function startNewDraft(nextProvider = MODEL_PRESETS[0].providerName) {
     const nextPreset = findPreset(nextProvider);
     setActiveId(undefined);
+    setSavedDraftSignature(undefined);
     setProvider(nextProvider);
     setDisplayName(nextPreset.shortName);
-    setBaseUrl(nextPreset.baseUrl);
+    setBaseUrl(transportUrl(nextPreset, nextPreset.transport));
     setModels(presetModelsOf(nextPreset));
     setModelOptions(Object.fromEntries(presetModelsOf(nextPreset).map((item) => [item, defaultModelOption()])));
     setModel(nextPreset.mainModels[0] ?? "");
@@ -330,7 +382,7 @@ export function ModelSettingsPanel() {
     const nextMode = getCustomEndpointMode(nextProvider);
     setProvider(nextProvider);
     setDisplayName(nextPreset.shortName);
-    setBaseUrl(nextPreset.baseUrl);
+    setBaseUrl(transportUrl(nextPreset, nextPreset.transport));
     setModels(presetModelsOf(nextPreset));
     setModelOptions(Object.fromEntries(presetModelsOf(nextPreset).map((item) => [item, defaultModelOption()])));
     setModel(nextPreset.mainModels[0] ?? "");
@@ -342,7 +394,7 @@ export function ModelSettingsPanel() {
   }
 
   function changeTransport(nextTransport: ApiTransport) {
-    const knownUrls = [preset.baseUrl, preset.anthropicBaseUrl].filter((item): item is string => Boolean(item));
+    const knownUrls = [preset.baseUrl, preset.anthropicBaseUrl, preset.responsesBaseUrl].filter((item): item is string => Boolean(item));
     const currentIsPreset = knownUrls.some((item) => item.replace(/\/$/, "") === baseUrl.trim().replace(/\/$/, ""));
     if (currentIsPreset) setBaseUrl(transportUrl(preset, nextTransport));
     setTransport(nextTransport);
@@ -665,6 +717,7 @@ export function ModelSettingsPanel() {
   async function saveRuntime() {
     if (!window.settings) return;
     const requestTimeout = runtime.modelRequestTimeoutSec;
+    const maxRetries = Number(runtime.modelRequestMaxRetries);
     const userWait = Number(runtime.userChoiceTimeoutSec);
     const parallel = Number(runtime.maxParallelToolCalls);
     const testTimeout = Number(runtime.testTimeout);
@@ -672,11 +725,15 @@ export function ModelSettingsPanel() {
       setStatus({ kind: "error", text: t("settingsPage.modelSettings.requestTimeoutRange") });
       return;
     }
+    if (!Number.isInteger(maxRetries) || maxRetries < 0 || maxRetries > 10) {
+      setStatus({ kind: "error", text: t("settingsPage.modelSettings.retryCountRange") });
+      return;
+    }
     if (!Number.isInteger(userWait) || userWait < 1) {
       setStatus({ kind: "error", text: t("settingsPage.modelSettings.userWaitRange") });
       return;
     }
-    if (!Number.isInteger(parallel) || parallel < 1 || parallel > 8) {
+    if (!Number.isInteger(parallel) || parallel < 1 || parallel > MAX_PARALLEL_TOOL_CALLS) {
       setStatus({ kind: "error", text: t("settingsPage.modelSettings.parallelRange") });
       return;
     }
@@ -692,6 +749,7 @@ export function ModelSettingsPanel() {
         testTimeout,
       } as Partial<TimeoutSettings>);
       await window.settings.saveGeneral({ maxParallelToolCalls: parallel });
+      await window.settings.saveConfig({ modelRequestMaxRetries: maxRetries });
       setStatus({ kind: "success", text: t("settingsPage.modelSettings.runtimeSaved") });
     } catch {
       setStatus({ kind: "error", text: t("settingsPage.saveFailed") });
@@ -709,13 +767,18 @@ export function ModelSettingsPanel() {
           <small>{t("settingsPage.modelSettings.requestTimeoutHint")}</small>
         </label>
         <label className="cy-model-field">
+          <span>{t("settingsPage.modelSettings.retryCount")}</span>
+          <InputNumber min={0} max={10} step={1} value={runtime.modelRequestMaxRetries} onChange={(value) => setRuntime((current) => ({ ...current, modelRequestMaxRetries: value }))} />
+          <small>{t("settingsPage.modelSettings.retryCountHint")}</small>
+        </label>
+        <label className="cy-model-field">
           <span>{t("settingsPage.modelSettings.userWait")}</span>
           <InputNumber min={1} value={runtime.userChoiceTimeoutSec} onChange={(value) => setRuntime((current) => ({ ...current, userChoiceTimeoutSec: value }))} addonAfter={t("settingsPage.modelSettings.seconds")} />
           <small>{t("settingsPage.modelSettings.userWaitHint")}</small>
         </label>
         <label className="cy-model-field">
           <span>{t("settingsPage.modelSettings.parallel")}</span>
-          <SettingsInput className="cy-model-runtime__parallel" type="number" min={1} max={8} step={1} value={runtime.maxParallelToolCalls ?? ""} aria-label={t("settingsPage.modelSettings.parallel")} onChange={(event) => setRuntime((current) => ({ ...current, maxParallelToolCalls: event.target.value === "" ? null : Number(event.target.value) }))} />
+          <SettingsInput className="cy-model-runtime__parallel" type="number" min={1} max={MAX_PARALLEL_TOOL_CALLS} step={1} value={runtime.maxParallelToolCalls ?? ""} aria-label={t("settingsPage.modelSettings.parallel")} onChange={(event) => setRuntime((current) => ({ ...current, maxParallelToolCalls: event.target.value === "" ? null : Number(event.target.value) }))} />
           <small>{t("settingsPage.modelSettings.parallelHint")}</small>
         </label>
         <label className="cy-model-field">
@@ -743,37 +806,49 @@ export function ModelSettingsPanel() {
       </header>
 
       <section className="cy-model-layout" aria-label={t("settingsPage.modelSettings.title")}>
-        <aside className="cy-model-list">
-          <div className="cy-model-list__heading">
-            <strong>{t("settingsPage.modelSettings.profiles")}</strong>
-            <span>{profiles.length}</span>
-          </div>
-          <div className="cy-model-list__items">
-            {profiles.map((item) => (
-              <Card
-                as="button"
-                className={`cy-model-profile ${activeId === item.id ? "is-active" : ""}`}
-                key={item.id}
-                type="button"
-                aria-current={activeId === item.id ? "true" : undefined}
-                onClick={() => { setActiveId(item.id); applyProfile(item); }}
-              >
-                <span className="cy-model-profile__icon">{providerIcon(item.provider, 22)}</span>
-                <span className="cy-model-profile__copy">
-                  <strong>{item.displayName || item.model || findPreset(item.provider).shortName}</strong>
-                  <small>{findPreset(item.provider).shortName} · {item.model}</small>
-                </span>
-                {item.id === defaultProfileId && <Tag className="cy-model-default-tag">{t("settingsPage.modelSettings.default")}</Tag>}
+        <div className="cy-model-sidebar">
+          <aside className="cy-model-list">
+            <div className="cy-model-list__heading">
+              <strong>{t("settingsPage.modelSettings.profiles")}</strong>
+              <span>{profiles.length}</span>
+            </div>
+            <div className="cy-model-list__items">
+              {profiles.map((item) => (
+                <Card
+                  as="button"
+                  className={`cy-model-profile ${activeId === item.id ? "is-active" : ""}`}
+                  key={item.id}
+                  type="button"
+                  aria-current={activeId === item.id ? "true" : undefined}
+                  onClick={() => { setActiveId(item.id); applyProfile(item); }}
+                >
+                  <span className="cy-model-profile__icon">{providerIcon(item.provider, 22)}</span>
+                  <span className="cy-model-profile__copy">
+                    <strong>{item.displayName || item.model || findPreset(item.provider).shortName}</strong>
+                    <small>{findPreset(item.provider).shortName} · {item.model}</small>
+                  </span>
+                  {item.id === defaultProfileId && <Tag className="cy-model-default-tag">{t("settingsPage.modelSettings.default")}</Tag>}
+                </Card>
+              ))}
+              {profiles.length === 0 && <Empty className="cy-model-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("settingsPage.modelSettings.noProfiles")} />}
+              <Card as="button" className={`cy-model-profile cy-model-profile--draft ${!activeId ? "is-active" : ""}`} type="button" onClick={() => startNewDraft()}>
+                <span className="cy-model-profile__icon"><Plus size={18} /></span>
+                <span className="cy-model-profile__copy"><strong>{t("settingsPage.modelSettings.newProfile")}</strong><small>{t("settingsPage.modelSettings.newProfileHint")}</small></span>
               </Card>
-            ))}
-            {profiles.length === 0 && <Empty className="cy-model-empty" image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("settingsPage.modelSettings.noProfiles")} />}
-            <Card as="button" className={`cy-model-profile cy-model-profile--draft ${!activeId ? "is-active" : ""}`} type="button" onClick={() => startNewDraft()}>
-              <span className="cy-model-profile__icon"><Plus size={18} /></span>
-              <span className="cy-model-profile__copy"><strong>{t("settingsPage.modelSettings.newProfile")}</strong><small>{t("settingsPage.modelSettings.newProfileHint")}</small></span>
-            </Card>
-          </div>
-          <p className="cy-model-list__footnote">{t("settingsPage.modelSettings.localStorageNote")}</p>
-        </aside>
+            </div>
+            <p className="cy-model-list__footnote">{t("settingsPage.modelSettings.localStorageNote")}</p>
+          </aside>
+          {hasUnsavedProfileChanges && (
+            <Alert
+              className="cy-model-unsaved-alert"
+              type="warning"
+              showIcon
+              message={t("settingsPage.modelSettings.unsavedProfileChanges")}
+              role="status"
+              aria-live="polite"
+            />
+          )}
+        </div>
 
         <main className="cy-model-editor">
           <div className="cy-model-editor__heading">

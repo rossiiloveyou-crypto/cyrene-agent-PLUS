@@ -12,6 +12,8 @@ export interface UserProfile {
   defaultCity: string;
   /** 性别：secret(保密) | male(男) | female(女) */
   gender: string;
+  /** 回复语言："auto" 表示跟随界面语言，其余为 BCP 47（如 zh-CN / en / ja-JP） */
+  replyLanguage: string;
 }
 
 export const DEFAULT_USER_PROFILE: UserProfile = {
@@ -22,6 +24,7 @@ export const DEFAULT_USER_PROFILE: UserProfile = {
   avatarPath: "",
   defaultCity: "",
   gender: "secret",
+  replyLanguage: "auto",
 };
 
 export function getSettingsPath(): string {
@@ -38,6 +41,20 @@ export function getUserProfilePath(): string {
 
 export function getAvatarPath(): string {
   return path.join(app.getPath("userData"), "avatar.png");
+}
+
+export const CYRENE_AVATAR_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp"] as const;
+
+export function getCyreneAvatarPath(extension: typeof CYRENE_AVATAR_EXTENSIONS[number]): string {
+  return path.join(app.getPath("userData"), `cyrene-avatar${extension}`);
+}
+
+export function findCyreneAvatarPath(): string | null {
+  const candidates = CYRENE_AVATAR_EXTENSIONS
+    .map((extension) => getCyreneAvatarPath(extension))
+    .filter((filePath) => fs.existsSync(filePath));
+  if (candidates.length === 0) return null;
+  return candidates.sort((left, right) => fs.statSync(right).mtimeMs - fs.statSync(left).mtimeMs)[0] ?? null;
 }
 
 export function getRagStorePath(): string {

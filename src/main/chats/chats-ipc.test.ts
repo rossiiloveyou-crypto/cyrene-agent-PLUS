@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: any[]) => unknown>(),
   openPath: vi.fn(async () => ""),
   showItemInFolder: vi.fn(),
+  windows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void } }>,
 }));
 
 vi.mock("electron", () => ({
@@ -20,7 +21,7 @@ vi.mock("electron", () => ({
     showItemInFolder: mocks.showItemInFolder,
   },
   BrowserWindow: {
-    getAllWindows: () => [],
+    getAllWindows: () => mocks.windows,
   },
   ipcMain: {
     handle: vi.fn((channel: string, handler: (...args: any[]) => unknown) => {
@@ -38,7 +39,23 @@ describe("chats IPC mode filtering", () => {
     mocks.handlers.clear();
     mocks.openPath.mockClear();
     mocks.showItemInFolder.mockClear();
+    mocks.windows = [];
     mocks.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyrene-chats-ipc-"));
+  });
+
+  it("broadcastCompactionPhase 只向存活窗口推送压缩阶段", async () => {
+    const { broadcastCompactionPhase } = await import("./chats-ipc");
+    const send = vi.fn();
+    const destroyedSend = vi.fn();
+    mocks.windows = [
+      { isDestroyed: () => false, webContents: { send } },
+      { isDestroyed: () => true, webContents: { send: destroyedSend } },
+    ];
+
+    broadcastCompactionPhase("c1", "running");
+
+    expect(send).toHaveBeenCalledWith(IPC.CHATS_COMPACTION_PHASE, { sessionId: "c1", phase: "running" });
+    expect(destroyedSend).not.toHaveBeenCalled();
   });
 
   it("returns only Code sessions for CHATS_LIST({ mode: \"code\" })", async () => {
@@ -122,6 +139,72 @@ describe("chats IPC mode filtering", () => {
       expect.objectContaining({ kind: "compaction_checkpoint" }),
     ]));
     expect(session.messages).toEqual([]);
+
+    // 压缩完成后：session 级 usage 快照落盘（环形图重载即显示压缩后占用）
+    const { getSessionView } = await import("./chats-store");
+    const afterCompact = getSessionView(session.id);
+    expect(afterCompact?.currentContextUsage?.phase).toBe("preRequest");
+    expect(afterCompact?.currentContextUsage?.totalTokens).toBeGreaterThan(0);
+  });
+
+  it("preserves the latest message usage breakdown after manual compaction", async () => {
+    const { registerChatsIpc } = await import("./chats-ipc");
+    const { getConversationTranscriptStore } = await import("../orchestrator/conversation-transcript-store");
+    const { ConversationJournalService } = await import("../orchestrator/conversation-journal-service");
+    const { ConversationTranscriptCompactor } = await import("../orchestrator/conversation-transcript-compactor");
+    const store = getConversationTranscriptStore(mocks.userDataDir);
+    const journal = new ConversationJournalService(store);
+    registerChatsIpc(undefined, {
+      transcriptCompactor: new ConversationTranscriptCompactor({ store, summarize: async () => "简短摘要" }),
+    });
+    const create = mocks.handlers.get(IPC.CHATS_CREATE);
+    const compact = mocks.handlers.get(IPC.CHATS_COMPACT);
+    const get = mocks.handlers.get(IPC.CHATS_GET);
+    if (!create || !compact || !get) throw new Error("compaction IPC handlers were not registered");
+    const event = { sender: {} };
+    const session = await create(event, { mode: "chat" }) as { id: string };
+    await store.append(session.id, {
+      id: "usage-u1", at: 1, kind: "user", turnId: "u1", revision: 1,
+      payload: { text: "之前的长对话".repeat(30) },
+    });
+    await store.append(session.id, {
+      id: "usage-a1", at: 2, kind: "assistant", turnId: "a1",
+      payload: { role: "assistant", content: "之前的回复" },
+    });
+    await journal.appendPresentationNext(session.id, "usage-a1", "usage:terminal", {
+      contextUsage: {
+        phase: "terminal", contextWindowTokens: 256000, totalTokens: 25100,
+        messageCount: 2, updatedAt: 100,
+        categories: [
+          { key: "systemPrompt", tokens: 5900 },
+          { key: "tools", tokens: 13500 },
+          { key: "skills", tokens: 4000 },
+          { key: "runtimeAndToolLogs", tokens: 1400 },
+          { key: "conversation", tokens: 300 },
+          { key: "other", tokens: 0 },
+        ],
+      },
+    });
+    await store.append(session.id, {
+      id: "usage-u2", at: 3, kind: "user", turnId: "u2", revision: 1,
+      payload: { text: "最新问题" },
+    });
+    const { setSessionContextUsage } = await import("./chats-store");
+    setSessionContextUsage(session.id, {
+      phase: "preRequest", contextWindowTokens: 256000, totalTokens: 1,
+      messageCount: 0, updatedAt: 1,
+      categories: [{ key: "systemPrompt", tokens: 1 }],
+    });
+
+    expect((await journal.readProjection(session.id)).messages.some((message) => message.contextUsage?.phase === "terminal")).toBe(true);
+    await expect(compact(event, { sessionId: session.id, retainTokens: 1 })).resolves.toEqual(
+      expect.objectContaining({ ok: true }),
+    );
+
+    const usage = (await get(event, session.id) as { currentContextUsage?: { categories: Array<{ key: string; tokens: number }> } } | null)?.currentContextUsage;
+    expect(Object.fromEntries(usage?.categories.map(({ key, tokens }) => [key, tokens]) ?? [])).toEqual(
+      expect.objectContaining({ systemPrompt: 5900, tools: 13500, skills: 4000 }),
+    );
   });
 
   it("normalizes a manual summarizer failure to TRANSCRIPT_COMPACTION_REQUIRED", async () => {
@@ -134,6 +217,34 @@ describe("chats IPC mode filtering", () => {
     await expect(compact({ sender: {} }, { sessionId: "c1" })).resolves.toEqual({
       ok: false, error: "TRANSCRIPT_COMPACTION_REQUIRED",
     });
+  });
+
+  it("dev 演示入口生成独立会话并走真实自动压缩链路", async () => {
+    const { registerChatsIpc } = await import("./chats-ipc");
+    registerChatsIpc(undefined, {
+      // demo 入口内部自建假摘要 compactor，不走全局注入
+      transcriptCompactor: { compact: vi.fn() } as any,
+    });
+    const demo = mocks.handlers.get(IPC.CHATS_SEED_COMPACTION_DEMO);
+    if (!demo) throw new Error("demo IPC handler was not registered");
+    const result = await demo({ sender: {} }) as { ok: boolean; sessionId?: string };
+    expect(result.ok).toBe(true);
+    expect(result.sessionId).toBeTruthy();
+
+    // 投影：假历史（含工具轮合并）+ 自动压缩 marker + 压缩后新消息。
+    // 旧历史压缩后已进归档区，必须走 journal 的 readProjection 合成视图。
+    const { getConversationTranscriptStore } = await import("../orchestrator/conversation-transcript-store");
+    const { ConversationJournalService } = await import("../orchestrator/conversation-journal-service");
+    const journal = new ConversationJournalService(getConversationTranscriptStore(mocks.userDataDir));
+    const messages = (await journal.readProjection(result.sessionId!))?.messages ?? [];
+    const marker = messages.find((item) => item.compaction);
+    expect(marker?.compaction).toEqual({ trigger: "automatic" });
+    expect(messages.some((item) => item.content.includes("TODO 注释整理成清单"))).toBe(true);
+    expect(messages.some((item) => item.content.includes("按优先级排一下"))).toBe(true);
+
+    // session 级 usage 快照已写入（环形图数据源）
+    const { getSessionView } = await import("./chats-store");
+    expect(getSessionView(result.sessionId!)?.currentContextUsage?.totalTokens).toBeGreaterThan(0);
   });
 
   it("runs the controller through the real bridge handler before api.run and fails closed for a deep patch", async () => {

@@ -286,7 +286,7 @@ export const webSearchTool: ToolDefinition = {
     "- 用户只给关键词，没给具体网址\n\n" +
     "不要用于：\n" +
     "- 用户已经给了明确网址 -> 用 fetch_url\n" +
-    "- 用户问本机文件 -> read_file / list_dir\n" +
+    "- 用户问本机文件 -> Read / Glob\n" +
     "- 能凭已有知识直接回答的简单问题\n\n" +
     "参数：query（必填，搜索关键词）。",
   enabled: true,

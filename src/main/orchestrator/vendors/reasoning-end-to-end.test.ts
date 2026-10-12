@@ -11,6 +11,7 @@ import { describe, expect, test } from "vitest";
 import { OpenAICompatAdapter } from "./openai-adapter";
 import { AnthropicAdapter } from "./anthropic-adapter";
 import { ResponsesAdapter } from "./responses-adapter";
+import { getCapabilityOrOpenAI } from "./capabilities";
 import type { ProviderCapability, VendorConfig } from "./types";
 import type { ReasoningPreference } from "../../../shared/reasoning";
 import type { ManualReasoningConfig } from "../../../shared/manual-reasoning";
@@ -27,7 +28,6 @@ const chatgptCap: ProviderCapability = {
   thinkingField: "reasoning_content",
   cacheStrategy: "auto",
   testStrategy: "text",
-  supportsVision: false,
 };
 
 const claudeCap: ProviderCapability = {
@@ -42,7 +42,6 @@ const claudeCap: ProviderCapability = {
   thinkingField: "thinking",
   cacheStrategy: "cache_control",
   testStrategy: "text",
-  supportsVision: true,
   disabled: true,
 };
 
@@ -58,9 +57,22 @@ const mimoCap: ProviderCapability = {
   thinkingField: "reasoning_content",
   cacheStrategy: "auto",
   testStrategy: "text",
-  supportsVision: true,
   visionBaseUrl: "https://api.xiaomimimo.com/v1",
 };
+
+test("豆包托管 glm-5.3 的实际请求保留强制思考与 high 档位", () => {
+  const cap = getCapabilityOrOpenAI("豆包（火山方舟）");
+  const adapter = new OpenAICompatAdapter("doubao", cap);
+  const model = "glm-5.3";
+  const http = adapter.buildRequest(
+    { model, messages: [{ role: "user", content: "hi" }] },
+    cfgOf(cap, { model, reasoning: { mode: "off" } }),
+  );
+  const body = JSON.parse(http.body);
+  expect(body.thinking).toEqual({ type: "enabled" });
+  expect(body.reasoning_effort).toBe("high");
+  expect(body.enable_thinking).toBeUndefined();
+});
 
 function cfgOf(
   cap: ProviderCapability,
@@ -195,7 +207,6 @@ describe("G4 cfg.reasoning 改动 → JSON body 改动（契约：adapter 必须
       thinkingField: "thinking",
       cacheStrategy: "cache_control",
       testStrategy: "text",
-      supportsVision: true,
       visionBaseUrl: "https://api.minimaxi.com/v1",
     };
     const adapter = new AnthropicAdapter("minimax", miniMaxCap);
@@ -237,7 +248,6 @@ describe("G4 cfg.reasoning 改动 → JSON body 改动（契约：adapter 必须
       thinkingField: "reasoning_content",
       cacheStrategy: "auto",
       testStrategy: "text",
-      supportsVision: false,
     };
     const adapter = new OpenAICompatAdapter("deepseek", dsCap);
 
@@ -272,7 +282,6 @@ describe("G5 5+ 关键 capability 形态端到端", () => {
       thinkingField: "thinking",
       cacheStrategy: "prompt_cache_key",
       testStrategy: "text",
-      supportsVision: true,
     };
     const adapter = new OpenAICompatAdapter("kimi", kimiCap);
     const http = adapter.buildRequest(
@@ -296,7 +305,6 @@ describe("G5 5+ 关键 capability 形态端到端", () => {
       thinkingField: "thinking",
       cacheStrategy: "prompt_cache_key",
       testStrategy: "text",
-      supportsVision: true,
     };
     const adapter = new OpenAICompatAdapter("kimi", kimiCap);
     const http = adapter.buildRequest(
@@ -324,7 +332,6 @@ describe("G5 5+ 关键 capability 形态端到端", () => {
       thinkingField: "reasoning_content",
       cacheStrategy: "auto",
       testStrategy: "text",
-      supportsVision: false,
     };
     const adapter = new OpenAICompatAdapter("qwen", qwenCap);
     const http = adapter.buildRequest(
@@ -349,7 +356,6 @@ describe("G5 5+ 关键 capability 形态端到端", () => {
       thinkingField: "reasoning_content",
       cacheStrategy: "none",
       testStrategy: "text",
-      supportsVision: true,
     };
     const adapter = new OpenAICompatAdapter("doubao", doubaoCap);
     const http = adapter.buildRequest(

@@ -292,12 +292,14 @@ export class ILinkBotAdapter implements ChannelAdapter {
 
   async #pollLoop(): Promise<void> {
     if (!this.client || !this.pollAbort) return;
+    // 捕获本轮轮询的信号：stop() 会把它置空，循环体只认这一个信号。
+    const signal = this.pollAbort.signal;
     let buf = "";
     let sessionExpired = false;
 
-    while (!this.pollAbort.signal.aborted && !sessionExpired) {
+    while (!signal.aborted && !sessionExpired) {
       try {
-        const { messages, buf: newBuf } = await this.client.getUpdates(buf);
+        const { messages, buf: newBuf } = await this.client.getUpdates(buf, signal);
         buf = newBuf;
         for (const msg of messages) {
           await this.dispatchInbound(msg);
@@ -313,7 +315,7 @@ export class ILinkBotAdapter implements ChannelAdapter {
           };
           break;
         }
-        if (this.pollAbort?.signal.aborted) break;
+        if (signal.aborted) break;
         // 网络抖一下 backoff
         await new Promise((r) => setTimeout(r, 2_000));
       }
@@ -592,7 +594,7 @@ async function transcribeInboundWechatVoice(
   const cfg = getAsrConfig();
   if (!cfg
       || (cfg.engine === "aliyun" && (!cfg.appKey || !cfg.accessKeyId || !cfg.accessKeySecret))
-      || (cfg.engine === "mossland" && !cfg.apiKey)) {
+      || ((cfg.engine === "mossland" || cfg.engine === "minimax") && !cfg.apiKey)) {
     throw new Error("ASR 未配置");
   }
 
@@ -620,7 +622,7 @@ async function transcribePcmWithConfiguredAsr(pcm: Buffer, cfg: AsrConfig): Prom
     },
   );
 
-  if (cfg.engine === "mossland") {
+  if (cfg.engine === "mossland" || cfg.engine === "minimax") {
     await stream.start();
     stream.sendAudio(pcm);
     const completed = await stream.stop();
@@ -760,10 +762,14 @@ function isWechatAsrConfigured(): boolean {
       asrAliyunAccessKeyId?: unknown;
       asrAliyunAccessKeySecret?: unknown;
       ttsMosslandKey?: unknown;
+      asrMinimaxKey?: unknown;
     };
     if (settings.asrEngine === "local") return true;
     if (settings.asrEngine === "mossland") {
       return Boolean(typeof settings.ttsMosslandKey === "string" && settings.ttsMosslandKey.trim());
+    }
+    if (settings.asrEngine === "minimax") {
+      return Boolean(typeof settings.asrMinimaxKey === "string" && settings.asrMinimaxKey.trim());
     }
     if (settings.asrEngine !== "aliyun") return false;
     return Boolean(

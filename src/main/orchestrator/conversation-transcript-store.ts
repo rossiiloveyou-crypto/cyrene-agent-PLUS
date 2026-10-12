@@ -25,9 +25,6 @@ import {
   type TranscriptSnapshotV2,
 } from "./conversation-transcript-types";
 import type { ChatMessage as CanonicalChatMessage } from "./vendors/types";
-import { isContextUsageSnapshot } from "../../shared/context-usage";
-import { SHELL_VISIBLE_OUTPUT_LIMIT } from "../../shared/shell-output";
-import { normalizeMusicCardData } from "../../shared/music-card";
 
 const ROOT_DIR_NAME = "transcripts";
 const JSONL_FILE_NAME = "transcript.jsonl";
@@ -65,6 +62,19 @@ interface LoadedConversationState {
   projection: TranscriptSnapshotV2["projection"];
   projectionDigest?: string;
   archives: TranscriptSnapshotV2["archives"];
+}
+
+/** Only the append indexes stay in memory; presentation payloads remain on disk. */
+interface PresentationWriteCache {
+  dir: string;
+  activeFile: string;
+  maxSeq: number;
+  seenEntryIds: Set<string>;
+  mutationKeys: Set<string>;
+  revisions: Map<string, number>;
+  activeFingerprint: string;
+  manifestFingerprint: string;
+  identityFingerprint: string;
 }
 
 interface TranscriptGenerationManifest {
@@ -125,6 +135,7 @@ export class ConversationTranscriptStore {
   private readonly syncFile: (file: string) => Promise<void>;
   /** 每会话写队列尾（settled promise），串行化所有文件操作。 */
   private readonly queues = new Map<string, Promise<void>>();
+  private readonly presentationWriteCaches = new Map<string, PresentationWriteCache>();
 
   constructor(userDataRoot: string, options?: ConversationTranscriptStoreOptions) {
     this.root = path.join(userDataRoot, ROOT_DIR_NAME);
@@ -136,6 +147,7 @@ export class ConversationTranscriptStore {
     // 入队前先做协议校验，非法草稿快速失败且不占队列
     assertValidTranscriptDraft(input);
     return this.enqueue(conversationId, async () => {
+      this.presentationWriteCaches.delete(conversationId);
       const state = await this.loadState(conversationId);
 
       // 幂等主键：entryId 已存在，first-write-wins，返回原条目
@@ -189,6 +201,7 @@ export class ConversationTranscriptStore {
       return Promise.reject(new Error("TRANSCRIPT_INVALID_COMPACTION_CHECKPOINT"));
     }
     return this.enqueue(conversationId, async () => {
+      this.presentationWriteCaches.delete(conversationId);
       const state = await this.loadState(conversationId);
       const payload = input.payload;
       // Compaction digests are deliberately scoped to the hot entries used by
@@ -221,31 +234,35 @@ export class ConversationTranscriptStore {
       return Promise.reject(new Error("TRANSCRIPT_INVALID_PRESENTATION_PATCH"));
     }
     assertValidPresentationPatch(patch);
+    const syncTerminalPatch = patch.runSnapshot?.status === "terminal";
     return this.enqueue<Extract<TranscriptEntry, { kind: "presentation_patch" }>>(conversationId, async () => {
-      const state = await this.loadState(conversationId);
-      const existing = state.entries.find((entry): entry is Extract<TranscriptEntry, { kind: "presentation_patch" }> => (
-        entry.kind === "presentation_patch" && entry.payload.mutationKey === mutationKey
-      ));
-      if (existing) {
+      const cache = await this.presentationWriteCache(conversationId);
+      if (cache.mutationKeys.has(mutationKey)) {
+        const state = await this.loadState(conversationId);
+        const existing = state.entries.find((entry): entry is Extract<TranscriptEntry, { kind: "presentation_patch" }> => (
+          entry.kind === "presentation_patch" && entry.payload.mutationKey === mutationKey
+        ));
+        if (!existing) throw new Error("TRANSCRIPT_IDEMPOTENCY_CONFLICT");
         if (existing.payload.messageId !== messageId || !deepEqual(existing.payload.patch, patch)) {
           throw new Error("TRANSCRIPT_IDEMPOTENCY_CONFLICT");
+        }
+        if (syncTerminalPatch) {
+          await this.syncFile(cache.activeFile);
+          this.presentationWriteCaches.delete(conversationId);
         }
         return existing;
       }
       const keyDigest = createHash("sha256").update(mutationKey, "utf8").digest("hex");
       const stableId = `presentation:${messageId}:m${keyDigest}`;
-      if (state.seenEntryIds.has(stableId)) throw new Error("TRANSCRIPT_IDEMPOTENCY_CONFLICT");
-      const nextRevision = state.entries
-        .filter((entry): entry is Extract<TranscriptEntry, { kind: "presentation_patch" }> =>
-          entry.kind === "presentation_patch" && entry.payload.messageId === messageId)
-        .reduce((max, entry) => Math.max(max, entry.payload.patchRevision), 0) + 1;
+      if (cache.seenEntryIds.has(stableId)) throw new Error("TRANSCRIPT_IDEMPOTENCY_CONFLICT");
+      const nextRevision = (cache.revisions.get(messageId) ?? 0) + 1;
       const input: TranscriptAppendInput = {
         kind: "presentation_patch",
         id: stableId,
         at: this.now(),
         payload: { messageId, patchRevision: nextRevision, mutationKey, patch },
       };
-      const entry = { ...input, seq: state.maxSeq + 1 } as Extract<TranscriptEntry, { kind: "presentation_patch" }>;
+      const entry = { ...input, seq: cache.maxSeq + 1 } as Extract<TranscriptEntry, { kind: "presentation_patch" }>;
       try {
         validateLoadedTranscriptEntry(entry);
       } catch (error) {
@@ -254,8 +271,16 @@ export class ConversationTranscriptStore {
         }
         throw error;
       }
-      await fs.promises.mkdir(state.dir, { recursive: true });
-      await fs.promises.appendFile(state.activeFile, `${JSON.stringify(entry)}\n`, "utf8");
+      await fs.promises.mkdir(cache.dir, { recursive: true });
+      const line = `${JSON.stringify(entry)}\n`;
+      if (syncTerminalPatch) await appendDurableLine(cache.activeFile, line, this.syncFile);
+      else await fs.promises.appendFile(cache.activeFile, line, "utf8");
+      cache.maxSeq = entry.seq;
+      cache.seenEntryIds.add(stableId);
+      cache.mutationKeys.add(mutationKey);
+      cache.revisions.set(messageId, nextRevision);
+      cache.activeFingerprint = await fileFingerprint(cache.activeFile);
+      if (syncTerminalPatch) this.presentationWriteCaches.delete(conversationId);
       return entry;
     });
   }
@@ -288,6 +313,7 @@ export class ConversationTranscriptStore {
     beforeManifest?: () => Promise<void>,
   ): Promise<void> {
     return this.enqueue(conversationId, async () => {
+      this.presentationWriteCaches.delete(conversationId);
       if (!Number.isInteger(throughSeq) || throughSeq < 1) {
         throw new Error("TRANSCRIPT_ARCHIVE_INVALID_BOUNDARY");
       }
@@ -444,6 +470,7 @@ export class ConversationTranscriptStore {
 
   deleteConversation(conversationId: string): Promise<void> {
     return this.enqueue(conversationId, async () => {
+      this.presentationWriteCaches.delete(conversationId);
       const dir = await this.resolveConversationDir(conversationId, false);
       await fs.promises.rm(dir, { recursive: true, force: true });
     });
@@ -458,6 +485,44 @@ export class ConversationTranscriptStore {
     return current.finally(() => {
       if (this.queues.get(conversationId) === settled) this.queues.delete(conversationId);
     });
+  }
+
+  private async presentationWriteCache(conversationId: string): Promise<PresentationWriteCache> {
+    const cached = this.presentationWriteCaches.get(conversationId);
+    if (cached &&
+      cached.activeFingerprint === await fileFingerprint(cached.activeFile) &&
+      cached.manifestFingerprint === await fileFingerprint(path.join(cached.dir, GENERATION_MANIFEST_FILE_NAME)) &&
+      cached.identityFingerprint === await fileFingerprint(path.join(cached.dir, IDENTITY_FILE_NAME))) {
+      // Keep a small number of active conversations; the cache holds indexes only.
+      this.presentationWriteCaches.delete(conversationId);
+      this.presentationWriteCaches.set(conversationId, cached);
+      return cached;
+    }
+    const state = await this.loadState(conversationId);
+    const revisions = new Map<string, number>();
+    const mutationKeys = new Set<string>();
+    for (const entry of state.entries) {
+      if (entry.kind !== "presentation_patch") continue;
+      revisions.set(entry.payload.messageId, Math.max(revisions.get(entry.payload.messageId) ?? 0, entry.payload.patchRevision));
+      if (entry.payload.mutationKey) mutationKeys.add(entry.payload.mutationKey);
+    }
+    const fresh: PresentationWriteCache = {
+      dir: state.dir,
+      activeFile: state.activeFile,
+      maxSeq: state.maxSeq,
+      seenEntryIds: new Set([...state.seenEntryIds].filter((id) => id.startsWith("presentation:"))),
+      mutationKeys,
+      revisions,
+      activeFingerprint: await fileFingerprint(state.activeFile),
+      manifestFingerprint: await fileFingerprint(path.join(state.dir, GENERATION_MANIFEST_FILE_NAME)),
+      identityFingerprint: await fileFingerprint(path.join(state.dir, IDENTITY_FILE_NAME)),
+    };
+    this.presentationWriteCaches.delete(conversationId);
+    this.presentationWriteCaches.set(conversationId, fresh);
+    if (this.presentationWriteCaches.size > 16) {
+      this.presentationWriteCaches.delete(this.presentationWriteCaches.keys().next().value!);
+    }
+    return fresh;
   }
 
   /** 加载会话状态：尾行修复 + 快照基线 + seq > throughSeq 的 JSONL 增量重放。 */
@@ -701,6 +766,7 @@ function validateLoadedTranscriptEntry(entry: unknown): asserts entry is Transcr
   const candidate = entry as Partial<TranscriptEntry>;
   const kinds = new Set([
     "user", "assistant", "tool_result", "interruption", "turn_rewind",
+    "tool_started", "task_state", "effect_resolution",
     "backfill_boundary", "compaction_checkpoint", "presentation_patch",
     "turn_tombstone", "delivery_receipt",
   ]);
@@ -727,6 +793,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function isValidTranscriptTodoItem(value: unknown): boolean {
+  return isRecord(value) && typeof value.id === "string" && typeof value.content === "string" &&
+    ["pending", "in_progress", "completed", "cancelled"].includes(value.status as string) &&
+    (value.activeForm === undefined || typeof value.activeForm === "string");
+}
+
 function isValidTranscriptPayload(entry: Partial<TranscriptEntry>): boolean {
   if (!isRecord(entry.payload)) return false;
   switch (entry.kind) {
@@ -743,6 +815,25 @@ function isValidTranscriptPayload(entry: Partial<TranscriptEntry>): boolean {
         ["success", "failure", "unknown", "not_executed"].includes(entry.payload.outcome as string) &&
         isValidCanonicalChatMessage(entry.payload.message, "tool") &&
         (entry.payload.fullRef === undefined || typeof entry.payload.fullRef === "string");
+    case "tool_started":
+      return typeof entry.payload.assistantEntryId === "string" && entry.payload.assistantEntryId.length > 0 &&
+        typeof entry.payload.toolCallId === "string" && entry.payload.toolCallId.length > 0 &&
+        typeof entry.payload.toolName === "string" && entry.payload.toolName.length > 0 &&
+        ["read_only", "idempotent_mutation", "non_idempotent_side_effect"].includes(entry.payload.sideEffect as string) &&
+        typeof entry.payload.fingerprint === "string" && entry.payload.fingerprint.length > 0 &&
+        (entry.payload.repeatAuthorizationId === undefined ||
+          (typeof entry.payload.repeatAuthorizationId === "string" && entry.payload.repeatAuthorizationId.length > 0));
+    case "task_state":
+      return typeof entry.payload.assistantEntryId === "string" && entry.payload.assistantEntryId.length > 0 &&
+        typeof entry.payload.toolCallId === "string" && entry.payload.toolCallId.length > 0 &&
+        Array.isArray(entry.payload.items) && entry.payload.items.every(isValidTranscriptTodoItem);
+    case "effect_resolution":
+      return typeof entry.payload.assistantEntryId === "string" && entry.payload.assistantEntryId.length > 0 &&
+        typeof entry.payload.effectId === "string" && entry.payload.effectId.length > 0 &&
+        entry.payload.action === "repeat_authorized" &&
+        typeof entry.payload.authorizationId === "string" && entry.payload.authorizationId.length > 0 &&
+        typeof entry.payload.fingerprint === "string" && entry.payload.fingerprint.length > 0 &&
+        validOptionalNumber(entry.payload.grantedAt) && entry.payload.grantedAt !== undefined;
     case "interruption":
       return ["user_cancel", "runtime_error", "crashed"].includes(entry.payload.reason);
     case "turn_rewind":
@@ -827,70 +918,16 @@ function sameStringSet(left: string[], right: string[]): boolean {
 }
 
 function isValidPresentationPatch(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  if (Object.keys(value).length === 0) return false;
-  const allowed = new Set([
-    "content", "reasoning", "reasoningBlocks", "processMessages", "agentRounds",
-    "taskDelegations", "channelSource", "sticker", "toolExecutions", "runActivity",
-    "runSnapshot", "ttsCacheKey", "ttsCacheVersion", "musicCard", "contextUsage",
-  ]);
-  if (Object.keys(value).some((key) => !allowed.has(key))) return false;
-  for (const [key, field] of Object.entries(value)) {
-    if (key === "content" || key === "reasoning" || key === "ttsCacheKey" || key === "ttsCacheVersion") {
-      if (typeof field !== "string") return false;
-    } else if (key === "sticker") {
-      if (field !== null && typeof field !== "string") return false;
-    } else if (key === "channelSource") {
-      if (!isRecord(field) || !["wechat", "feishu", "qq", "qqbot"].includes(field.channel as string) ||
-        (field.chatType !== undefined && !["private", "group"].includes(field.chatType as string)) ||
-        (field.senderName !== undefined && typeof field.senderName !== "string")) return false;
-    } else if (["reasoningBlocks", "processMessages", "agentRounds", "taskDelegations", "toolExecutions"].includes(key)) {
-      if (!Array.isArray(field)) return false;
-      if (key === "reasoningBlocks" && !field.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.content === "string" &&
-        (item.streaming === undefined || typeof item.streaming === "boolean") && validOptionalSequenceFields(item))) return false;
-      if (key === "processMessages" && !field.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.content === "string" &&
-        (item.interrupted === undefined || typeof item.interrupted === "boolean") && validOptionalSequenceFields(item))) return false;
-      if (key === "agentRounds" && !field.every((item) => isRecord(item) && typeof item.id === "string" &&
-        ["running", "completed"].includes(item.status as string) && typeof item.startedAt === "number" && validOptionalNumber(item.completedAt))) return false;
-      if (key === "taskDelegations" && !field.every((item) => isRecord(item) && typeof item.invocationId === "string" &&
-        typeof item.taskId === "string" && typeof item.description === "string" && typeof item.nickname === "string" &&
-        typeof item.assetFileName === "string" && ["running", "completed", "failed", "cancelled"].includes(item.status as string))) return false;
-      if (key === "toolExecutions" && !field.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string" &&
-        ["running", "success", "error"].includes(item.status as string) &&
-        (item.result === undefined || typeof item.result === "string") && (item.argsText === undefined || typeof item.argsText === "string") &&
-        (item.terminalOutput === undefined || (typeof item.terminalOutput === "string" && item.terminalOutput.length <= SHELL_VISIBLE_OUTPUT_LIMIT)) &&
-        (item.terminalOutputTruncated === undefined || typeof item.terminalOutputTruncated === "boolean"))) return false;
-    } else if (key === "runActivity") {
-      if (!isRecord(field) || typeof field.startedAt !== "number" || typeof field.reasoningMs !== "number" ||
-        !validOptionalNumber(field.completedAt) || !validOptionalNumber(field.activeReasoningStartedAt) ||
-        (field.keepExpanded !== undefined && typeof field.keepExpanded !== "boolean")) return false;
-    } else if (key === "runSnapshot") {
-      if (!isRecord(field) || !["running", "waiting_user", "interrupted", "terminal"].includes(field.status as string) ||
-        typeof field.updatedAt !== "number" || (field.runId !== undefined && typeof field.runId !== "string") ||
-        (field.terminalStatus !== undefined && !["success", "cancelled", "timeout", "runtime_error"].includes(field.terminalStatus as string))) return false;
-    } else if (key === "musicCard") {
-      if (!isRecord(field) || normalizeMusicCardData(field) === null) return false;
-      const tracks = field.tracks;
-      if (!Array.isArray(tracks) || !tracks.every((track) => isRecord(track) && typeof track.id === "string" && typeof track.name === "string" &&
-        Array.isArray(track.artists) && track.artists.every((artist) => typeof artist === "string") &&
-        (track.album === undefined || typeof track.album === "string") && (track.coverUrl === undefined || typeof track.coverUrl === "string"))) return false;
-    } else if (key === "contextUsage") {
-      if (!isContextUsageSnapshot(field)) return false;
-    } else {
-      return false;
-    }
+  try {
+    assertValidPresentationPatch(value);
+    return true;
+  } catch {
+    return false;
   }
-  return true;
 }
 
 function validOptionalNumber(value: unknown): boolean {
   return value === undefined || (typeof value === "number" && Number.isFinite(value));
-}
-
-function validOptionalSequenceFields(value: Record<string, unknown>): boolean {
-  return (value.afterToolCount === undefined || (typeof value.afterToolCount === "number" && Number.isInteger(value.afterToolCount))) &&
-    (value.roundId === undefined || typeof value.roundId === "string") &&
-    (value.seq === undefined || (typeof value.seq === "number" && Number.isInteger(value.seq)));
 }
 
 function isValidCanonicalChatMessage(value: unknown, expectedRole?: CanonicalChatMessage["role"]): value is CanonicalChatMessage {
@@ -924,6 +961,16 @@ async function pathExists(target: string): Promise<boolean> {
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function fileFingerprint(file: string): Promise<string> {
+  try {
+    const stat = await fs.promises.stat(file);
+    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
     throw error;
   }
 }

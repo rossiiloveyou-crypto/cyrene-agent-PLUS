@@ -13,14 +13,19 @@ describe("style sampling preferences", () => {
     expect(normalizeStyleId("../../evil.md")).toBe("default");
   });
 
-  it("keeps the five approved presets exact", () => {
+  it("keeps the built-in presets exact", () => {
     expect(BUILT_IN_STYLE_PRESETS).toEqual({
+      native: { diversity: { driver: "model-default" }, repetition: "model-default" },
       default: { diversity: { driver: "temperature", value: 0.65 }, repetition: "model-default" },
       lively: { diversity: { driver: "temperature", value: 0.90 }, repetition: "light" },
       healing: { diversity: { driver: "temperature", value: 0.55 }, repetition: "model-default" },
       focused: { diversity: { driver: "temperature", value: 0.40 }, repetition: "model-default" },
       sweet: { diversity: { driver: "temperature", value: 0.82 }, repetition: "light" },
     });
+  });
+
+  it("keeps native at pure model defaults", () => {
+    expect(resolveStylePreference("native", {})).toEqual(DEFAULT_CUSTOM_STYLE);
   });
 
   it("keeps built-in style ids mapped to the existing markdown files", () => {

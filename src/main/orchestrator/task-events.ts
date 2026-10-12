@@ -24,6 +24,10 @@ export function projectTaskTraceEvent(
       return { id: createId(), at, kind: "round", phase: "start", label: event.roundId };
     case "round_end":
       return { id: createId(), at, kind: "round", phase: "end", label: event.roundId };
+    case "candidate_text_delta":
+      return { id: createId(), at, kind: "candidate", phase: "delta", label: event.roundId, content: boundedText(event.delta) };
+    case "candidate_text_discard":
+      return { id: createId(), at, kind: "candidate", phase: "discard", label: event.roundId };
     case "progress_text":
       return { id: createId(), at, kind: "progress", content: boundedText(event.content) };
     case "reasoning_start":
@@ -33,7 +37,10 @@ export function projectTaskTraceEvent(
     case "reasoning_end":
       return { id: createId(), at, kind: "reasoning", phase: "end", label: event.messageId };
     case "tool_start":
-      return { id: createId(), at, kind: "tool", phase: "start", label: event.toolName };
+      return {
+        id: createId(), at, kind: "tool", phase: "start", label: event.toolName,
+        ...(event.displayName ? { displayName: event.displayName } : {}),
+      };
     case "tool_end":
       return { id: createId(), at, kind: "tool", phase: "end", label: event.toolCallId, status: event.outcome };
     case "todo_update":

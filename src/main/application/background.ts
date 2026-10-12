@@ -5,7 +5,7 @@
  *
  * 依赖组（A–D 并发；组内箭头为严格顺序）：
  *   A: MCP 清理 → 内置同步 → MCP 恢复（30s 屏障）→ channels 启动 → scheduler 启动 → 主动触发器 → 动态反应队列扫描器
- *   B: 记忆协调 → 向量索引刷新 → 重排序器预热
+ *   B: 记忆协调 → 重排序器预热
  *   C: 截图预热
  *   D: 更新检查
  * 全部组结算后推进 ready；失败进入 degradedReasons，不阻塞聊天。
@@ -20,6 +20,13 @@ import type { SchedulerSubsystem } from "../scheduler/bootstrap";
 /** MCP 恢复屏障总超时；超时后 channels/scheduler 仍可启动，MCP 标记降级。 */
 export const MCP_RESTORE_BARRIER_TIMEOUT_MS = 30_000;
 
+/**
+ * 后台任务退出宽限期。
+ * 多数后台任务不响应 abort（如整段 MCP 连接），若在退出的第一个阶段等它们自然结算，
+ * 整个退出会被拖到全局总超时（10s）才放行；因此只等一个短宽限期，超时即放弃等待。
+ */
+export const BACKGROUND_STOP_GRACE_MS = 1_000;
+
 export interface BackgroundDependencies {
   core: CoreResult;
   channels: ChannelsSubsystem;
@@ -30,7 +37,6 @@ export interface BackgroundDependencies {
   syncBuiltInMcp(signal: AbortSignal): Promise<void>;
   restoreMcp(signal: AbortSignal): Promise<void>;
   reconcileMemory(signal: AbortSignal): Promise<void>;
-  scheduleEmbeddingRefresh(signal: AbortSignal): Promise<{ dispose(): void } | void>;
   initializeReranker(signal: AbortSignal): Promise<void>;
   prewarmScreenshot(signal: AbortSignal): Promise<void>;
   scheduleUpdateCheck(signal: AbortSignal): Promise<{ dispose(): void } | void>;
@@ -61,10 +67,17 @@ function disposeLateResult(result: unknown): void {
   }
 }
 
+/** 退出宽限期定时器：到点即视为「不再等待」。 */
+function stopGracePeriod(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, BACKGROUND_STOP_GRACE_MS);
+  });
+}
+
 /**
  * 跟踪式后台任务运行器：
  * - run() 在 runner 停止后拒绝新任务；
- * - stop() abort 共享信号，等待已注册任务结算（最多等到传入的 shutdown 信号）；
+ * - stop() abort 共享信号，最多等 BACKGROUND_STOP_GRACE_MS 或传入信号中止即放行；
  * - 停止后完成的任务若返回 { dispose() }，立即调用，保证无所有者资源不残留。
  */
 export function createBackgroundTaskRunner(): BackgroundTaskRunner {
@@ -99,15 +112,15 @@ export function createBackgroundTaskRunner(): BackgroundTaskRunner {
       const pending = [...entries.values()];
       if (pending.length === 0) return;
       const waitAll = Promise.allSettled(pending.map((entry) => entry.promise.catch(() => undefined)));
+      // 只等一个短宽限期：超过即放弃等待，迟到结算的任务由 run() 的停止分支立即 dispose。
+      const waiters: Promise<unknown>[] = [waitAll, stopGracePeriod()];
       if (signal) {
-        const abortPromise = new Promise<void>((resolve) => {
+        waiters.push(new Promise<void>((resolve) => {
           if (signal.aborted) resolve();
           else signal.addEventListener("abort", () => resolve(), { once: true });
-        });
-        await Promise.race([waitAll, abortPromise]);
-      } else {
-        await waitAll;
+        }));
       }
+      await Promise.race(waiters);
     },
   };
 }
@@ -129,7 +142,6 @@ export function startBackground(deps: BackgroundDependencies): BackgroundHandle 
 
   let proactiveTriggerDisposer: OptionalDisposer;
   let updateCheckDisposer: OptionalDisposer;
-  let embeddingRefreshDisposer: OptionalDisposer;
   let momentsScannerDisposer: OptionalDisposer;
 
   const isShuttingDown = (): boolean => {
@@ -193,11 +205,6 @@ export function startBackground(deps: BackgroundDependencies): BackgroundHandle 
     dispose: async () => { scheduler.stop(); },
   });
   shutdown.register({
-    id: "embedding-refresh",
-    phase: "stopProducers",
-    dispose: async () => { disposeOptional(embeddingRefreshDisposer); },
-  });
-  shutdown.register({
     id: "update-check-timer",
     phase: "stopProducers",
     dispose: async () => { disposeOptional(updateCheckDisposer); },
@@ -250,9 +257,6 @@ export function startBackground(deps: BackgroundDependencies): BackgroundHandle 
 
   async function groupB(): Promise<void> {
     await runTracked("memory-reconcile", "memory", (signal) => deps.reconcileMemory(signal));
-    await runTracked("embedding-refresh", "embedding", async (signal) => {
-      embeddingRefreshDisposer = await deps.scheduleEmbeddingRefresh(signal);
-    });
     await runTracked("reranker-init", "reranker", (signal) => deps.initializeReranker(signal));
   }
 

@@ -53,7 +53,8 @@ vi.mock("../vendors", () => ({
   resolveTransport: vi.fn(() => "openai"),
 }));
 
-vi.mock("./tool-dispatcher", () => ({
+vi.mock("./tool-dispatcher", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./tool-dispatcher")>(),
   dispatchToolCall: vi.fn(),
   persistToolDispatchResult: vi.fn(async (_call: unknown, result: unknown) => result),
 }));
@@ -62,15 +63,30 @@ vi.mock("../../token-usage-store", () => ({ recordUsage, recordRequest }));
 
 import { runCyreneHarness } from "./cyrene-harness";
 import { getAdapterForConfig } from "../vendors";
-import { dispatchToolCall } from "./tool-dispatcher";
+import { dispatchToolCall, resolveToolDispatchSideEffect } from "./tool-dispatcher";
 import type { ToolDispatchResult } from "./tool-dispatcher";
 import type { HarnessCacheDiagnostic, HarnessCheckpoint, HarnessEvent, HarnessInput, HarnessToolFinishedEvent, HarnessToolLifecycleEvent, RunAdjustmentMessage } from "./types";
 import type { ChatMessage, ChatResponse, ToolCall } from "../vendors/types";
 import type { ToolDefinition } from "../tools/registry/tool-registry";
 import { projectCacheRelevantChatRequest } from "../prompt-layers";
 import type { TranscriptSink } from "../transcript-sink";
+import { parseToolCallArgs, toolCallFingerprint } from "./types";
 
 const mockedDispatch = vi.mocked(dispatchToolCall);
+
+/** A mocked tool still crosses the durable dispatch boundary before returning. */
+function mockStartedDispatch(result: ToolDispatchResult): void {
+  mockedDispatch.mockImplementation(async (call, context) => {
+    const args = parseToolCallArgs(call);
+    await context.onToolStarted?.({
+      toolCallId: call.id,
+      toolName: call.name,
+      sideEffect: resolveToolDispatchSideEffect(call.name, args, context.tools),
+      fingerprint: toolCallFingerprint(call.name, args),
+    });
+    return result;
+  });
+}
 
 // ── Helpers ────────────────────────────────────────────
 
@@ -836,6 +852,7 @@ describe("CyreneHarness completion", () => {
         safetyMarginTokens: 0,
         compactionThreshold: 0.3,
         compactionRetainRatio: 0.16,
+        modelRequestMaxRetries: 0,
       },
       onCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
     });
@@ -930,7 +947,7 @@ describe("CyreneHarness completion", () => {
       assistantResponse({ text: "完成。" }),
     ]);
     vi.stubGlobal("fetch", fetchMock);
-    mockedDispatch.mockResolvedValue(successDispatchResult("durable-call"));
+    mockStartedDispatch(successDispatchResult("durable-call"));
     const lifecycle: Array<{ toolCallId: string; status: string }> = [];
 
     await runCyreneHarness({
@@ -953,7 +970,7 @@ describe("CyreneHarness completion", () => {
       assistantResponse({ text: "完成。" }),
     ]);
     vi.stubGlobal("fetch", fetchMock);
-    mockedDispatch.mockResolvedValue(successDispatchResult("obs-call"));
+    mockStartedDispatch(successDispatchResult("obs-call"));
     const finished: HarnessToolFinishedEvent[] = [];
 
     await runCyreneHarness({
@@ -988,7 +1005,7 @@ describe("CyreneHarness completion", () => {
       assistantResponse({ text: "好的，继续。" }),
     ]);
     vi.stubGlobal("fetch", fetchMock);
-    mockedDispatch.mockResolvedValue({
+    mockStartedDispatch({
       outcome: "success",
       tool: "ask_user",
       message: "继续",
@@ -1607,7 +1624,7 @@ describe("CyreneHarness transcript sink", () => {
       assistantResponse({ text: "不应到达" }),
     ]);
     vi.stubGlobal("fetch", modelFetch);
-    mockedDispatch.mockResolvedValue({
+    mockStartedDispatch({
       outcome: "success",
       tool: "send_email",
       target: "x@y",

@@ -8,8 +8,9 @@ import {
   MOMENT_MAX_POST_TITLE_LENGTH,
   type MomentCreatePostInput,
 } from "../../../../shared/moments-types";
-import { useTranslation } from "../../i18n";
+import { translateCharacterName, useTranslation } from "../../i18n";
 import { getCharacterAvatar } from "../../character-avatars";
+import { useCyreneAvatar } from "../../hooks/useCyreneAvatar";
 
 interface PendingImage {
   file: File;
@@ -51,6 +52,7 @@ function detectMentionTyping(text: string, caret: number): { at: number; query: 
 /** QQ 群式常驻发布框：标题（可选）+ 正文 + 图片 + @ 点名，点开就能发。 */
 export function MomentComposer({ submitting, onPublish }: MomentComposerProps) {
   const { t } = useTranslation();
+  const cyreneAvatarUrl = useCyreneAvatar();
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [images, setImages] = useState<PendingImage[]>([]);
@@ -72,9 +74,10 @@ export function MomentComposer({ submitting, onPublish }: MomentComposerProps) {
   const candidates = useMemo(() => {
     if (!picker) return [];
     const query = picker.query;
-    return mentionNames.filter((name) =>
-      name === "cyrene" ? query === "" || t("moments.mention.cyreneOptionLabel").startsWith(query) : name.startsWith(query),
-    );
+    return mentionNames.filter((name) => {
+      const display = name === "cyrene" ? t("moments.mention.cyreneOptionLabel") : translateCharacterName(name, t);
+      return query === "" || display.startsWith(query);
+    });
   }, [picker, mentionNames, t]);
 
   // 候选变化后收敛高亮下标（过滤后列表变短时防止越界）
@@ -106,7 +109,7 @@ export function MomentComposer({ submitting, onPublish }: MomentComposerProps) {
   /** 把 @候选词 替换为完整 @昵称（带尾随空格），光标落在空格后 */
   function pickMention(nickname: string) {
     if (!picker) return;
-    const display = nickname === "cyrene" ? t("moments.mention.cyreneOptionLabel") : nickname;
+    const display = nickname === "cyrene" ? t("moments.mention.cyreneOptionLabel") : translateCharacterName(nickname, t);
     const next =
       text.slice(0, picker.at) + `@${display} ` + text.slice(Math.min(picker.caret, text.length));
     setText(next);
@@ -179,7 +182,9 @@ export function MomentComposer({ submitting, onPublish }: MomentComposerProps) {
     const names: string[] = [];
     if (text.includes(`@${t("moments.mention.cyreneOptionLabel")}`)) names.push("cyrene");
     for (const name of mentionNames) {
-      if (name !== "cyrene" && text.includes(`@${name}`)) names.push(name);
+      if (name === "cyrene") continue;
+      // 正文可能写中文昵称，也可能写本地化名（英文模式下由选择框插入）
+      if (text.includes(`@${name}`) || text.includes(`@${translateCharacterName(name, t)}`)) names.push(name);
     }
     return [...new Set(names)];
   }
@@ -239,9 +244,9 @@ export function MomentComposer({ submitting, onPublish }: MomentComposerProps) {
           ) : (
             candidates.map((name, index) => {
               const isCyrene = name === "cyrene";
-              const display = isCyrene ? t("moments.mention.cyreneOptionLabel") : name;
+              const display = isCyrene ? t("moments.mention.cyreneOptionLabel") : translateCharacterName(name, t);
               // 头像池覆盖到昔涟，@ 选择框里她也带头像——和别人外观一致
-              const avatar = getCharacterAvatar(isCyrene ? "昔涟" : name);
+              const avatar = isCyrene ? cyreneAvatarUrl : getCharacterAvatar(name);
               return (
                 <button
                   type="button"

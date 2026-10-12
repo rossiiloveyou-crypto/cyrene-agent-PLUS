@@ -35,7 +35,7 @@
 
 .cy-composer-greeting__text {
   margin: 0;
-  color: #000;
+  color: var(--rb-text-primary);
   font: 500 28px/1.3 "Noto Sans SC", var(--rb-font-ui, sans-serif);
   letter-spacing: 0.015em;
   text-wrap: balance;
@@ -50,7 +50,7 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: 22px;
-  background: #f4f4f4;
+  background: var(--rb-surface-elevated);
   box-shadow: var(--rb-shadow-bubble-neutral);
 }
 
@@ -75,7 +75,7 @@
 .cy-composer.ant-sender {
   position: relative;
   z-index: 1;
-  border: 1px solid rgba(31, 35, 48, 0.07);
+  border: 1px solid var(--rb-border-subtle);
   border-radius: 22px;
   background: var(--rb-surface-elevated);
   box-shadow: var(--rb-shadow-bubble-neutral);
@@ -85,7 +85,7 @@
 }
 
 .cy-composer.ant-sender:hover {
-  border-color: rgba(31, 35, 48, 0.11);
+  border-color: var(--rb-border-default);
   box-shadow: var(--rb-shadow-control-hover);
 }
 
@@ -103,12 +103,14 @@
 .cy-composer .ant-sender-input {
   min-height: 70px;
   color: var(--rb-text-primary);
+  background: transparent;
+  caret-color: var(--rb-accent);
   font: 400 15px/1.6 var(--rb-font-sans, sans-serif);
   resize: none;
 }
 
 .cy-composer .ant-sender-input::placeholder {
-  color: #969696;
+  color: var(--rb-text-disabled);
 }
 
 .cy-composer .ant-sender-actions-list {
@@ -119,13 +121,13 @@
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  color: #fff;
+  color: var(--rb-text-on-accent);
   background: var(--rb-accent);
 }
 
 .cy-composer .ant-sender-actions-btn:disabled {
-  color: #aaa;
-  background: #e7e7e7;
+  color: var(--rb-text-disabled);
+  background: var(--rb-surface-hover);
 }
 
 .cy-queue-dock {
@@ -136,11 +138,11 @@
   margin: 0 auto -5px;
   padding: 3px 6px 8px;
   overflow: hidden;
-  border: 1px solid #f3d9e2;
+  border: 1px solid var(--rb-border-default);
   border-bottom: 0;
   border-radius: 14px 14px 0 0;
-  background: #fff4f7;
-  color: #604c54;
+  background: var(--rb-surface-soft);
+  color: var(--rb-text-primary);
 }
 
 .cy-queue-dock__header,
@@ -169,8 +171,8 @@
 }
 
 .cy-queue-dock__header:hover {
-  background: #fbe5ed;
-  color: #d84f7d;
+  background: var(--rb-surface-active);
+  color: var(--rb-accent);
 }
 
 .cy-queue-dock__list {
@@ -185,12 +187,12 @@
 }
 
 .cy-queue-dock__row + .cy-queue-dock__row {
-  border-top: 1px solid rgba(31, 35, 48, 0.07);
+  border-top: 1px solid var(--rb-border-subtle);
 }
 
 .cy-queue-dock__lead {
   flex: none;
-  color: #9b7281;
+  color: var(--rb-text-secondary);
 }
 
 .cy-queue-dock__content {
@@ -221,7 +223,7 @@
   flex: none;
   align-items: center;
   gap: 3px;
-  color: rgba(31, 35, 48, 0.44);
+  color: var(--rb-text-secondary);
   font-size: 11px;
 }
 
@@ -257,13 +259,13 @@
   border-radius: 6px;
   padding: 0;
   background: transparent;
-  color: #9b7281;
+  color: var(--rb-text-secondary);
   cursor: pointer;
 }
 
 .cy-queue-dock__actions button:hover:not(:disabled) {
-  background: #fbe5ed;
-  color: #d84f7d;
+  background: var(--rb-surface-active);
+  color: var(--rb-accent);
 }
 
 .cy-queue-dock__actions button:disabled,
@@ -278,7 +280,7 @@
   appearance: none;
   border: 0;
   background: transparent;
-  color: #363636;
+  color: var(--rb-text-primary);
   font: 500 13px/1 var(--rb-font-sans, sans-serif);
   cursor: pointer;
 }
@@ -302,7 +304,7 @@
 }
 
 .cy-composer__icon-button:disabled {
-  color: #aaa;
+  color: var(--rb-text-disabled);
   cursor: wait;
 }
 
@@ -312,16 +314,6 @@
   stroke: currentColor;
   stroke-width: 1.8;
   stroke-linecap: round;
-}
-
-.cy-composer__icon-button .cy-composer__screenshot-icon {
-  width: 20px;
-  height: 20px;
-  fill: none;
-  stroke: #333;
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .cy-composer__sticker-button img {
@@ -366,8 +358,28 @@
   height: 58px;
   padding: 0;
   overflow: hidden;
-  background: #eee;
+  background: var(--rb-surface-hover);
 }
+
+.cy-composer__attachment.is-web-element {
+  max-width: 290px;
+  border: 1px solid color-mix(in srgb, var(--rb-accent, #e75d87) 42%, transparent);
+  background: color-mix(in srgb, var(--rb-accent, #e75d87) 10%, var(--rb-bg-2, #faf8fa));
+}
+
+.cy-composer__web-element {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--rb-accent, #e75d87);
+}
+
+.cy-composer__web-element > span { display: grid; min-width: 0; }
+.cy-composer__web-element strong,
+.cy-composer__web-element small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cy-composer__web-element strong { color: var(--rb-text-primary, #29252a); font-size: 12px; font-weight: 600; }
+.cy-composer__web-element small { color: var(--rb-text-secondary, #777); font-size: 10px; }
 
 .cy-composer__attachment--sticker {
   position: relative;
@@ -376,7 +388,7 @@
   height: 58px;
   padding: 0;
   overflow: hidden;
-  background: #fff8fa;
+  background: var(--rb-surface-soft);
 }
 
 .cy-composer__attachment--sticker img {
@@ -423,7 +435,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #888;
+  color: var(--rb-text-secondary);
   font: 500 16px/18px sans-serif;
   cursor: pointer;
 }
@@ -432,16 +444,13 @@
   color: var(--rb-accent);
 }
 
-.cy-sticker-popover .ant-popover-inner {
-  padding: 10px;
-  border: 1px solid var(--rb-border-default);
-  border-radius: 16px;
-}
-
+/* 表情面板走统一的浮层外壳（cy-composer-menu-popover），
+   面板比菜单略宽松：公共内边距 6px + 自身 4px = 原 10px */
 .cy-sticker-picker {
   display: grid;
   width: min(360px, 70vw);
   max-height: 270px;
+  padding: 4px;
   grid-template-columns: repeat(4, minmax(64px, 1fr));
   gap: 7px;
   overflow-y: auto;
@@ -454,13 +463,13 @@
   padding: 5px;
   border: 1px solid transparent;
   border-radius: 11px;
-  background: #f7f7f7;
+  background: var(--rb-surface-hover);
   cursor: pointer;
 }
 
 .cy-sticker-picker button:hover {
-  border-color: #ffc0d2;
-  background: #fff1f5;
+  border-color: var(--rb-border-focus);
+  background: var(--rb-surface-active);
 }
 
 .cy-sticker-picker img {
@@ -505,15 +514,15 @@
 }
 
 .cy-composer__footer-button:disabled {
-  color: #828282;
+  color: var(--rb-text-disabled);
   cursor: default;
 }
 
 .cy-composer__footer-button--placeholder small {
   padding: 2px 4px;
   border-radius: 5px;
-  background: #ececec;
-  color: #898989;
+  background: var(--rb-surface-hover);
+  color: var(--rb-text-disabled);
   font: 600 9px/1 var(--rb-font-sans, sans-serif);
   letter-spacing: .04em;
 }
@@ -530,12 +539,6 @@
   stroke-linejoin: round;
 }
 
-.cy-composer__footer .cy-composer__obsidian-icon,
-.cy-composer__footer .cy-composer__obsidian-icon path {
-  stroke: none;
-  fill: #A88BFA;
-}
-
 .cy-composer__footer .cy-composer__footer-button svg:last-child,
 .cy-composer__agent-button svg {
   width: 13px;
@@ -546,7 +549,7 @@
   width: 1px;
   height: 16px;
   margin: 0 2px;
-  background: #ddd;
+  background: var(--rb-border-default);
 }
 
 /* 弹性空白：把右侧控件组（上下文环/思考控制）推到 footer 最右端。 */
@@ -556,34 +559,46 @@
 
 .cy-model-selector__menu { min-width: 210px; display: grid; gap: 4px; }
 .cy-model-selector__menu button { border: 0; background: transparent; text-align: left; padding: 8px; border-radius: 8px; cursor: pointer; display: grid; gap: 2px; }
-.cy-model-selector__menu button:hover { background: #fff0f5; }
-.cy-model-selector__menu small { color: #8d7c83; }
+.cy-model-selector__menu button:hover { background: var(--rb-surface-hover); }
+.cy-model-selector__menu small { color: var(--rb-text-secondary); }
 /* 模型子下拉：档案下拉旁的会话级当前模型；单模型档案不渲染（外观零变化） */
 .cy-model-selector--model code { font-size: 12px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cy-model-selector__models { min-width: 180px; }
 .cy-model-selector__models button code { font-size: 12.5px; }
-.cy-model-selector__models button[data-current] { background: #fff0f5; font-weight: 600; }
+.cy-model-selector__models button[data-current] { background: var(--rb-surface-active); font-weight: 600; }
 
-/* 最近项目下拉：工作文件夹按钮的历史项目复选菜单（外观与模型下拉一致） */
-.cy-recent-projects-popover .ant-popover-inner {
-  padding: 6px;
-  border: 1px solid rgba(31, 35, 48, 0.08);
+/* 输入区菜单类浮层的统一外壳：模型下拉 / 最近项目下拉 / 表情面板共用。
+   antd v6 的 Popover 是三层结构：.ant-popover（根）→ .ant-popover-container
+   → .ant-popover-content，其中 container 自带不透明底色（深色下 #1f1f1f）
+   + 12px 内边距 + 独立圆角：只改根的话，container 会在里面再套一个方块，
+   看起来就是「一层套一层」。所以外壳统一挂在根上，container 全部透明化。
+   描边用 elevated 档（深色主题下是亮灰，深底上才立得住） */
+.cy-composer-menu-popover.ant-popover {
+  background: var(--rb-surface-elevated);
+  border: 1px solid var(--rb-border-elevated);
   border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 12px 32px rgba(29, 29, 31, 0.12);
+  box-shadow: var(--rb-shadow-elevated);
+}
+.cy-composer-menu-popover .ant-popover-container {
+  padding: 6px;
+  background: transparent;
+  border-radius: 0;
+}
+.cy-composer-menu-popover .ant-popover-content {
+  background: transparent;
 }
 .cy-recent-projects__menu { min-width: 260px; max-width: 360px; display: grid; gap: 4px; }
 .cy-recent-projects__item { border: 0; background: transparent; text-align: left; padding: 8px; border-radius: 8px; cursor: pointer; display: grid; gap: 2px; }
-.cy-recent-projects__item:hover { background: #fff0f5; }
-.cy-recent-projects__item small { color: #8d7c83; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cy-recent-projects__item--choose-other { margin-top: 2px; border-top: 1px solid #f0e3e8; border-radius: 0; padding-top: 10px; color: #0d0d0d; font-size: 13px; font-weight: 500; }
+.cy-recent-projects__item:hover { background: var(--rb-surface-hover); }
+.cy-recent-projects__item small { color: var(--rb-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cy-recent-projects__item--choose-other { margin-top: 2px; border-top: 1px solid var(--rb-border-subtle); border-radius: 0; padding-top: 10px; color: var(--rb-text-primary); font-size: 13px; font-weight: 500; }
 
 /* 聊天功能栏沿用设置页的界面字体与文字对比；消息 Markdown 保持独立排版。 */
 .cy-composer-shell .cy-composer__footer-button,
 .cy-composer-shell .cy-composer__agent-button,
 .cy-composer-shell .cy-composer__icon-button {
-  color: #0d0d0d;
-  font-family: var(--rb-font-ui, ui-sans-serif, system-ui, sans-serif);
+  color: var(--rb-text-primary);
+  font-family: var(--rb-font-sans, ui-sans-serif, system-ui, sans-serif);
   font-size: 13px;
   font-weight: 500;
   line-height: 1.4;
@@ -597,11 +612,56 @@
 
 .cy-composer-shell .cy-composer__footer-button:disabled,
 .cy-composer-shell .cy-composer__icon-button:disabled {
-  color: #828282;
+  color: var(--rb-text-disabled);
 }
 
 .cy-queue-dock__header,
 .cy-queue-dock__content {
-  color: #0d0d0d;
-  font-family: var(--rb-font-ui, ui-sans-serif, system-ui, sans-serif);
+  color: var(--rb-text-primary);
+  font-family: var(--rb-font-sans, ui-sans-serif, system-ui, sans-serif);
 }
+.cy-model-error-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, #eab308 34%, var(--rb-border-soft));
+  border-radius: 10px;
+  background: color-mix(in srgb, #eab308 7%, var(--rb-surface-elevated, transparent));
+  color: var(--rb-text-primary);
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.cy-model-error-item__icon { display: inline-flex; color: #d6a300; }
+.cy-model-error-item__summary { min-width: 0; flex: 1; }
+.cy-model-error-item__status { margin-left: 8px; color: var(--rb-text-secondary); font-size: 12px; }
+.cy-model-error-item__action, .cy-model-error-dialog__close {
+  border: 1px solid var(--rb-border-soft);
+  border-radius: 7px;
+  background: var(--rb-surface-elevated, transparent);
+  color: var(--rb-text-primary);
+  padding: 5px 9px;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+.cy-model-error-item__action:hover, .cy-model-error-dialog__close:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+.cy-model-error-dialog__overlay { position: fixed; inset: 0; z-index: 1000; background: rgb(0 0 0 / 52%); }
+.cy-model-error-dialog {
+  position: fixed;
+  z-index: 1001;
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(480px, calc(100vw - 32px)); max-height: min(80vh, 620px); overflow: auto;
+  border: 1px solid var(--rb-border-soft); border-radius: 14px;
+  background: var(--rb-surface-elevated, #202020); color: var(--rb-text-primary);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 35%); padding: 22px;
+}
+.cy-model-error-dialog__title { margin: 0; font-size: 17px; font-weight: 650; }
+.cy-model-error-dialog__description { margin: 8px 0 18px; color: var(--rb-text-secondary); font-size: 13px; }
+.cy-model-error-dialog__details { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px 12px; margin: 0; font-size: 13px; }
+.cy-model-error-dialog__details dt { color: var(--rb-text-secondary); }
+.cy-model-error-dialog__details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cy-model-error-dialog__hint { margin: 18px 0 0; color: var(--rb-text-secondary); font-size: 13px; line-height: 1.5; }
+.cy-model-error-dialog__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; }
+.cy-model-error-dialog__footer a { display: inline-flex; align-items: center; gap: 6px; color: var(--rb-text-primary); font-size: 13px; }

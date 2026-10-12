@@ -34,7 +34,7 @@ export const shellJobTool: ToolDefinition = {
     "stopped=主动终止 / failed=异常终止（输出超限或启动失败，看 reason）。\n\n" +
     "判活技巧：status 返回 totalBytes（累计输出字节数）+ tail（日志最后 8KB）。" +
     "两次查询 totalBytes 有增量说明任务真在跑；长时间零增量且任务本应持续输出则可能卡死。\n" +
-    "完整日志在 run_shell 返回的 logFile 路径，需要全文时用 read_file 读取。\n\n" +
+    "完整日志在 run_shell 返回的 logFile 路径，需要全文时用 Read 读取。\n\n" +
     "参数：action（status 或 stop，默认 status），job_id（run_shell 后台模式返回的任务 ID），" +
     "wait_ms（可选，仅 status：阻塞等待毫秒数 0–60000，超范围自动钳制，默认 0 立即返回）。",
   enabled: true,

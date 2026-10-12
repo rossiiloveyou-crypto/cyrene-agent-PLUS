@@ -4,7 +4,12 @@ import type { WindowManager } from "../windows/window-manager";
 import { applyGeneralSettings, handleGeneralSettingsChanged } from "./general-settings-lifecycle";
 import { syncLaunchAtLogin } from "./launch-at-login";
 
-vi.mock("electron", () => ({ app: {}, nativeImage: {} }));
+const themeMock = vi.hoisted(() => ({ dark: false }));
+
+vi.mock("electron", () => ({
+  app: {}, nativeImage: {},
+  nativeTheme: { get shouldUseDarkColors() { return themeMock.dark; } },
+}));
 vi.mock("../windows/broadcast", () => ({ broadcastToAllWindows: vi.fn() }));
 vi.mock("../windows/window-state", () => ({ setGetCurrentAppIconPath: vi.fn() }));
 vi.mock("../locale-context", () => ({ updateLocaleContext: vi.fn() }));
@@ -27,6 +32,7 @@ function createHarness(petVisible = true) {
     hidePetWindow: vi.fn(() => { visible = false; }),
     setPetWindowAlwaysOnTop: vi.fn(),
     applyPetWindowZoom: vi.fn(),
+    broadcast: vi.fn(),
   };
   const deps = {
     windowManager: windowManager as unknown as WindowManager,
@@ -77,6 +83,17 @@ describe("general settings window lifecycle", () => {
     expect(h.windowManager.setPetWindowAlwaysOnTop).toHaveBeenCalledWith(false);
     expect(h.windowManager.applyPetWindowZoom).toHaveBeenCalledWith(1.5);
     expect(syncLaunchAtLogin).toHaveBeenCalledWith(true, {});
+  });
+
+  it("broadcasts the resolved theme when the saved choice changes", () => {
+    const h = createHarness();
+    themeMock.dark = true;
+    handleGeneralSettingsChanged(
+      { ...h.settings, uiTheme: "pearl-white" },
+      { ...h.settings, uiTheme: "system" },
+      h.deps,
+    );
+    expect(h.windowManager.broadcast).toHaveBeenCalledWith("ui-theme:changed", "charcoal-pink");
   });
 
   it.each([true, false])("fully applies startup settings with petVisible=%s", (visible) => {

@@ -174,12 +174,13 @@ describe("agui-bridge sticker event ordering", () => {
     expect(onFinished).toHaveBeenCalledWith(
       expect.objectContaining({ reply: "抱抱你" }),
       "你好",
-      {
+      expect.objectContaining({
         source: "desktop",
         mode: "chat",
         conversationId: "chat-events",
         runId: ack.runId,
-      },
+        assistantEntryId: expect.any(String),
+      }),
     );
   });
 
@@ -502,7 +503,11 @@ describe("agui-bridge sticker event ordering", () => {
       { sender },
       { messages: [{ role: "user", content: "累了" }], sessionId: "chat-sticker", style: "01_default.md" },
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // complete 回调里 run 终态统计同步（真实 fs）先于终态事件发送，
+    // 等待 RUN_FINISHED 真正送达后再断言事件顺序
+    await vi.waitFor(() => {
+      expect(sent.some((event) => (event as { type?: string }).type === "RUN_FINISHED")).toBe(true);
+    });
 
     const eventTypes = sent.map((event) => (event as { type?: string; name?: string }).name ?? (event as { type?: string }).type);
     expect(eventTypes).toEqual(["RUN_STARTED", "cyrene.sticker", "RUN_FINISHED"]);

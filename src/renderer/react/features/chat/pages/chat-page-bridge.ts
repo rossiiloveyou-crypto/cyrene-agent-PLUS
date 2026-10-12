@@ -1,5 +1,6 @@
 import type {
   ChatMessage,
+  ChatPresentationCheckpointPatch,
   ChatSession,
   ChatSessionMeta,
   ConversationMode,
@@ -12,6 +13,8 @@ import type {
   SpeechInputCommitResult,
 } from "../../../../../shared/ipc-channels";
 import type { SidebarOrganizationDraft, SidebarOrganizationResult, SidebarOrganizationSnapshot } from "../../../../../shared/sidebar-organization";
+import type { TaskSession } from "../../../../../shared/task-session";
+import type { ModelFailureInfo } from "../../../../../shared/model-error";
 
 /** 认领队首的返回形状（与主进程 chats-store 的 ClaimPendingResult 对齐）。 */
 export type PendingClaimResult =
@@ -36,6 +39,19 @@ import type {
   PopQuizSettledPayload,
   PopQuizSubmission,
 } from "../../../../../shared/pop-quiz";
+import type { LearnExamAnswerValue, LearnExamChangedEvent, LearnExamCreatedEvent, LearnExamView } from "../../../../../shared/learn-exam";
+
+export interface LearnExamApi {
+  listByConversation: (conversationId: string) => Promise<LearnExamView[]>;
+  getView: (conversationId: string, examId: string) => Promise<{ ok: boolean; exam?: LearnExamView; error?: string }>;
+  saveAnswer: (conversationId: string, examId: string, questionId: string, answer: LearnExamAnswerValue | null) => Promise<{ ok: boolean; exam?: LearnExamView; error?: string }>;
+  saveNavigation: (conversationId: string, examId: string, activeQuestionId: string, flaggedQuestionIds: string[]) => Promise<{ ok: boolean; exam?: LearnExamView; error?: string }>;
+  submit: (conversationId: string, examId: string) => Promise<{ ok: boolean; shouldStartGrading?: boolean; exam?: LearnExamView; error?: string }>;
+  retry: (conversationId: string, examId: string) => Promise<{ ok: boolean; shouldStartGrading?: boolean; exam?: LearnExamView; error?: string }>;
+  markGradingFailed: (conversationId: string, examId: string) => Promise<{ ok: boolean; exam?: LearnExamView; error?: string }>;
+  onCreated: (callback: (event: LearnExamCreatedEvent) => void) => () => void;
+  onChanged: (callback: (event: LearnExamChangedEvent) => void) => () => void;
+}
 
 export interface ChatStoreApi {
   list: (options?: { mode?: ConversationMode }) => Promise<ChatSessionMeta[]>;
@@ -43,12 +59,13 @@ export interface ChatStoreApi {
   applySidebarOrganization: (expectedRevision: number, draft: SidebarOrganizationDraft) => Promise<SidebarOrganizationResult>;
   onSidebarOrganizationChanged: (callback: () => void) => () => void;
   get: (id: string) => Promise<ChatSession | null>;
+  getTaskSession: (taskId: string, parentConversationId: string) => Promise<TaskSession | null>;
   create: (input: { identityId: null; mode: ConversationMode; title?: string }) => Promise<ChatSession>;
   checkpointPresentation: (
     sessionId: string,
     messageId: string,
     mutationKey: string,
-    patch: Partial<ChatMessage>,
+    patch: ChatPresentationCheckpointPatch,
   ) => Promise<{ ok: true } | { ok: false; error: string }>;
   rename: (id: string, title: string) => Promise<ChatSession | null>;
   delete: (id: string) => Promise<boolean>;
@@ -86,6 +103,9 @@ export interface ChatStoreApi {
   // 验证工作区目录当前是否可用（存在且为目录）：失效路径不得显示为已选上
   validateWorkspacePath: (workspaceRoot: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
   setWorkspace: (sessionId: string, workspaceRoot: string) => Promise<{ ok: boolean; error?: string; isEmpty?: boolean }>;
+  // main → 渲染端：上下文压缩阶段。自动压缩在 run 开始前于主进程发生，
+  // 渲染端收不到 AG-UI 事件，靠这条推送显示消息流尾部的呼吸提示。
+  onCompactionPhase: (callback: (payload: { sessionId: string; phase: "running" | "finished" }) => void) => () => void;
   initLearnWorkspace: (sessionId: string) => Promise<{ ok: boolean; error?: string; created?: string[]; skipped?: string[] }>;
   openWorkspace: (workspaceRoot: string) => Promise<{ ok: boolean; error?: string }>;
   // 聊天文件卡片右键菜单：本机默认方式打开 / 在资源管理器中定位工作区内文件
@@ -132,6 +152,7 @@ export interface AguiEvent {
   stepName?: string;
   status?: string;
   changes?: ToolFileChange[];
+  metadata?: { cyreneModelFailure?: ModelFailureInfo };
 }
 
 /** Harness 正文候选事件：只驱动本次运行的临时预览，不代表正式消息提交。 */
@@ -153,7 +174,6 @@ export interface AguiApi {
     styleId?: string;
     sessionId: string;
     imageAttachments?: Array<{ name: string; filePath: string; mime?: string }>;
-    recoveryContext?: string;
     takeoverFromRunId?: string;
     /** 桌面 edit / regenerate 的轨迹回退锚点（主进程写 turn_rewind；渲染端只传元数据）。 */
     transcriptRewind?: {
@@ -222,4 +242,8 @@ export function choiceApi(): ChoiceApi | undefined {
 
 export function settingsApprovalApi(): SettingsApprovalApi | undefined {
   return (window as typeof window & { settings?: SettingsApprovalApi }).settings;
+}
+
+export function learnExamApi(): LearnExamApi | undefined {
+  return (window as typeof window & { learnExam?: LearnExamApi }).learnExam;
 }

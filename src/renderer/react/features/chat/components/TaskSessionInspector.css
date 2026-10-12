@@ -1,0 +1,77 @@
+.cy-task-session-inspector {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.cy-task-session-inspector__header {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--rb-border-default, #f0ebee);
+  background: color-mix(in srgb, var(--rb-bg-2, #fafafc) 92%, transparent);
+  font: 500 12px/1.3 var(--rb-font-sans, sans-serif);
+}
+
+.cy-task-session-inspector__title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cy-task-session-inspector__status {
+  flex: 0 0 auto;
+  color: var(--rb-text-secondary, #777078);
+}
+
+.cy-task-session-inspector__header-status {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.cy-task-session-inspector__context {
+  color: var(--rb-text-secondary, #777078);
+}
+
+.cy-task-session-inspector__context.is-open { color: #54a56d; }
+.cy-task-session-inspector__context.is-closed { color: var(--rb-text-tertiary, #a09aa1); }
+
+.cy-task-session-inspector__status.is-running { color: var(--rb-accent, #ff5b8a); }
+.cy-task-session-inspector__status.is-completed { color: #54a56d; }
+.cy-task-session-inspector__status.is-failed,
+.cy-task-session-inspector__status.is-cancelled { color: #d06969; }
+
+.cy-task-session-inspector__message {
+  padding: 18px;
+  color: var(--rb-text-secondary, #777078);
+  font: 400 13px/1.5 var(--rb-font-sans, sans-serif);
+}
+
+.cy-task-session-inspector__message--with-avatar {
+  display: flex;
+  min-height: 70px;
+  align-items: center;
+  gap: 12px;
+}
+
+.cy-task-session-inspector__loading-avatar {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  object-fit: contain;
+}
+
+.cy-task-session-inspector > .cy-message-list {
+  --cy-message-reading-width: min(100%, 980px);
+  width: 100%;
+  padding: 18px;
+}

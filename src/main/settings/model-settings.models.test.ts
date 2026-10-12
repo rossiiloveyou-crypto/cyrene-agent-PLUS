@@ -100,6 +100,80 @@ describe("normalize 六步契约（档案模型清单）", () => {
   });
 });
 
+describe("model request retry settings", () => {
+  it("旧配置默认额外重试 5 次，并将异常值归一到 0–10 的整数", () => {
+    expect(normalizeModelSettings({ ...GLM_BASE } as never).modelRequestMaxRetries).toBe(5);
+    expect(normalizeModelSettings({ ...GLM_BASE, modelRequestMaxRetries: 0 } as never).modelRequestMaxRetries).toBe(0);
+    expect(normalizeModelSettings({ ...GLM_BASE, modelRequestMaxRetries: 10 } as never).modelRequestMaxRetries).toBe(10);
+    expect(normalizeModelSettings({ ...GLM_BASE, modelRequestMaxRetries: 4.6 } as never).modelRequestMaxRetries).toBe(5);
+    expect(normalizeModelSettings({ ...GLM_BASE, modelRequestMaxRetries: -2 } as never).modelRequestMaxRetries).toBe(0);
+    expect(normalizeModelSettings({ ...GLM_BASE, modelRequestMaxRetries: 24 } as never).modelRequestMaxRetries).toBe(10);
+    expect(normalizeModelSettings({ ...GLM_BASE, modelRequestMaxRetries: Number.NaN } as never).modelRequestMaxRetries).toBe(5);
+  });
+
+  it("切换会话模型档案时仍保留全局重试次数", () => {
+    const configured = normalizeModelSettings({
+      ...GLM_BASE,
+      modelRequestMaxRetries: 3,
+      modelProfiles: [
+        { id: "p-a", provider: GLM_BASE.provider, baseUrl: "https://a.example", apiKey: "key-a", model: "a" },
+        { id: "p-b", provider: GLM_BASE.provider, baseUrl: "https://b.example", apiKey: "key-b", model: "b" },
+      ],
+      defaultModelProfileId: "p-a",
+    } as never);
+
+    expect(resolveSessionModelSettings(configured, { modelProfileId: "p-b", model: "b" }).modelRequestMaxRetries).toBe(3);
+  });
+});
+
+describe("MiniMax Responses 端点迁移", () => {
+  const oldResponsesBase = "https://api.minimaxi.com/v1";
+  const officialResponsesBase = "https://api.minimax.cn/v1";
+
+  it("迁移 Responses 的旧默认地址，覆盖档案、perProvider 和顶层镜像", () => {
+    const settings = normalizeModelSettings({
+      schemaVersion: 3,
+      provider: "MiniMax",
+      baseUrl: oldResponsesBase,
+      model: "MiniMax-M3",
+      apiKey: "sk-test",
+      explicitTransport: "responses",
+      perProvider: {
+        "MiniMax": {
+          baseUrl: oldResponsesBase, model: "MiniMax-M3", apiKey: "sk-test", explicitTransport: "responses",
+        },
+      },
+      modelProfiles: [{
+        id: "mini-responses", provider: "MiniMax", baseUrl: oldResponsesBase,
+        model: "MiniMax-M3", apiKey: "sk-test", explicitTransport: "responses",
+      }],
+    } as never);
+
+    expect(settings.schemaVersion).toBe(5);
+    expect(settings.baseUrl).toBe(officialResponsesBase);
+    expect(settings.perProvider?.["MiniMax（稀宇科技）"].baseUrl).toBe(officialResponsesBase);
+    expect(settings.modelProfiles?.[0].baseUrl).toBe(officialResponsesBase);
+    expect(settings.modelProfiles?.[0].provider).toBe("MiniMax（稀宇科技）");
+  });
+
+  it("保留非 Responses 配置和用户自定义地址", () => {
+    const settings = normalizeModelSettings({
+      schemaVersion: 3,
+      provider: "MiniMax（稀宇科技）",
+      baseUrl: oldResponsesBase,
+      model: "MiniMax-M3",
+      apiKey: "sk-test",
+      explicitTransport: "openai",
+      modelProfiles: [
+        { id: "custom", provider: "MiniMax（稀宇科技）", baseUrl: "https://proxy.example/v1", model: "MiniMax-M3", explicitTransport: "responses" },
+      ],
+    } as never);
+
+    expect(settings.baseUrl).toBe(oldResponsesBase);
+    expect(settings.modelProfiles?.[0].baseUrl).toBe("https://proxy.example/v1");
+  });
+});
+
 describe("resolveSessionModelSettings（④：绑定 + effective model 组合）", () => {
   function buildSettings(defaultModelProfileId: string, profiles: Array<Record<string, unknown>>) {
     return normalizeModelSettings({

@@ -17,6 +17,18 @@ export function resolveFileIconUrl(filePath: string): string {
   return FILE_ICON_URLS.default;
 }
 
+/** 判断文件名是否命中品牌图标映射；普通代码片段不应显示兜底文件图标。 */
+export function hasFileIconMapping(filePath: string): boolean {
+  const base = filePath.replaceAll("\\", "/").split("/").pop() ?? "";
+  const lower = base.toLowerCase();
+  const byName = FILE_NAME_MAP[lower];
+  if (byName && FILE_ICON_URLS[byName]) return true;
+  const dot = lower.lastIndexOf(".");
+  if (dot <= 0) return false;
+  const byExt = FILE_EXT_MAP[lower.slice(dot + 1)];
+  return Boolean(byExt && FILE_ICON_URLS[byExt]);
+}
+
 /** 行内文件图标；尺寸/对齐由 className 对应的样式控制 */
 export function FileIcon({ fileName, className }: { fileName: string; className?: string }) {
   return (

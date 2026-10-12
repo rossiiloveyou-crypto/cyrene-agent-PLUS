@@ -33,6 +33,10 @@ export interface ConversationTranscriptCompactorOptions {
   runReader?: TranscriptRunReader;
   archive?: ConversationTranscriptArchive;
   now?: () => number;
+  /** 压缩阶段观察者：摘要请求前 running、结束后 finished（失败也发）。
+   *  自动压缩发生在 run 开始前的主进程侧，渲染端拿不到 AG-UI 事件，
+   *  只能靠这个回调把「正在压缩」推给窗口驱动呼吸提示。 */
+  onPhase?: (phase: "running" | "finished", conversationId: string) => void;
 }
 
 export interface TranscriptCompactionModelSettings {
@@ -59,10 +63,12 @@ export function createModelBackedConversationTranscriptCompactor(input: {
   store: ConversationTranscriptStore;
   runReader?: TranscriptRunReader;
   loadModelSettings: () => TranscriptCompactionModelSettings;
+  onPhase?: ConversationTranscriptCompactorOptions["onPhase"];
 }): ConversationTranscriptCompactor {
   return new ConversationTranscriptCompactor({
     store: input.store,
     runReader: input.runReader,
+    onPhase: input.onPhase,
     summarize: async (history) => {
       const settings = input.loadModelSettings();
       return callSummarizeModel(
@@ -89,6 +95,7 @@ export class ConversationTranscriptCompactor {
   private readonly runReader: TranscriptRunReader;
   private readonly archive: ConversationTranscriptArchive;
   private readonly now: () => number;
+  private readonly onPhase: ConversationTranscriptCompactorOptions["onPhase"];
 
   constructor(options: ConversationTranscriptCompactorOptions) {
     this.store = options.store;
@@ -96,6 +103,7 @@ export class ConversationTranscriptCompactor {
     this.runReader = options.runReader ?? { get: () => null };
     this.archive = options.archive ?? new ConversationTranscriptArchive(options.store);
     this.now = options.now ?? (() => Date.now());
+    this.onPhase = options.onPhase;
   }
 
   async compact(request: ConversationCompactionRequest): Promise<ConversationCompactionResult> {
@@ -112,18 +120,25 @@ export class ConversationTranscriptCompactor {
     const sourceEntries = before.entries.filter((entry) => entry.seq <= sourceThroughSeq);
     const sourceDigest = digest(sourceEntries);
     let summaryError: unknown;
-    const compacted = await compressForAgentLoop({
-      messages: full.messages,
-      retainTokens,
-      summarize: async (history) => {
-        try {
-          return await this.summarize(history);
-        } catch (error) {
-          summaryError = error;
-          throw error;
-        }
-      },
-    });
+    let compacted: CanonicalChatMessage[];
+    // 呼吸提示覆盖整个压缩流程（含重试），只发一对 running/finished 避免闪烁。
+    this.onPhase?.("running", request.conversationId);
+    try {
+      compacted = await compressForAgentLoop({
+        messages: full.messages,
+        retainTokens,
+        summarize: async (history) => {
+          try {
+            return await this.summarize(history);
+          } catch (error) {
+            summaryError = error;
+            throw error;
+          }
+        },
+      });
+    } finally {
+      this.onPhase?.("finished", request.conversationId);
+    }
     if (summaryError) {
       console.error("[ConversationTranscriptCompactor] summary failed", summaryError);
       throw createTranscriptCompactionRequiredError(summaryError);

@@ -7,10 +7,8 @@ import type { ToolOutputRef } from "./tool-output/tool-output-store";
 const ROOT_DIR_NAME = "cyrene-runs";
 const SESSIONS_DIR_NAME = "sessions";
 const INDEX_FILE_NAME = "index.json";
-const SCHEMA_VERSION = 1;
-/** 问题 5 P0：index.json 写入防抖窗口（ms）。create / markTerminal / delete /
- *  initialize 走立即写，checkpoint / recordTool 的热路径写在此窗口内合并。 */
-const INDEX_WRITE_DEBOUNCE_MS = 500;
+const LEGACY_SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export type HarnessRunStatus = "running" | "interrupted" | "completed" | "cancelled" | "failed";
 export type PersistedToolCallStatus = "planned" | "started" | "committed" | "unknown" | "not_executed";
@@ -35,11 +33,21 @@ export interface PersistedToolCall {
   updatedAt: number;
 }
 
-export interface HarnessRunSession {
-  schemaVersion: typeof SCHEMA_VERSION;
+interface HarnessRunMetadataBase {
   conversationId: string;
   runId: string;
   status: HarnessRunStatus;
+  createdAt: number;
+  updatedAt: number;
+  completedAt?: number;
+}
+
+export interface HarnessRunMetadata extends HarnessRunMetadataBase {
+  schemaVersion: typeof SCHEMA_VERSION;
+}
+
+export interface LegacyHarnessRunSession extends HarnessRunMetadataBase {
+  schemaVersion: typeof LEGACY_SCHEMA_VERSION;
   messages: ChatMessage[];
   state: AgentState;
   toolOutputs: ToolOutputRef[];
@@ -47,18 +55,13 @@ export interface HarnessRunSession {
   rounds: number;
   cache: HarnessCacheState;
   request: HarnessRequestSnapshot;
-  createdAt: number;
-  updatedAt: number;
-  completedAt?: number;
 }
+
+export type HarnessRunSession = HarnessRunMetadata | LegacyHarnessRunSession;
 
 export interface CreateHarnessRunInput {
   conversationId: string;
   runId: string;
-  messages: ChatMessage[];
-  request: HarnessRequestSnapshot;
-  state?: AgentState;
-  cache?: HarnessCacheState;
 }
 
 export interface HarnessRunCheckpoint {
@@ -105,18 +108,22 @@ function isCacheState(value: unknown): value is HarnessCacheState {
 
 function isSession(value: unknown): value is HarnessRunSession {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const candidate = value as Partial<HarnessRunSession>;
-  return candidate.schemaVersion === SCHEMA_VERSION
+  const candidate = value as Record<string, unknown>;
+  const hasCommonMetadata = (candidate.schemaVersion === LEGACY_SCHEMA_VERSION || candidate.schemaVersion === SCHEMA_VERSION)
     && typeof candidate.conversationId === "string"
     && typeof candidate.runId === "string" && validRunId(candidate.runId)
     && isRunStatus(candidate.status)
-    && Array.isArray(candidate.messages)
-    && !!candidate.state && Array.isArray(candidate.state.todoItems) && Array.isArray(candidate.state.uncertainEffects)
+    && typeof candidate.createdAt === "number" && Number.isFinite(candidate.createdAt)
+    && typeof candidate.updatedAt === "number" && Number.isFinite(candidate.updatedAt);
+  if (!hasCommonMetadata) return false;
+  if (candidate.schemaVersion === SCHEMA_VERSION) return true;
+  const state = candidate.state as Partial<AgentState> | undefined;
+  return Array.isArray(candidate.messages)
+    && !!state && Array.isArray(state.todoItems) && Array.isArray(state.uncertainEffects)
     && Array.isArray(candidate.toolOutputs) && Array.isArray(candidate.toolCalls)
     && typeof candidate.rounds === "number"
     && (candidate.cache === undefined || isCacheState(candidate.cache))
-    && !!candidate.request
-    && typeof candidate.createdAt === "number" && typeof candidate.updatedAt === "number";
+    && !!candidate.request && typeof candidate.request === "object";
 }
 
 /**
@@ -128,12 +135,9 @@ export class HarnessRunStore {
   private readonly indexPath: string;
   private readonly now: () => number;
   private index = new Map<string, IndexRow>();
-  /** 问题 5 P0：index 防抖写的 pending 定时器（writeIndexNow 会取消它）。 */
-  private indexWriteTimer: ReturnType<typeof setTimeout> | undefined;
   /** 问题 5 P0：写放大量度（实例生命周期累计；markTerminal 时输出一行日志）。 */
   private diskWrites = 0;
   private diskBytes = 0;
-  private checkpointCount = 0;
 
   constructor(userDataRoot: string, options: HarnessRunStoreOptions = {}) {
     this.root = path.join(userDataRoot, ROOT_DIR_NAME);
@@ -147,61 +151,43 @@ export class HarnessRunStore {
     if (!input.conversationId || !validRunId(input.runId)) throw new Error("HARNESS_RUN_INVALID_ID");
     // canonical runId 在生产中唯一；但旧终态/中断记录不可阻碍一次新的同名测试或迁移运行。
     // 仅仍在执行的记录代表真实冲突，绝不覆盖。
-    if (this.get(input.runId)?.status === "running") throw new Error("HARNESS_RUN_EXISTS");
+    const existing = this.get(input.runId);
+    if (existing?.status === "running") throw new Error("HARNESS_RUN_EXISTS");
+    if (existing?.schemaVersion === LEGACY_SCHEMA_VERSION) throw new Error("HARNESS_RUN_LEGACY_READ_ONLY");
     const now = this.now();
-    const session: HarnessRunSession = {
+    const session: HarnessRunMetadata = {
       schemaVersion: SCHEMA_VERSION,
       conversationId: input.conversationId,
       runId: input.runId,
       status: "running",
-      messages: clone(input.messages),
-      state: clone(input.state ?? { todoItems: [], uncertainEffects: [] }),
-      toolOutputs: [],
-      toolCalls: [],
-      rounds: 0,
-      cache: clone(input.cache ?? INITIAL_HARNESS_CACHE_STATE),
-      request: clone(input.request),
       createdAt: now,
       updatedAt: now,
     };
-    this.write(session, "now");
+    this.write(session);
     this.appendEvent(session, "run_created");
     return clone(session);
   }
 
   get(runId: string): HarnessRunSession | null {
     const session = this.read(runId);
-    return session ? clone(session) : null;
-  }
-
-  checkpoint(runId: string, patch: HarnessRunCheckpoint): HarnessRunSession {
-    const session = this.require(runId);
-    // 消费方克隆契约：harness 传活引用，这里在返回前同步 clone（问题 5 P0）
-    if (patch.messages !== undefined) session.messages = clone(patch.messages);
-    if (patch.state !== undefined) session.state = clone(patch.state);
-    if (patch.todoItems !== undefined) session.state.todoItems = clone(patch.todoItems);
-    if (patch.toolOutputs !== undefined) session.toolOutputs = clone(patch.toolOutputs);
-    if (patch.rounds !== undefined) session.rounds = patch.rounds;
-    if (patch.cache !== undefined) session.cache = clone(patch.cache);
-    if (patch.request !== undefined) session.request = clone(patch.request);
-    session.updatedAt = this.now();
-    this.checkpointCount += 1;
-    this.write(session);
-    this.appendEvent(session, "checkpoint");
+    if (!session) return null;
+    const row = this.index.get(runId);
+    if (session.schemaVersion === LEGACY_SCHEMA_VERSION && session.status === "running" && row?.status === "interrupted") {
+      return clone({ ...session, status: "interrupted", updatedAt: row.updatedAt });
+    }
     return clone(session);
   }
 
-  recordTool(runId: string, input: Omit<PersistedToolCall, "updatedAt">): HarnessRunSession {
-    const session = this.require(runId);
-    const updatedAt = this.now();
-    const next: PersistedToolCall = { ...input, updatedAt };
-    const existing = session.toolCalls.findIndex((call) => call.toolCallId === input.toolCallId);
-    if (existing >= 0) session.toolCalls[existing] = next;
-    else session.toolCalls.push(next);
-    session.updatedAt = updatedAt;
-    this.write(session);
-    this.appendEvent(session, `tool_${input.status}`, { toolCallId: input.toolCallId });
-    return clone(session);
+  /** Keep the old method name so stale callers fail visibly instead of writing full snapshots. */
+  checkpoint(runId: string, _patch: HarnessRunCheckpoint): HarnessRunSession {
+    if (!this.read(runId)) throw new Error("HARNESS_RUN_NOT_FOUND");
+    throw new Error("HARNESS_RUN_CHECKPOINT_DISABLED");
+  }
+
+  /** Keep the old method name so stale callers fail visibly instead of rewriting session files. */
+  recordTool(runId: string, _input: Omit<PersistedToolCall, "updatedAt">): HarnessRunSession {
+    if (!this.read(runId)) throw new Error("HARNESS_RUN_NOT_FOUND");
+    throw new Error("HARNESS_RUN_TOOL_LIFECYCLE_DISABLED");
   }
 
   recordCompaction(runId: string, input: { status: "started" | "committed"; messageCountBefore: number; messageCountAfter?: number }): void {
@@ -214,13 +200,14 @@ export class HarnessRunStore {
 
   markTerminal(runId: string, status: Exclude<HarnessRunStatus, "running" | "interrupted">): HarnessRunSession {
     const session = this.require(runId);
+    if (session.schemaVersion !== SCHEMA_VERSION) throw new Error("HARNESS_RUN_LEGACY_READ_ONLY");
     session.status = status;
     session.completedAt = this.now();
     session.updatedAt = session.completedAt;
-    this.write(session, "now");
+    this.write(session);
     this.appendEvent(session, `run_${status}`);
-    // 问题 5 P0：写放大量度基线（纯 console 观测，为 journal 化决策拿数据）
-    console.log(`[HarnessRunStore] run=${runId} terminal=${status} diskWrites=${this.diskWrites} diskBytes=${this.diskBytes} checkpoints=${this.checkpointCount}`);
+    // 写入量度用于观察运行元数据和索引的实际写放大。
+    console.log(`[HarnessRunStore] run=${runId} terminal=${status} diskWrites=${this.diskWrites} diskBytes=${this.diskBytes}`);
     return clone(session);
   }
 
@@ -241,12 +228,17 @@ export class HarnessRunStore {
    * interrupted 只由 initialize() 在启动时把滞留的 running 翻转而来
    * （正常终态都走 markTerminal），因此该集合即「进程崩溃遗留」的穷尽集合。
    */
-  listInterruptedRuns(): HarnessRunSession[] {
+  listInterruptedRuns(conversationId?: string): HarnessRunSession[] {
     const sessions: HarnessRunSession[] = [];
     for (const [runId, row] of this.index) {
       if (row.status !== "interrupted") continue;
+      if (conversationId && row.conversationId !== conversationId) continue;
       const session = this.read(runId);
-      if (session) sessions.push(session);
+      if (session) {
+        sessions.push(session.schemaVersion === LEGACY_SCHEMA_VERSION && session.status === "running"
+          ? { ...session, status: "interrupted", updatedAt: row.updatedAt }
+          : session);
+      }
     }
     // 稳定排序：避免并发初始化因遍历顺序不同产生不同的对账写入顺序
     return sessions.sort((left, right) => left.createdAt - right.createdAt);
@@ -256,6 +248,29 @@ export class HarnessRunStore {
     fs.mkdirSync(this.sessionsDir, { recursive: true });
     this.readIndex();
     let changed = false;
+
+    // The index is a lookup cache, not the only recovery source. Rebuild rows
+    // from valid session metadata so a missing or truncated index cannot hide
+    // runs that need crash reconciliation.
+    for (const name of fs.readdirSync(this.sessionsDir)) {
+      if (path.extname(name) !== ".json") continue;
+      const runId = path.basename(name, ".json");
+      if (!validRunId(runId)) continue;
+      const session = this.read(runId);
+      if (!session || session.runId !== runId) continue;
+      const current = this.index.get(runId);
+      if (!current || current.conversationId !== session.conversationId
+        || current.status !== session.status || current.updatedAt !== session.updatedAt) {
+        this.index.set(runId, {
+          conversationId: session.conversationId,
+          runId: session.runId,
+          status: session.status,
+          updatedAt: session.updatedAt,
+        });
+        changed = true;
+      }
+    }
+
     for (const row of [...this.index.values()]) {
       // 孤儿行：session 文件已不存在（崩溃/手动清理遗留），直接清行
       if (!fs.existsSync(this.sessionPath(row.runId))) {
@@ -279,9 +294,21 @@ export class HarnessRunStore {
         }
         continue;
       }
+      if (session.schemaVersion === LEGACY_SCHEMA_VERSION) {
+        // Preserve the old heavy file byte-for-byte. The index is enough to
+        // discover the interrupted run; its transcript facts are read-only.
+        this.index.set(row.runId, {
+          conversationId: session.conversationId,
+          runId: session.runId,
+          status: "interrupted",
+          updatedAt: this.now(),
+        });
+        changed = true;
+        continue;
+      }
       session.status = "interrupted";
       session.updatedAt = this.now();
-      this.write(session, "now");
+      this.write(session);
       this.appendEvent(session, "run_interrupted");
       changed = true;
     }
@@ -301,6 +328,9 @@ export class HarnessRunStore {
     try {
       const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
       if (!isSession(parsed)) return null;
+      if (parsed.schemaVersion === SCHEMA_VERSION) {
+        return parsed;
+      }
       return {
         ...parsed,
         cache: isCacheState(parsed.cache) ? parsed.cache : { ...INITIAL_HARNESS_CACHE_STATE },
@@ -310,17 +340,26 @@ export class HarnessRunStore {
     }
   }
 
-  /** session 文件每次都写（恢复的权威数据源）；index 按调用方语义分类写入。 */
-  private write(session: HarnessRunSession, mode: "now" | "lazy" = "lazy"): void {
-    this.atomicWrite(this.sessionPath(session.runId), session);
+  /** 新运行只写运行元数据；旧版 session 文件保持只读。 */
+  private write(session: HarnessRunMetadata): void {
+    if (session.schemaVersion !== SCHEMA_VERSION) throw new Error("HARNESS_RUN_LEGACY_READ_ONLY");
+    const persisted = {
+      schemaVersion: SCHEMA_VERSION,
+      conversationId: session.conversationId,
+      runId: session.runId,
+      status: session.status,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      ...(session.completedAt !== undefined ? { completedAt: session.completedAt } : {}),
+    };
+    this.atomicWrite(this.sessionPath(session.runId), persisted);
     this.index.set(session.runId, {
       conversationId: session.conversationId,
       runId: session.runId,
       status: session.status,
       updatedAt: session.updatedAt,
     });
-    if (mode === "now") this.writeIndexNow();
-    else this.writeIndexLazy();
+    this.writeIndexNow();
   }
 
   private readIndex(): void {
@@ -340,26 +379,8 @@ export class HarnessRunStore {
     }
   }
 
-  /** 热路径防抖写：窗口内多次 write() 只触发一次落盘；回调从 index 现值构造，不捕获快照。 */
-  private writeIndexLazy(): void {
-    if (this.indexWriteTimer !== undefined) return;
-    this.indexWriteTimer = setTimeout(() => {
-      this.indexWriteTimer = undefined;
-      try {
-        this.writeIndexNow();
-      } catch (error) {
-        // index 非权威数据（session 文件才是）：写失败由 initialize 权威校正兜底
-        console.warn("[HarnessRunStore] lazy index write failed:", error);
-      }
-    }, INDEX_WRITE_DEBOUNCE_MS);
-  }
-
-  /** 立即写：先取消 pending 的 lazy 定时器，防止旧回调把 stale 状态覆盖回去。 */
+  /** Run metadata changes only at creation, terminal settlement, and crash reconciliation. */
   private writeIndexNow(): void {
-    if (this.indexWriteTimer !== undefined) {
-      clearTimeout(this.indexWriteTimer);
-      this.indexWriteTimer = undefined;
-    }
     this.atomicWrite(this.indexPath, [...this.index.values()]);
   }
 

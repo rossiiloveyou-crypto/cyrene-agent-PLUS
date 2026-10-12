@@ -185,6 +185,39 @@ describe("ConversationTranscriptCompactor", () => {
       .toContain("<cyrene_compaction_checkpoint>");
   });
 
+  it("压缩阶段回调成对触发：摘要前 running、结束后 finished", async () => {
+    const fixture = createFixture();
+    await seed(fixture);
+    const phases: Array<{ phase: string; conversationId: string }> = [];
+    const compactor = new ConversationTranscriptCompactor({
+      store: fixture.store,
+      summarize: async () => "summary",
+      onPhase: (phase, conversationId) => phases.push({ phase, conversationId }),
+    });
+
+    await compactor.compact({ conversationId: "c1", trigger: "automatic", retainTokens: 1 });
+
+    expect(phases).toEqual([
+      { phase: "running", conversationId: "c1" },
+      { phase: "finished", conversationId: "c1" },
+    ]);
+  });
+
+  it("摘要失败时仍补发 finished，呼吸提示不会卡在运行中", async () => {
+    const fixture = createFixture();
+    await seed(fixture);
+    const phases: string[] = [];
+    const compactor = new ConversationTranscriptCompactor({
+      store: fixture.store,
+      summarize: async () => { throw new Error("provider down"); },
+      onPhase: (phase) => phases.push(phase),
+    });
+
+    await expect(compactor.compact({ conversationId: "c1", trigger: "automatic", retainTokens: 1 }))
+      .rejects.toThrow("TRANSCRIPT_COMPACTION_REQUIRED");
+    expect(phases).toEqual(["running", "finished"]);
+  });
+
   it("第一次压缩归档后仍可按热分支完成第二次压缩", async () => {
     const fixture = createFixture();
     await seed(fixture);

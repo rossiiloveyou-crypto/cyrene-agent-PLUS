@@ -17,6 +17,8 @@ import { broadcastToAllWindows } from "./broadcast";
 import { PetWindowMoveController } from "../pet-window-movement";
 import { CURRENT_DISCLAIMER_VERSION } from "../../shared/disclaimer";
 
+const PET_WINDOW_RESOURCE_RELEASE_DELAY_MS = 30_000;
+
 export interface WindowManagerOptions {
   getCurrentAppIconPath: () => string;
   isDev: boolean;
@@ -69,6 +71,7 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
   let onboardingWindow: BrowserWindow | null = null;
   let chatShell: ReactChatWindowHandle | null = null;
   let chatLoadPromise: Promise<void> | null = null;
+  let petWindowReleaseTimer: ReturnType<typeof setTimeout> | null = null;
   const readyHandlers: Array<(win: BrowserWindow) => void> = [];
   const closedHandlers: Array<() => void> = [];
   const movedHandlers: Array<(position: { x: number; y: number }) => void> = [];
@@ -83,6 +86,22 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
   function getUsablePetWindow(): BrowserWindow | null {
     if (!petWindow || petWindow.isDestroyed()) return null;
     return petWindow;
+  }
+
+  function cancelPetWindowResourceRelease(): void {
+    if (petWindowReleaseTimer === null) return;
+    clearTimeout(petWindowReleaseTimer);
+    petWindowReleaseTimer = null;
+  }
+
+  function schedulePetWindowResourceRelease(window: BrowserWindow): void {
+    cancelPetWindowResourceRelease();
+    if (window.isDestroyed() || window.isVisible()) return;
+    petWindowReleaseTimer = setTimeout(() => {
+      petWindowReleaseTimer = null;
+      if (petWindow !== window || window.isDestroyed() || window.isVisible()) return;
+      window.destroy();
+    }, PET_WINDOW_RESOURCE_RELEASE_DELAY_MS);
   }
 
   function hasCurrentDisclaimerConsent(): boolean {
@@ -132,17 +151,24 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
   function setPetWindow(window: BrowserWindow, showOnReady = true): void {
     petWindow = window;
     window.once("ready-to-show", () => {
-      if (!petWindow || petWindow.isDestroyed()) return;
+      if (petWindow !== window || window.isDestroyed()) return;
       if (showOnReady) {
-        petWindow.show();
+        window.show();
+      } else {
+        schedulePetWindowResourceRelease(window);
       }
       for (const handler of readyHandlers) {
-        try { handler(petWindow); } catch (err) { console.error("[WindowManager] ready handler failed:", err); }
+        try { handler(window); } catch (err) { console.error("[WindowManager] ready handler failed:", err); }
       }
     });
+    window.on("hide", () => schedulePetWindowResourceRelease(window));
+    window.on("show", cancelPetWindowResourceRelease);
     window.on("closed", () => {
+      cancelPetWindowResourceRelease();
       petWindowMoveController.dispose();
-      petWindow = null;
+      const wasCurrentPetWindow = petWindow === window;
+      if (wasCurrentPetWindow) petWindow = null;
+      if (!wasCurrentPetWindow) return;
       for (const handler of closedHandlers) {
         try { handler(); } catch (err) { console.error("[WindowManager] closed handler failed:", err); }
       }
@@ -180,6 +206,9 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
         { showOnReady: shouldShowOnReady },
       );
       setPetWindow(win, shouldShowOnReady);
+      const settings = options.loadPetWindowSettingsSlice();
+      const alwaysOnTop = settings.petAlwaysOnTop ?? true;
+      win.setAlwaysOnTop(alwaysOnTop, alwaysOnTop ? "screen-saver" : "normal");
       return win;
     },
 
@@ -352,6 +381,7 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
     },
 
     dispose(): void {
+      cancelPetWindowResourceRelease();
       petWindowMoveController.dispose();
     },
   };

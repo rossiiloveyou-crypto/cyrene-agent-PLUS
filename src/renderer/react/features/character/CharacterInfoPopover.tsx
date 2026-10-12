@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Eye, Phone, Settings2 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Popover } from "radix-ui";
-import { getCharacterAvatar } from "../../character-avatars";
+import { useCyreneAvatar } from "../../hooks/useCyreneAvatar";
 import { CharacterStatusPill } from "../../components/ui/CharacterStatusPill";
 import { useTranslation } from "../../i18n";
 import { VoiceCallPreviewDialog } from "./VoiceCallPreviewDialog";
@@ -23,8 +23,6 @@ import {
 } from "./characterRuntime";
 import "./CharacterInfoPopover.css";
 
-/** 角色昵称：与 character-avatars / 朋友圈点名名单共用同一标识 */
-const CHARACTER_NAME = "昔涟";
 /** 悬停多久后浮出（避免鼠标划过时误触） */
 const HOVER_OPEN_DELAY = 250;
 /** 移出后延时关闭，留出「从触发器移到浮层」的过渡时间 */
@@ -87,6 +85,7 @@ function TraitLine({ iconSrc, text, disabled = false }: { iconSrc: string; text:
  * 外壳交给 radix-ui 的 Popover（焦点、Esc、点外部关闭由它负责），只自己写内容与动效。
  */
 export function CharacterInfoPopover() {
+  const cyreneAvatarUrl = useCyreneAvatar();
   const { t } = useTranslation();
   const reduceMotion = useReducedMotion();
   const state = useRuntimeState();
@@ -182,7 +181,7 @@ export function CharacterInfoPopover() {
 
   const syncEnabled = isRuntimeSyncEnabled(config);
   const syncHint = t("character.syncDisabled");
-  const avatarPath = getCharacterAvatar(CHARACTER_NAME) ?? "";
+  const avatarPath = cyreneAvatarUrl;
 
   return (
     <>

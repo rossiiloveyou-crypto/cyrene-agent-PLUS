@@ -62,20 +62,24 @@ describe("agent settings migration", () => {
     Object.assign(window, { settings: { getGeneral: async () => ({}) } });
     const host = await renderSettings();
 
-    expect(host.querySelector(".cy-settings-sidebar__footer")?.textContent).toBe(`v${packageJson.version}`);
+    // 1.3.0 起 footer 在 v 号后拼纪念称号（如"正式版"），普通版本只有 v 号，
+    // 所以这里只断言 v 号在开头，不锁死整串文本
+    const footer = host.querySelector(".cy-settings-sidebar__footer")?.textContent ?? "";
+    expect(footer.startsWith(`v${packageJson.version}`)).toBe(true);
   });
 
   it("opens memory in the React settings workspace and saves an edited long-term profile", async () => {
     const payload = {
       l0: { preferredName: "小明", occupation: "学生", longTermInterests: "音乐", language: "中文", permanentNote: "" },
       l1: { recentGoals: "学习", recentPreferences: "", currentProject: "" },
-      l2: [], importedDocs: [], reflections: [],
+      l2: [], reflections: [],
     };
     Object.assign(window, {
-      settings: { getGeneral: async () => ({}) },
+      settings: { getGeneral: async () => ({}), getConfig: async () => ({ memoryMode: "vector" }) },
       memoryPanel: {
         getData: async () => payload,
         getVaultConfig: async () => ({ vaultPath: "", autoSync: false, lastSyncAt: 0 }),
+        getSummaryMemory: async () => null,
         saveL0: async (patch: typeof payload.l0) => { payload.l0 = { ...patch }; return { ok: true }; },
       },
     });
@@ -128,33 +132,26 @@ describe("agent settings migration", () => {
     expect(config.runtimeSync).toBe("llm");
   });
 
-  it("keeps memory document deletion behind confirmation and can bind a vault", async () => {
+  it("omits imported documents from memory settings and can bind a vault", async () => {
     const payload = {
       l0: { preferredName: "", occupation: "", longTermInterests: "", language: "", permanentNote: "" },
       l1: { recentGoals: "", recentPreferences: "", currentProject: "" },
       l2: [], reflections: [],
-      importedDocs: [{ importId: "import-1", fileName: "notes.md", chunkCount: 3, lastImportedAt: 1000 }],
     };
     let vaultPath = "";
-    const deleteImportedDoc = vi.fn(async () => { payload.importedDocs = []; return { ok: true, deleted: 1 }; });
     Object.assign(window, {
-      settings: { getGeneral: async () => ({}) },
+      settings: { getGeneral: async () => ({}), getConfig: async () => ({ memoryMode: "vector" }) },
       memoryPanel: {
         getData: async () => payload,
         getVaultConfig: async () => ({ vaultPath, autoSync: false, lastSyncAt: 0 }),
-        deleteImportedDoc,
+        getSummaryMemory: async () => null,
         bindVault: async () => { vaultPath = "C:/Notes"; return { ok: true, vaultPath, fileCount: 2 }; },
       },
     });
     const host = await renderSettings();
     await act(async () => { buttonByText(host, "记忆")!.click(); });
-    expect(host.textContent).toContain("notes.md");
+    expect(host.textContent).not.toContain("导入知识");
     expect(host.querySelector('svg[aria-label="Obsidian"] path')?.getAttribute("d")).toBe(siObsidian.path);
-    await act(async () => { host.querySelector<HTMLButtonElement>('button[aria-label="删除 notes.md"]')!.click(); });
-    expect(deleteImportedDoc).not.toHaveBeenCalled();
-    await act(async () => { buttonByText(document, "确认删除")!.click(); });
-    expect(deleteImportedDoc).toHaveBeenCalledWith("import-1", "notes.md");
-    expect(host.textContent).not.toContain("notes.md");
     await act(async () => { buttonByText(host, "绑定文件夹")!.click(); });
     expect(host.textContent).toContain("C:/Notes");
   });

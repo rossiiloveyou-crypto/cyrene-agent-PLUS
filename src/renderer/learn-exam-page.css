@@ -1,0 +1,77 @@
+:root {
+  color-scheme: light;
+  --background: 220 14% 96.5%;
+  --foreground: 240 6% 10%;
+  --card: 0 0% 100%;
+  --primary: 343 76% 60%;
+  --border: 240 6% 88%;
+  --muted-foreground: 240 4% 46%;
+}
+
+:root[data-ui-theme="charcoal-pink"] {
+  color-scheme: dark;
+  --background: 0 0% 8%;
+  --foreground: 0 0% 92%;
+  --card: 0 0% 11%;
+  --primary: 343 100% 68%;
+  --border: 0 0% 22%;
+  --muted-foreground: 0 0% 64%;
+}
+
+html,
+body,
+#learn-exam-preview-root {
+  width: 100%;
+  height: 100%;
+  min-width: 320px;
+  min-height: 0;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--rb-font-ui, "Segoe UI", "Microsoft YaHei", sans-serif);
+}
+
+.learn-exam-page-root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.learn-exam-page-state {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: 24px;
+  color: hsl(var(--muted-foreground));
+  text-align: center;
+}
+
+.learn-exam-page-error {
+  position: fixed;
+  z-index: 2;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 24px));
+  padding: 10px 14px;
+  border: 1px solid hsl(var(--destructive) / 0.3);
+  border-radius: 8px;
+  background: hsl(var(--background));
+  color: hsl(var(--destructive));
+  box-shadow: 0 4px 20px rgb(0 0 0 / 12%);
+}
+
+.learn-exam-page-error button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

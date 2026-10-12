@@ -2,7 +2,7 @@
  * 侧栏展开/收起按钮连点卡顿的根因基准（四阶段对照实验）。
  *
  * 跑法（项目根目录）：
- *   1. 先起渲染端 dev server：npx vite            （或直接 npm run dev 后另开终端跑本脚本）
+ *   1. 先起渲染端 dev server：pnpm exec vite      （或直接 pnpm run dev 后另开终端跑本脚本）
  *   2. node scripts/bench-sidebar-toggle.mjs
  *
  * 四个阶段都在真实 Electron 聊天窗口里执行：
@@ -199,7 +199,7 @@ async function main() {
   await app.close();
   if (viteChild) {
     viteChild.kill();
-    console.log("\n（基准自动拉起的 vite 已停止；若你自己起过 npm run dev 请手动关闭）");
+    console.log("\n（基准自动拉起的 vite 已停止；若你自己起过 pnpm run dev 请手动关闭）");
   }
 }
 

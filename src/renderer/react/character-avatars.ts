@@ -13,7 +13,7 @@ import hysUrl from "./avatars/海瑟音.png";
 import nakexiaUrl from "./avatars/那刻夏.png";
 import saifeierUrl from "./avatars/赛飞儿.png";
 import wandiUrl from "./avatars/万敌.png";
-import cyreneUrl from "./avatars/昔涟.png";
+import { resolveAsset } from "../../shared/renderer-base";
 
 /** 昵称 → 头像 url */
 const avatarByNickname: Readonly<Record<string, string>> = {
@@ -29,7 +29,7 @@ const avatarByNickname: Readonly<Record<string, string>> = {
   "那刻夏": nakexiaUrl,
   "赛飞儿": saifeierUrl,
   "万敌": wandiUrl,
-  "昔涟": cyreneUrl,
+  "昔涟": resolveAsset("avatars/cyrene-avatar.png"),
 };
 
 /** 角色昵称查头像；池外角色返回 null */

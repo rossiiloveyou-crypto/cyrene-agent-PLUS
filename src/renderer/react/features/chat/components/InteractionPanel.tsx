@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
 import { useTranslation } from "../../../i18n";
 import {
   buildAskSubmission,
@@ -24,21 +25,74 @@ import moodCompanyUrl from "../../../assets/status-moods/陪伴中.png?url";
 import moodSpoiledUrl from "../../../assets/status-moods/撒娇.png?url";
 import moodLearnUrl from "../../../assets/status-moods/学习.png?url";
 
-function PanelShell({ children, title }: { children: ReactNode; title: string }) {
+function PanelShell({ children, title, onCollapse }: { children: ReactNode; title: string; onCollapse?: () => void }) {
+  const { t } = useTranslation();
   return (
     <section className="cy-interaction-panel" aria-label={title}>
+      <button
+        type="button"
+        className="cy-interaction-panel__collapse"
+        aria-label={t("interaction.collapseCard")}
+        title={t("interaction.collapseCard")}
+        onClick={onCollapse}
+      >
+        <ChevronDown size={16} aria-hidden="true" />
+      </button>
       {children}
     </section>
+  );
+}
+
+function QuestionnaireChoice({
+  name,
+  value,
+  index,
+  multiple = false,
+  selected,
+  disabled = false,
+  onChange,
+  children,
+}: {
+  name: string;
+  value: string;
+  index: number;
+  multiple?: boolean;
+  selected: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className={`cy-questionnaire-choice${selected ? " is-selected" : ""}${multiple ? " is-multiple" : ""}`}>
+      <input
+        className="cy-questionnaire-choice__input"
+        type={multiple ? "checkbox" : "radio"}
+        name={name}
+        value={value}
+        checked={selected}
+        disabled={disabled}
+        onClick={() => {
+          // 重新选择已选中的单选项也应继续前进；此时浏览器不会触发 change。
+          if (!multiple && selected) onChange();
+        }}
+        onChange={onChange}
+      />
+      <span className="cy-questionnaire-choice__index" aria-hidden="true">{index + 1}</span>
+      <span className="cy-questionnaire-choice__body">{children}</span>
+      <span className="cy-questionnaire-choice__indicator" aria-hidden="true" />
+    </label>
   );
 }
 
 export function AskUserPanel({
   interaction,
   disabled = false,
+  onCollapse,
   onAnswer,
 }: {
   interaction: AskUserInteraction;
   disabled?: boolean;
+  onCollapse?: () => void;
   onAnswer?: (answer: unknown) => void;
   onIgnore?: () => void;
 }) {
@@ -51,9 +105,11 @@ export function AskUserPanel({
   }];
   const [page, setPage] = useState(0);
   const [drafts, setDrafts] = useState(() => createAskDrafts(questions));
+  const [additionalContext, setAdditionalContext] = useState("");
   useEffect(() => {
     setPage(0);
     setDrafts(createAskDrafts(questions));
+    setAdditionalContext("");
   }, [interaction.id]);
   const current = questions[Math.min(page, questions.length - 1)];
   const currentDraft = drafts[current.id] ?? { source: null, optionIds: [], customText: "" };
@@ -61,12 +117,13 @@ export function AskUserPanel({
   const submit = () => {
     if (!canSubmit) return;
     if (interaction.responseKind === "submission") {
-      onAnswer?.(buildAskSubmission(interaction, drafts));
+      onAnswer?.(buildAskSubmission(interaction, drafts, additionalContext));
       return;
     }
     if (interaction.responseKind === "clarification") {
       onAnswer?.({
         requestId: interaction.id,
+        ...(additionalContext.trim() ? { additionalContext: additionalContext.trim() } : {}),
         answers: questions.map((question) => {
           const draft = drafts[question.id];
           return draft.source === "custom"
@@ -80,7 +137,7 @@ export function AskUserPanel({
   };
 
   return (
-    <PanelShell title={t("interaction.askingTitle")}>
+    <PanelShell title={t("interaction.askingTitle")} onCollapse={onCollapse}>
       <img src={moodWarmUrl} className="cy-interaction-panel__mood-bottom-left" alt="" />
       <div className="cy-interaction-panel__heading">
         <span className="cy-interaction-panel__status"><img src={moodCompanyUrl} alt="" />{t("interaction.askingTitle")}</span>
@@ -103,23 +160,26 @@ export function AskUserPanel({
       {current.options.length > 0 && (
         <div className="cy-interaction-panel__options" role={current.multiple ? "group" : "radiogroup"} aria-label={current.question}>
           {current.options.map((option, index) => (
-            <button
-              type="button"
+            <QuestionnaireChoice
               key={option.id}
-              className={currentDraft.optionIds.includes(option.id) ? "is-selected" : ""}
-              role={current.multiple ? "checkbox" : "radio"}
-              aria-checked={currentDraft.optionIds.includes(option.id)}
+              name={`ask-${interaction.id}-${current.id}`}
+              value={option.id}
+              index={index}
+              multiple={current.multiple}
+              selected={currentDraft.optionIds.includes(option.id)}
               disabled={disabled}
-              onClick={() => {
+              onChange={() => {
                 setDrafts((values) => selectAskOption(values, current, option.id));
+                if (!current.multiple && questions.length > 1) {
+                  setPage((value) => Math.min(questions.length - 1, value + 1));
+                }
               }}
             >
-              <span className="cy-interaction-panel__option-index">{index + 1}.</span>
-              <div className="cy-interaction-panel__option-body">
+              <span className="cy-interaction-panel__option-body">
                 <MarkdownContent content={option.label} />
                 {option.description && <small>{option.description}</small>}
-              </div>
-            </button>
+              </span>
+            </QuestionnaireChoice>
           ))}
         </div>
       )}
@@ -143,6 +203,18 @@ export function AskUserPanel({
           })}
         </div>
       )}
+      {interaction.allowAdditionalContext && (
+        <label className="cy-interaction-panel__additional-context">
+          <span>{t("interaction.additionalContextLabel")}</span>
+          <textarea
+            value={additionalContext}
+            disabled={disabled}
+            rows={3}
+            placeholder={t("interaction.additionalContextPlaceholder")}
+            onChange={(event) => setAdditionalContext(event.target.value)}
+          />
+        </label>
+      )}
       <div className="cy-interaction-panel__actions">
         <button type="button" className="is-primary" disabled={disabled || !canSubmit} onClick={submit}>{questions.length > 1 ? t("interaction.submitAll") : t("interaction.submit")}</button>
       </div>
@@ -158,10 +230,12 @@ export function AskUserPanel({
 export function PlanApprovalPanel({
   interaction,
   disabled = false,
+  onCollapse,
   onAnswer,
 }: {
   interaction: AskUserInteraction;
   disabled?: boolean;
+  onCollapse?: () => void;
   onAnswer?: (answer: unknown) => void;
 }) {
   const { t } = useTranslation();
@@ -194,8 +268,7 @@ export function PlanApprovalPanel({
   };
 
   return (
-    <PanelShell title={t("interaction.planApprovalTitle")}>
-      <img src={moodWarmUrl} className="cy-interaction-panel__mood-bottom-left" alt="" />
+    <PanelShell title={t("interaction.planApprovalTitle")} onCollapse={onCollapse}>
       <div className="cy-interaction-panel__heading">
         <span className="cy-interaction-panel__status"><img src={moodCompanyUrl} alt="" />{t("interaction.planApprovalTitle")}</span>
       </div>
@@ -256,15 +329,17 @@ export function PlanApprovalPanel({
 export function PermissionPanel({
   interaction,
   disabled = false,
+  onCollapse,
   onDecision,
 }: {
   interaction: PermissionInteraction;
   disabled?: boolean;
+  onCollapse?: () => void;
   onDecision?: (allowed: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
-    <PanelShell title={t("interaction.permissionTitle")}>
+    <PanelShell title={t("interaction.permissionTitle")} onCollapse={onCollapse}>
       <img src={moodWarmUrl} className="cy-interaction-panel__mood-bottom-left" alt="" />
       <div className="cy-interaction-panel__heading">
         <span className="cy-interaction-panel__status"><img src={moodSpoiledUrl} alt="" />{t("interaction.permissionTitle")}</span>
@@ -339,11 +414,13 @@ function describeQuizAnswerValue(
 export function PopQuizPanel({
   interaction,
   disabled = false,
+  onCollapse,
   onSubmit,
   onSkip,
 }: {
   interaction: PopQuizInteraction;
   disabled?: boolean;
+  onCollapse?: () => void;
   /** 提交作答：主进程本地判分，返回 graded 后切展示态。 */
   onSubmit?: (submission: PopQuizSubmission) => Promise<{ ok: boolean; error?: string; graded?: PopQuizGradedQuestion[] }>;
   /** 跳过整次抽查：主进程结算 skipped 后由广播清卡。 */
@@ -416,7 +493,7 @@ export function PopQuizPanel({
   if (phase === "graded") {
     const gradedById = new Map(graded.map((item) => [item.questionId, item]));
     return (
-      <PanelShell title={t("interaction.quizTitle")}>
+      <PanelShell title={t("interaction.quizTitle")} onCollapse={onCollapse}>
         <img src={moodWarmUrl} className="cy-interaction-panel__mood-bottom-left" alt="" />
         <div className="cy-interaction-panel__heading">
           <span className="cy-interaction-panel__status"><img src={moodLearnUrl} alt="" />{t("interaction.quizGradedTitle")}</span>
@@ -469,7 +546,7 @@ export function PopQuizPanel({
 
   // ── 作答态：逐题作答，全部答完才能提交 ──
   return (
-    <PanelShell title={t("interaction.quizTitle")}>
+    <PanelShell title={t("interaction.quizTitle")} onCollapse={onCollapse}>
       <img src={moodWarmUrl} className="cy-interaction-panel__mood-bottom-left" alt="" />
       <div className="cy-interaction-panel__heading">
         <span className="cy-interaction-panel__status"><img src={moodLearnUrl} alt="" />{t("interaction.quizTitle")}</span>
@@ -497,14 +574,15 @@ export function PopQuizPanel({
               ? drafts[current.id]?.optionId === option.id
               : (drafts[current.id]?.optionIds ?? []).includes(option.id);
             return (
-              <button
-                type="button"
+              <QuestionnaireChoice
                 key={option.id}
-                className={selected ? "is-selected" : ""}
-                role={current.type === "multi" ? "checkbox" : "radio"}
-                aria-checked={selected}
+                name={`quiz-${interaction.id}-${current.id}`}
+                value={option.id}
+                index={index}
+                multiple={current.type === "multi"}
+                selected={selected}
                 disabled={disabled || phase === "submitting"}
-                onClick={() => {
+                onChange={() => {
                   setDrafts((values) => {
                     const prev = values[current.id] ?? {};
                     if (current.type === "choice") {
@@ -516,32 +594,38 @@ export function PopQuizPanel({
                       : [...prevIds, option.id];
                     return { ...values, [current.id]: { ...prev, optionIds } };
                   });
+                  if (current.type === "choice" && questions.length > 1) {
+                    setPage((value) => Math.min(questions.length - 1, value + 1));
+                  }
                 }}
               >
-                <span className="cy-interaction-panel__option-index">{index + 1}.</span>
-                <div className="cy-interaction-panel__option-body">
+                <span className="cy-interaction-panel__option-body">
                   <MarkdownContent content={option.label} />
-                </div>
-              </button>
+                </span>
+              </QuestionnaireChoice>
             );
           })}
         </div>
       )}
       {current.type === "true_false" && (
         <div className="cy-interaction-panel__options" role="radiogroup" aria-label={current.question}>
-          {trueFalseOptions.map((option) => (
-            <button
-              type="button"
+          {trueFalseOptions.map((option, index) => (
+            <QuestionnaireChoice
               key={String(option.value)}
-              className={drafts[current.id]?.boolean === option.value ? "is-selected" : ""}
-              role="radio"
-              aria-checked={drafts[current.id]?.boolean === option.value}
+              name={`quiz-${interaction.id}-${current.id}`}
+              value={String(option.value)}
+              index={index}
+              selected={drafts[current.id]?.boolean === option.value}
               disabled={disabled || phase === "submitting"}
-              onClick={() => setDrafts((values) => ({ ...values, [current.id]: { ...values[current.id], boolean: option.value } }))}
+              onChange={() => {
+                setDrafts((values) => ({ ...values, [current.id]: { ...values[current.id], boolean: option.value } }));
+                if (questions.length > 1) {
+                  setPage((value) => Math.min(questions.length - 1, value + 1));
+                }
+              }}
             >
-              <span className="cy-interaction-panel__option-index">◦</span>
               <span><strong>{option.label}</strong></span>
-            </button>
+            </QuestionnaireChoice>
           ))}
         </div>
       )}

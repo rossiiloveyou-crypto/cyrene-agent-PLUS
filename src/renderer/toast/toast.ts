@@ -4,6 +4,7 @@
 //   2. 用户点击/关闭只上报 toast id，跳转决策完全在主进程
 //   3. 高度协议：内容区实际高度变化时上报，主进程 clamp 后调整窗口尺寸
 
+import "../ui/theme";
 import {
   TOAST_MAX_VISIBLE,
   type ToastItem,

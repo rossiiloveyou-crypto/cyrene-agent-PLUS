@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, Button, Spin } from "antd";
-import { ArrowLeft, AudioLines, BarChart3, Boxes, Brain, FileText, Headphones, Heart, Layers, Monitor, Palette, Power, Puzzle, Settings2, Smartphone, Sparkles, Type, Wrench } from "lucide-react";
+import { ArrowLeft, AudioLines, BarChart3, BookOpen, Bot, Boxes, Brain, FileText, Globe, Headphones, Heart, Layers, Monitor, Palette, Power, Puzzle, Settings2, Smartphone, Sparkles, Type, Wrench } from "lucide-react";
 import { MCP } from "@lobehub/icons";
 import packageJson from "../../../../../package.json";
-import { normalizeUiFont, type UiFont } from "../../../../shared/ui-font";
-import { normalizeUiIcon, UI_ICON_PRESETS, type UiIcon } from "../../../../shared/ui-icon";
-import { normalizeWindowCornerRadius } from "../../../../shared/window-corner-radius";
+import { normalizeUiThemeChoice, type UiThemeChoice } from "../../../../shared/ui-theme";
 import {
   DEFAULT_MESSAGE_TYPOGRAPHY,
   MESSAGE_TYPOGRAPHY_RANGES,
@@ -13,17 +11,20 @@ import {
   type MessageTypography,
 } from "../../../../shared/message-typography";
 import { useTranslation } from "../../i18n";
-import { applyWindowCornerRadius } from "../../../ui/window-corner-radius";
+import { useCyreneAvatar } from "../../hooks/useCyreneAvatar";
 import { applyMessageTypography } from "../../../ui/message-typography";
+import { applyUiThemeChoice } from "../../../ui/theme";
 import { WindowControls } from "../../components/ui/WindowControls";
 import { Card } from "../../components/ui/Card";
-import { SettingsSlider, SettingsSwitch } from "../../components/ui/SettingsControls";
+import { SettingsSegmented, SettingsSlider, SettingsSwitch } from "../../components/ui/SettingsControls";
 import "../../components/ui/NewTaskButton.css";
 import { PreferencesSettingsPanel } from "./PreferencesSettingsPanel";
 import { GeneralSettingsPanel } from "./GeneralSettingsPanel";
+import { resolveVersionTitleKey } from "./app-update-view";
 import { ModelSettingsPanel } from "./ModelSettingsPanel";
 import { ToolSettingsPanel } from "./ToolSettingsPanel";
 import { MemorySettingsPanel } from "./MemorySettingsPanel";
+import { KnowledgeBaseSettingsPanel } from "./KnowledgeBaseSettingsPanel";
 import { CyreneSettingsPanel } from "./CyreneSettingsPanel";
 import { AsrSettingsPanel } from "./AsrSettingsPanel";
 import { TtsSettingsPanel } from "./TtsSettingsPanel";
@@ -35,14 +36,14 @@ import { SkillSettingsPanel } from "./SkillSettingsPanel";
 import { ToolToggleSettingsPanel } from "./ToolToggleSettingsPanel";
 import { ChannelsSettingsPanel } from "./ChannelsSettingsPanel";
 import { ZonesSettingsPanel } from "./ZonesSettingsPanel";
+import { SubagentSettingsPanel } from "./SubagentSettingsPanel";
+import { BrowserControlSettingsPanel } from "./BrowserControlSettingsPanel";
 import settingsLogoUrl from "../../../settings/100.png";
 import "../../components/ui/WindowControls.css";
 import "./AppearanceSettingsPage.css";
 
 interface AppearanceValues {
-  windowCornerRadius: number;
-  uiFont: UiFont;
-  uiIcon: UiIcon;
+  uiTheme: UiThemeChoice;
   messageTypography: MessageTypography;
   petAlwaysOnTop: boolean;
   petVisible: boolean;
@@ -50,9 +51,7 @@ interface AppearanceValues {
 }
 
 const defaults: AppearanceValues = {
-  windowCornerRadius: 24,
-  uiFont: { kind: "source-han" },
-  uiIcon: "cyrene-sun",
+  uiTheme: "pearl-white",
   messageTypography: DEFAULT_MESSAGE_TYPOGRAPHY,
   petAlwaysOnTop: false,
   petVisible: true,
@@ -70,9 +69,7 @@ function finiteNumber(value: unknown, fallback: number): number {
 function readAppearance(value: unknown): AppearanceValues {
   const input = objectValue(value);
   return {
-    windowCornerRadius: normalizeWindowCornerRadius(input.windowCornerRadius),
-    uiFont: normalizeUiFont(input.uiFont),
-    uiIcon: normalizeUiIcon(input.uiIcon),
+    uiTheme: normalizeUiThemeChoice(input.uiTheme),
     messageTypography: normalizeMessageTypography(input.messageTypography),
     petAlwaysOnTop: typeof input.petAlwaysOnTop === "boolean" ? input.petAlwaysOnTop : defaults.petAlwaysOnTop,
     petVisible: typeof input.petVisible === "boolean" ? input.petVisible : defaults.petVisible,
@@ -81,7 +78,7 @@ function readAppearance(value: unknown): AppearanceValues {
 }
 
 export type SettingsSection =
-  | "appearance" | "preferences" | "models" | "usage" | "general" | "toolToggle" | "tools" | "plugins" | "memory" | "zones" | "cyrene" | "skill" | "asr" | "tts" | "mcp" | "channels" | "disclaimer";
+  | "appearance" | "preferences" | "models" | "usage" | "general" | "toolToggle" | "tools" | "subagents" | "plugins" | "memory" | "knowledge" | "zones" | "cyrene" | "skill" | "asr" | "tts" | "mcp" | "channels" | "disclaimer" | "browser";
 
 export interface AppearanceSettingsPageProps {
   section: SettingsSection;
@@ -119,7 +116,10 @@ export function AppearanceSettingsPage({ section, onSelectSection, onBackToWorks
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState("");
-  const [fontBusy, setFontBusy] = useState(false);
+  const cyreneAvatarUrl = useCyreneAvatar();
+  // 版本称号（如 1.3.0 的"正式版"）随版本走，普通版本查不到就不显示
+  const versionTitleKey = resolveVersionTitleKey(packageJson.version);
+  const [avatarBusy, setAvatarBusy] = useState(false);
   // 昔涟消息字体：ref 记住最新值，松手保存时不依赖可能过期的渲染闭包
   const typographyRef = useRef<MessageTypography>(DEFAULT_MESSAGE_TYPOGRAPHY);
 
@@ -138,7 +138,6 @@ export function AppearanceSettingsPage({ section, onSelectSection, onBackToWorks
         const next = readAppearance(config);
         setValues(next);
         typographyRef.current = next.messageTypography;
-        applyWindowCornerRadius(next.windowCornerRadius);
         setLoading(false);
       })
       .catch(() => {
@@ -147,7 +146,13 @@ export function AppearanceSettingsPage({ section, onSelectSection, onBackToWorks
         setLoading(false);
       });
 
-    return () => { disposed = true; };
+    const unsubscribeTheme = window.cyreneTheme?.onChanged(() => {
+      void settingsApi.getGeneral().then((config) => {
+        if (!disposed) setValues((current) => ({ ...current, uiTheme: readAppearance(config).uiTheme }));
+      }).catch(() => {});
+    });
+
+    return () => { disposed = true; unsubscribeTheme?.(); };
   }, []);
 
   async function savePatch(patch: Record<string, unknown>, successMessage = t("settingsPage.saved")) {
@@ -162,13 +167,48 @@ export function AppearanceSettingsPage({ section, onSelectSection, onBackToWorks
     }
   }
 
-  function updateNumber<K extends "windowCornerRadius" | "petZoom">(
+  async function uploadCyreneAvatar() {
+    if (!window.cyreneAvatar || avatarBusy) return;
+    setAvatarBusy(true);
+    try {
+      const uploaded = await window.cyreneAvatar.upload();
+      if (uploaded) setStatus(t("settingsPage.cyreneAvatarUploaded"));
+    } catch {
+      setStatus(t("settingsPage.cyreneAvatarFailed"));
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function resetCyreneAvatar() {
+    if (!window.cyreneAvatar || avatarBusy) return;
+    setAvatarBusy(true);
+    try {
+      await window.cyreneAvatar.reset();
+      setStatus(t("settingsPage.cyreneAvatarReset"));
+    } catch {
+      setStatus(t("settingsPage.cyreneAvatarFailed"));
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  function updateNumber<K extends "petZoom">(
     key: K,
     value: number,
   ) {
     setValues((current) => ({ ...current, [key]: value }));
-    if (key === "windowCornerRadius") applyWindowCornerRadius(value);
     setStatus(t("settingsPage.applyOnRelease"));
+  }
+
+  async function selectTheme(uiTheme: UiThemeChoice) {
+    const previous = values.uiTheme;
+    setValues((current) => ({ ...current, uiTheme }));
+    applyUiThemeChoice(uiTheme);
+    if (!await savePatch({ uiTheme })) {
+      setValues((current) => ({ ...current, uiTheme: previous }));
+      applyUiThemeChoice(previous);
+    }
   }
 
   // 昔涟消息字体：拖动时实时写入 CSS 变量预览，松手由 saveTypography 落盘
@@ -191,51 +231,12 @@ export function AppearanceSettingsPage({ section, onSelectSection, onBackToWorks
     void savePatch({ messageTypography: DEFAULT_MESSAGE_TYPOGRAPHY }, t("settingsPage.messageTypographyReset"));
   }
 
-  async function changeFont() {
-    setFontBusy(true);
-    try {
-      if (!window.settings) throw new Error("Settings API unavailable");
-      const sourcePath = await window.settings.pickUiFont();
-      if (!sourcePath) return;
-      setStatus(t("settingsPage.importingFont"));
-      const uiFont = await window.settings.importUiFont(sourcePath);
-      setValues((current) => ({ ...current, uiFont }));
-      setStatus(t("settingsPage.fontApplied"));
-    } catch {
-      setStatus(t("settingsPage.fontImportFailed"));
-    } finally {
-      setFontBusy(false);
-    }
-  }
-
-  async function resetFont() {
-    setFontBusy(true);
-    try {
-      if (!window.settings) throw new Error("Settings API unavailable");
-      const uiFont = await window.settings.resetUiFont();
-      setValues((current) => ({ ...current, uiFont }));
-      setStatus(t("settingsPage.fontReset"));
-    } catch {
-      setStatus(t("settingsPage.saveFailed"));
-    } finally {
-      setFontBusy(false);
-    }
-  }
-
-  async function selectIcon(uiIcon: UiIcon) {
-    if (uiIcon === values.uiIcon) return;
-    const saved = await savePatch({ uiIcon }, t("settingsPage.iconApplied"));
-    if (saved) setValues((current) => ({ ...current, uiIcon: normalizeUiIcon(uiIcon) }));
-  }
-
   function updatePetBoolean(key: "petAlwaysOnTop" | "petVisible", checked: boolean) {
     setValues((current) => ({ ...current, [key]: checked }));
     if (key === "petAlwaysOnTop") window.settings?.setPetAlwaysOnTop(checked);
     else window.settings?.setPetVisible(checked);
     setStatus(t("settingsPage.applied"));
   }
-
-  const fontName = values.uiFont.kind === "custom" ? values.uiFont.displayName : t("settingsPage.defaultFont");
 
   return (
     <div className="cy-page cy-settings-page">
@@ -259,13 +260,16 @@ export function AppearanceSettingsPage({ section, onSelectSection, onBackToWorks
         <SettingsNavItem section="preferences" currentSection={section} icon={<Monitor size={18} strokeWidth={1.8} />} label={t("settingsPage.preferencesLabel")} onSelect={onSelectSection} />
         <SettingsNavItem section="models" currentSection={section} icon={<Boxes size={18} strokeWidth={1.8} />} label={t("settingsPage.modelSettings.title")} onSelect={onSelectSection} />
         <SettingsNavItem section="usage" currentSection={section} icon={<BarChart3 size={18} strokeWidth={1.8} />} label={t("settingsPage.usage.title")} onSelect={onSelectSection} />
+        <SettingsNavItem section="browser" currentSection={section} icon={<Globe size={18} strokeWidth={1.8} />} label={t("settingsPage.browserControl.navLabel")} onSelect={onSelectSection} />
         <div className="cy-settings-sidebar__group-title cy-settings-sidebar__group-title--spaced">{t("settingsPage.agentAbilities")}</div>
         <SettingsNavItem section="toolToggle" currentSection={section} icon={<Power size={18} strokeWidth={1.8} />} label={t("settingsPage.toolToggle.title")} onSelect={onSelectSection} />
         <SettingsNavItem section="tools" currentSection={section} icon={<Wrench size={18} strokeWidth={1.8} />} label={t("settingsPage.tools.title")} onSelect={onSelectSection} />
+        <SettingsNavItem section="subagents" currentSection={section} icon={<Bot size={18} strokeWidth={1.8} />} label={t("settingsPage.subagents.title")} onSelect={onSelectSection} />
         <SettingsNavItem section="plugins" currentSection={section} icon={<Puzzle size={18} strokeWidth={1.8} />} label={t("pluginPanel.title")} onSelect={onSelectSection} />
         <SettingsNavItem section="mcp" currentSection={section} icon={<MCP size={18} />} label={t("settingsPage.mcp.menuLabel")} onSelect={onSelectSection} />
         <SettingsNavItem section="memory" currentSection={section} icon={<Brain size={18} strokeWidth={1.8} />} label={t("settingsPage.memory.title")} onSelect={onSelectSection} />
         <SettingsNavItem section="zones" currentSection={section} icon={<Layers size={18} strokeWidth={1.8} />} label={t("settingsPage.zones.title")} onSelect={onSelectSection} />
+        <SettingsNavItem section="knowledge" currentSection={section} icon={<BookOpen size={18} strokeWidth={1.8} />} label={t("settingsPage.knowledgeBase.title")} onSelect={onSelectSection} />
         <SettingsNavItem section="cyrene" currentSection={section} icon={<Heart size={18} strokeWidth={1.8} />} label={t("settingsPage.cyrene.title")} onSelect={onSelectSection} />
         <SettingsNavItem section="skill" currentSection={section} icon={<Sparkles size={18} strokeWidth={1.8} />} label={t("settingsPage.skill.title")} onSelect={onSelectSection} />
         <div className="cy-settings-sidebar__group-title cy-settings-sidebar__group-title--spaced">{t("settingsPage.externalChannels")}</div>
@@ -276,12 +280,15 @@ export function AppearanceSettingsPage({ section, onSelectSection, onBackToWorks
         <div className="cy-settings-sidebar__group-title cy-settings-sidebar__group-title--spaced">{t("settingsPage.usageNotice")}</div>
         <SettingsNavItem section="disclaimer" currentSection={section} icon={<FileText size={18} strokeWidth={1.8} />} label={t("settingsPage.disclaimer.navLabel")} onSelect={onSelectSection} />
         </nav>
-        <div className="cy-settings-sidebar__footer">v{packageJson.version}</div>
+        <div className="cy-settings-sidebar__footer">
+          v{packageJson.version}
+          {versionTitleKey && ` · ${t(versionTitleKey)}`}
+        </div>
       </aside>
 
       <main className="cy-workspace is-empty cy-settings-content">
-        <div className="cy-settings-content__inner">
-          {section === "preferences" ? <PreferencesSettingsPanel /> : section === "models" ? <ModelSettingsPanel /> : section === "usage" ? <UsageStatsPanel /> : section === "general" ? <GeneralSettingsPanel /> : section === "toolToggle" ? <ToolToggleSettingsPanel /> : section === "tools" ? <ToolSettingsPanel musicSettingsNavigation={musicSettingsNavigation} /> : section === "plugins" ? <PluginSettingsPanel /> : section === "memory" ? <MemorySettingsPanel /> : section === "zones" ? <ZonesSettingsPanel /> : section === "cyrene" ? <CyreneSettingsPanel /> : section === "skill" ? <SkillSettingsPanel /> : section === "asr" ? <AsrSettingsPanel /> : section === "tts" ? <TtsSettingsPanel /> : section === "mcp" ? <McpSettingsPanel /> : section === "channels" ? <ChannelsSettingsPanel /> : section === "disclaimer" ? <DisclaimerSettingsPanel /> : <>
+        <div className={`cy-settings-content__inner${section === "knowledge" ? " is-knowledge-settings" : ""}`}>
+          {section === "browser" ? <BrowserControlSettingsPanel /> : section === "preferences" ? <PreferencesSettingsPanel /> : section === "models" ? <ModelSettingsPanel /> : section === "usage" ? <UsageStatsPanel /> : section === "general" ? <GeneralSettingsPanel /> : section === "toolToggle" ? <ToolToggleSettingsPanel /> : section === "tools" ? <ToolSettingsPanel musicSettingsNavigation={musicSettingsNavigation} /> : section === "subagents" ? <SubagentSettingsPanel /> : section === "plugins" ? <PluginSettingsPanel /> : section === "memory" ? <MemorySettingsPanel /> : section === "knowledge" ? <KnowledgeBaseSettingsPanel /> : section === "zones" ? <ZonesSettingsPanel /> : section === "cyrene" ? <CyreneSettingsPanel /> : section === "skill" ? <SkillSettingsPanel /> : section === "asr" ? <AsrSettingsPanel /> : section === "tts" ? <TtsSettingsPanel /> : section === "mcp" ? <McpSettingsPanel /> : section === "channels" ? <ChannelsSettingsPanel /> : section === "disclaimer" ? <DisclaimerSettingsPanel /> : <>
             <h1>{t("settingsPage.appearance")}</h1>
             <p className="cy-settings-intro">{t("settingsPage.description")}</p>
 
@@ -295,17 +302,18 @@ export function AppearanceSettingsPage({ section, onSelectSection, onBackToWorks
                 </div>
                 <Card>
                   <div className="cy-settings-row">
-                    <div className="cy-settings-row__copy"><strong>{t("settingsPage.windowRadius")}</strong><span>{t("settingsPage.windowRadiusDescription")}</span></div>
-                    <div className="cy-settings-row__control cy-settings-slider">
-                      <SettingsSlider min={0} max={40} step={1} value={values.windowCornerRadius} ariaLabel={t("settingsPage.windowRadius")} onChange={(value) => updateNumber("windowCornerRadius", value)} onChangeComplete={(value) => void savePatch({ windowCornerRadius: value })} />
-                      <span>{values.windowCornerRadius}px</span>
-                    </div>
+                    <div className="cy-settings-row__copy"><strong>{t("settingsPage.theme")}</strong><span>{t("settingsPage.themeDescription")}</span></div>
+                    <SettingsSegmented value={values.uiTheme} onChange={(value) => void selectTheme(value as UiThemeChoice)} options={[{ label: t("settingsPage.themeSystem"), value: "system" }, { label: t("settingsPage.themePearlWhite"), value: "pearl-white" }, { label: t("settingsPage.themeCharcoalPink"), value: "charcoal-pink" }]} />
                   </div>
                   <div className="cy-settings-row">
-                    <div className="cy-settings-row__copy"><strong>{t("settingsPage.uiFont")}</strong><span>{fontName}</span></div>
-                    <div className="cy-settings-row__control cy-settings-button-group">
-                      <Button loading={fontBusy} onClick={() => void changeFont()}>{t("settingsPage.importFont")}</Button>
-                      {values.uiFont.kind === "custom" && <Button disabled={fontBusy} onClick={() => void resetFont()}>{t("settingsPage.resetFont")}</Button>}
+                    <div className="cy-settings-row__copy"><strong>{t("settingsPage.uiFont")}</strong><span>{t("settingsPage.defaultFont")}</span></div>
+                  </div>
+                  <div className="cy-settings-row">
+                    <div className="cy-settings-row__copy"><strong>{t("settingsPage.cyreneAvatar")}</strong><span>{t("settingsPage.cyreneAvatarDescription")}</span></div>
+                    <div className="cy-settings-row__control cy-settings-avatar-control">
+                      <img className="cy-settings-avatar-preview" src={cyreneAvatarUrl} alt={t("settingsPage.cyreneAvatar")} />
+                      <Button disabled={avatarBusy} onClick={() => void uploadCyreneAvatar()}>{t("settingsPage.cyreneAvatarUpload")}</Button>
+                      <Button disabled={avatarBusy} onClick={() => void resetCyreneAvatar()}>{t("settingsPage.cyreneAvatarResetButton")}</Button>
                     </div>
                   </div>
                   <div className="cy-settings-row">
@@ -344,16 +352,6 @@ export function AppearanceSettingsPage({ section, onSelectSection, onBackToWorks
                   </div>
                   <div className="cy-settings-row">
                     <p className="cy-message-typography-preview">{t("settingsPage.messageTypographyPreviewText")}</p>
-                  </div>
-                  <div className="cy-settings-row">
-                    <div className="cy-settings-row__copy"><strong>{t("settingsPage.desktopIcon")}</strong><span>{t("settingsPage.desktopIconDescription")}</span></div>
-                    <div className="cy-settings-icon-options" role="radiogroup" aria-label={t("settingsPage.desktopIcon")}>
-                      {UI_ICON_PRESETS.map((preset) => (
-                        <button key={preset.id} type="button" className={`cy-settings-icon-option ${values.uiIcon === preset.id ? "is-active" : ""}`} aria-pressed={values.uiIcon === preset.id} aria-label={preset.label} onClick={() => void selectIcon(preset.id)}>
-                          <img src={`/icons/${preset.fileName}`} alt="" />
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 </Card>
               </section>

@@ -1,0 +1,231 @@
+.cy-issue-report__overlay {
+  position: fixed;
+  z-index: 1450;
+  inset: 0;
+  app-region: no-drag;
+  background: rgb(18 16 22 / 38%);
+  backdrop-filter: blur(3px);
+}
+
+.cy-issue-report {
+  position: fixed;
+  z-index: 1451;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  width: min(680px, calc(100vw - 28px));
+  max-height: min(820px, calc(100vh - 28px));
+  flex-direction: column;
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--rb-border-elevated, var(--rb-border-default, #ded9de));
+  border-radius: 17px;
+  outline: none;
+  background: var(--rb-surface-workspace, #fff);
+  color: var(--rb-text-primary, #25252a);
+  box-shadow: var(--rb-shadow-elevated, 0 24px 72px rgb(25 22 31 / 22%));
+  app-region: no-drag;
+}
+
+.cy-issue-report__header,
+.cy-issue-report__footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 17px 20px;
+}
+
+.cy-issue-report__header {
+  border-bottom: 1px solid var(--rb-border-subtle, #eee9ec);
+}
+
+.cy-issue-report__title {
+  margin: 0;
+  font: 600 18px/1.35 var(--rb-font-sans, inherit);
+}
+
+.cy-issue-report__description {
+  margin-top: 4px;
+  color: var(--rb-text-secondary, #85858d);
+  font: 400 12px/1.45 var(--rb-font-sans, inherit);
+}
+
+.cy-issue-report__close {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rb-text-secondary, #85858d);
+  cursor: pointer;
+}
+
+.cy-issue-report__close:hover { background: var(--rb-surface-hover, #f4f1f3); color: var(--rb-text-primary, #25252a); }
+
+.cy-issue-report__body {
+  display: grid;
+  min-height: 0;
+  gap: 14px;
+  overflow: auto;
+  padding: 14px 20px 18px;
+}
+
+.cy-issue-report__contacts {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--rb-border-subtle, #eee9ec);
+  border-radius: 11px;
+  background: var(--rb-surface-elevated, #fff);
+}
+
+.cy-issue-report__contact {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--rb-text-secondary, #85858d);
+  font-size: 12px;
+}
+
+.cy-issue-report__contact > svg { flex: 0 0 auto; }
+.cy-issue-report__contact > span { min-width: 72px; }
+
+.cy-issue-report__contact a,
+.cy-issue-report__contact button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--rb-accent, #ff5b8a);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.cy-issue-report__contact a:hover,
+.cy-issue-report__contact button:hover { text-decoration: underline; }
+
+.cy-issue-report__form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cy-issue-report__field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font: 400 12px/1.4 var(--rb-font-sans, inherit);
+}
+
+.cy-issue-report__field--full { grid-column: 1 / -1; }
+
+.cy-issue-report__field > span,
+.cy-issue-report__field > legend {
+  padding: 0;
+  color: var(--rb-text-secondary, #77717a);
+  font-weight: 550;
+}
+
+.cy-issue-report__field i { color: var(--rb-accent, #ff5b8a); font-style: normal; }
+
+.cy-issue-report__field input,
+.cy-issue-report__field textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--rb-border-default, #e7e2e5);
+  border-radius: 8px;
+  outline: none;
+  background: var(--rb-surface-elevated, #fff);
+  color: var(--rb-text-primary, #25252a);
+  font: 400 12px/1.45 var(--rb-font-sans, inherit);
+}
+
+.cy-issue-report__field .cy-issue-report__select { height: 35px; padding: 0 10px; }
+.cy-issue-report__field .cy-issue-report__select[data-placeholder] { color: var(--rb-text-secondary, #85858d); }
+.cy-control-select__content.cy-issue-report__select-content { z-index: 1452; min-width: var(--radix-select-trigger-width); }
+.cy-issue-report__field textarea { resize: vertical; }
+.cy-issue-report__field input:focus,
+.cy-issue-report__field textarea:focus { border-color: var(--rb-border-focus, var(--rb-accent, #ff5b8a)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--rb-accent, #ff5b8a) 14%, transparent); }
+
+.cy-issue-report__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cy-issue-report__modes button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 9px;
+  border: 1px solid var(--rb-border-default, #e7e2e5);
+  border-radius: 999px;
+  background: var(--rb-surface-elevated, #fff);
+  color: var(--rb-text-secondary, #77717a);
+  font: inherit;
+  cursor: pointer;
+}
+
+.cy-issue-report__modes button:hover { border-color: var(--rb-border-focus, var(--rb-accent, #ff5b8a)); }
+.cy-issue-report__modes button.is-selected { border-color: var(--rb-accent, #ff5b8a); background: color-mix(in srgb, var(--rb-accent, #ff5b8a) 9%, var(--rb-surface-elevated, #fff)); color: var(--rb-accent, #ff5b8a); }
+
+.cy-issue-report__footer {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--rb-border-subtle, #eee9ec);
+}
+
+.cy-issue-report__feedback {
+  min-height: 18px;
+  color: var(--rb-text-secondary, #85858d);
+  font-size: 11px;
+}
+
+.cy-issue-report__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.cy-issue-report__actions button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid var(--rb-border-default, #e7e2e5);
+  border-radius: 8px;
+  background: var(--rb-surface-elevated, #fff);
+  color: var(--rb-text-primary, #25252a);
+  font: 500 12px/1 var(--rb-font-sans, inherit);
+  cursor: pointer;
+}
+
+.cy-issue-report__actions .cy-issue-report__primary { border-color: var(--rb-accent, #ff5b8a); background: var(--rb-accent, #ff5b8a); color: var(--rb-text-on-accent, #fff); }
+.cy-issue-report__actions button:hover:not(:disabled) { filter: brightness(1.04); }
+.cy-issue-report__actions button:disabled { cursor: not-allowed; opacity: .48; }
+
+@media (max-width: 560px) {
+  .cy-issue-report__header,
+  .cy-issue-report__footer { padding-right: 14px; padding-left: 14px; }
+  .cy-issue-report__body { padding-right: 14px; padding-left: 14px; }
+  .cy-issue-report__form { grid-template-columns: minmax(0, 1fr); }
+  .cy-issue-report__field--full { grid-column: auto; }
+  .cy-issue-report__footer { align-items: flex-start; }
+  .cy-issue-report__actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cy-issue-report__actions button { min-width: 0; padding-right: 8px; padding-left: 8px; }
+  .cy-issue-report__actions .cy-issue-report__primary { grid-column: 1 / -1; }
+}

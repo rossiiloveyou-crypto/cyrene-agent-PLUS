@@ -36,7 +36,6 @@ function makeBackgroundDeps(calls: string[], overrides: Partial<BackgroundDepend
     syncBuiltInMcp: vi.fn(async () => { calls.push("sync"); }),
     restoreMcp: vi.fn(async () => { calls.push("mcp"); }),
     reconcileMemory: vi.fn(async () => { calls.push("memory"); }),
-    scheduleEmbeddingRefresh: vi.fn(async () => { calls.push("embedding"); }),
     initializeReranker: vi.fn(async () => { calls.push("reranker"); }),
     prewarmScreenshot: vi.fn(async () => { calls.push("screenshot"); }),
     scheduleUpdateCheck: vi.fn(async () => { calls.push("update-check"); return () => undefined; }),

@@ -8,6 +8,11 @@ declare module "*.md?raw" {
   export default content;
 }
 
+declare module "*.ts?raw" {
+  const content: string;
+  export default content;
+}
+
 // Vite 静态资源导入：返回解析后的 URL 字符串
 declare module "*.mp3" {
   const src: string;

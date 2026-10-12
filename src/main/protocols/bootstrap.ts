@@ -1,12 +1,19 @@
-import { app, net, protocol } from "electron";
+import { app, net, protocol, session, type Session } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { pathToFileURL } from "url";
-import { getUiFontResponseHeaders, isSafeUiFontRequest } from "../ui-font-protocol";
 import { getStickersDir } from "../sticker-storage";
 import { parseLocalStickerFileFromUrl, resolveLocalStickerPath } from "../sticker-protocol";
 import { parseMomentMediaUrl, resolveMomentMediaPath } from "../moments/moment-media-protocol";
 import { getMomentsMediaRootDir } from "../moments/moments-store";
+import { parseLearnExamPageRequest, resolveLearnExamPageAsset } from "./learn-exam-page-protocol";
+import { buildLearnExamCsp } from "./learn-exam-csp";
+
+const LEARN_EXAM_SESSION_PARTITION = "cyrene-learn-exam";
+
+export function getLearnExamPageSession(): Session {
+  return session.fromPartition(LEARN_EXAM_SESSION_PARTITION);
+}
 
 /**
  * 注册自定义协议的特权。
@@ -16,20 +23,15 @@ import { getMomentsMediaRootDir } from "../moments/moments-store";
 export function registerPrivilegedSchemes(): void {
   protocol.registerSchemesAsPrivileged([
     { scheme: "local-sticker", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
-    { scheme: "local-font", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
     { scheme: "moment-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+    { scheme: "cyrene-exam", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
   ]);
-}
-
-function getUiFontsDir(): string {
-  return path.join(app.getPath("userData"), "ui-fonts");
 }
 
 /**
  * 注册本地用户资源协议的实际处理器。
  *
  * - local-sticker:// 将请求映射到 userData/stickers/ 下的文件
- * - local-font:// 将请求映射到 userData/ui-fonts/ 下的文件
  * - moment-media:// 将请求映射到 userData/moments-media/<postId>/ 下的文件（白名单映射式解析）
  */
 export function registerProtocolHandlers(): void {
@@ -53,18 +55,33 @@ export function registerProtocolHandlers(): void {
     return net.fetch(pathToFileURL(filePath).toString());
   });
 
-  protocol.handle("local-font", (request) => {
-    let fileName: string;
-    try {
-      fileName = decodeURIComponent(new URL(request.url).hostname);
-    } catch {
-      return new Response("Invalid font URL", { status: 404 });
+  getLearnExamPageSession().protocol.handle("cyrene-exam", async (request) => {
+    const isDev = process.env.VITE_DEV === "1";
+    const parsed = parseLearnExamPageRequest(request.url, { allowViteDevRequests: isDev });
+    if (!parsed) return new Response("Invalid exam page URL", { status: 404 });
+
+    let response: Response;
+    if (isDev) {
+      const pathname = parsed.kind === "document" ? "learn-exam.html" : parsed.relativePath;
+      const search = parsed.kind === "asset" ? parsed.search ?? "" : "";
+      // Vite uses Accept to decide whether a .css request should return CSS or
+      // its JavaScript HMR wrapper. Preserve the browser's negotiation headers
+      // when proxying the custom protocol request.
+      response = await net.fetch(`http://localhost:5173/${pathname}${search}`, {
+        headers: { Accept: request.headers.get("accept") ?? "*/*" },
+      });
+    } else {
+      const rendererRoot = path.join(app.getAppPath(), "dist", "renderer");
+      const filePath = parsed.kind === "document"
+        ? path.join(rendererRoot, "learn-exam.html")
+        : resolveLearnExamPageAsset(rendererRoot, parsed.relativePath);
+      if (!filePath || !fs.existsSync(filePath)) return new Response("Exam page resource not found", { status: 404 });
+      response = await net.fetch(pathToFileURL(filePath).toString());
     }
-    if (!isSafeUiFontRequest(fileName)) return new Response("Invalid font URL", { status: 404 });
-    const filePath = path.join(getUiFontsDir(), fileName);
-    if (path.dirname(filePath) !== getUiFontsDir() || !fs.existsSync(filePath)) return new Response("Font not found", { status: 404 });
-    return net.fetch(pathToFileURL(filePath).toString()).then((response) => new Response(response.body, {
-      headers: getUiFontResponseHeaders(fileName),
-    }));
+
+    const headers = new Headers(response.headers);
+    headers.set("Content-Security-Policy", buildLearnExamCsp(isDev));
+    headers.set("X-Content-Type-Options", "nosniff");
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   });
 }

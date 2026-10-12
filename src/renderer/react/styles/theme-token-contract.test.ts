@@ -94,9 +94,14 @@ describe("React 主题令牌契约", () => {
       .filter((file): file is string => typeof file === "string" && file.endsWith(".css"));
 
     for (const file of cssFiles) {
-      const references = Array.from(readStyle(resolve(__dirname, "..", file)).matchAll(/var\(\s*(--rb-surface-[\w-]+)/g), (match) => match[1]);
-      for (const token of references) {
-        expect(declaredTokens.has(token), `${file} references undeclared token ${token}`).toBe(true);
+      const references = Array.from(
+        readStyle(resolve(__dirname, "..", file)).matchAll(/var\(\s*(--rb-surface-[\w-]+)(\s*,[^)]*)?\)/g),
+        (match) => ({ token: match[1], hasFallback: Boolean(match[2]) }),
+      );
+      for (const { token, hasFallback } of references) {
+        if (!hasFallback) {
+          expect(declaredTokens.has(token), `${file} references undeclared token ${token}`).toBe(true);
+        }
       }
     }
   });

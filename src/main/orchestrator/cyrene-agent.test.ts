@@ -85,6 +85,17 @@ describe("CyreneAgent", () => {
       .toMatchObject({ type: "REASONING_MESSAGE_END", messageId: "r1" });
   });
 
+  it("maps model retry status to the Cyrene custom event", () => {
+    expect(toAguiEvent({
+      type: "model_retry",
+      status: { phase: "waiting", retryNumber: 1, maxRetries: 5, delayMs: 2_000, category: "NETWORK" },
+    })).toMatchObject({
+      type: EventType.CUSTOM,
+      name: "cyrene.model.retry",
+      value: { phase: "waiting", retryNumber: 1, maxRetries: 5, delayMs: 2_000, category: "NETWORK" },
+    });
+  });
+
   it("maps incremental tool arguments onto the standard AG-UI event", () => {
     expect(toAguiEvent({ type: "tool_call_args", toolCallId: "call-1", delta: "{\"path\":" }))
       .toMatchObject({ type: "TOOL_CALL_ARGS", toolCallId: "call-1", delta: "{\"path\":" });

@@ -58,7 +58,8 @@ vi.mock("../vendors", () => ({
   resolveTransport: vi.fn(() => "openai"),
 }));
 
-vi.mock("./tool-dispatcher", () => ({
+vi.mock("./tool-dispatcher", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./tool-dispatcher")>(),
   dispatchToolCall: vi.fn(),
   persistToolDispatchResult: vi.fn(async (_call: unknown, result: unknown) => result),
 }));

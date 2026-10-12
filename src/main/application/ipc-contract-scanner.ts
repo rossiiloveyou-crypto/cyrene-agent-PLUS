@@ -80,6 +80,60 @@ function ipcChannelKey(argument: ts.Expression | undefined): string | null {
   return argument.name.text;
 }
 
+/**
+ * Collect same-file functions that forward their first argument to an outbound
+ * IPC call. This covers small broadcast helpers such as
+ * `publish(channel, payload) { window.webContents.send(channel, payload) }`
+ * without trying to resolve arbitrary runtime values.
+ */
+function collectOutboundWrappers(tree: ts.SourceFile): Set<string> {
+  const wrappers = new Set<string>();
+
+  const addIfOutboundWrapper = (
+    name: string | undefined,
+    parameters: ts.NodeArray<ts.ParameterDeclaration>,
+    body: ts.ConciseBody | undefined,
+  ): void => {
+    const parameter = parameters[0]?.name;
+    if (!name || !parameter || !ts.isIdentifier(parameter) || !body) return;
+    let forwardsParameter = false;
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.arguments[0]
+        && ts.isIdentifier(node.arguments[0])
+        && node.arguments[0].text === parameter.text) {
+        const callee = node.expression;
+        const objectName = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
+          ? callee.expression.text
+          : undefined;
+        const methodName = ts.isPropertyAccessExpression(callee)
+          ? callee.name.text
+          : ts.isIdentifier(callee)
+            ? callee.text
+            : undefined;
+        if (methodName && classify(objectName, methodName) === "outbound") forwardsParameter = true;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(body);
+    if (forwardsParameter) wrappers.add(name);
+  };
+
+  for (const statement of tree.statements) {
+    if (ts.isFunctionDeclaration(statement)) {
+      addIfOutboundWrapper(statement.name?.text, statement.parameters, statement.body);
+    } else if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
+        const initializer = declaration.initializer;
+        if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
+          addIfOutboundWrapper(declaration.name.text, initializer.parameters, initializer.body);
+        }
+      }
+    }
+  }
+  return wrappers;
+}
+
 function scriptKindFor(file: string): ts.ScriptKind {
   if (file.endsWith(".tsx")) return ts.ScriptKind.TSX;
   if (file.endsWith(".jsx")) return ts.ScriptKind.JSX;
@@ -90,6 +144,7 @@ function scriptKindFor(file: string): ts.ScriptKind {
 export function findIpcChannelUses(file: string, source: string): IpcChannelUse[] {
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, scriptKindFor(file));
   const uses: IpcChannelUse[] = [];
+  const outboundWrappers = collectOutboundWrappers(tree);
 
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
@@ -113,6 +168,17 @@ export function findIpcChannelUses(file: string, source: string): IpcChannelUse[
             file,
             line: tree.getLineAndCharacterOfPosition(node.getStart()).line + 1,
           });
+        }
+        if (ts.isIdentifier(callee) && outboundWrappers.has(callee.text)) {
+          const forwardedChannel = ipcChannelKey(node.arguments[0]);
+          if (forwardedChannel !== null) {
+            uses.push({
+              kind: "outbound",
+              channel: forwardedChannel,
+              file,
+              line: tree.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+            });
+          }
         }
       }
     }

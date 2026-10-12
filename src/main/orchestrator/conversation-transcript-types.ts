@@ -10,11 +10,12 @@
  */
 
 import type {
+  ChatPresentationCheckpointPatch,
   ChatMessage as UiChatMessage,
   ChatMessageChannel,
   PendingChatAttachment,
 } from "../../shared/chat-types";
-import type { ToolCallOutcome } from "./harness/types";
+import type { SideEffectKind, TodoItem, ToolCallOutcome } from "./harness/types";
 import type { ChatMessage as CanonicalChatMessage } from "./vendors/types";
 import { isContextUsageSnapshot } from "../../shared/context-usage";
 import { normalizeMusicCardData } from "../../shared/music-card";
@@ -41,12 +42,7 @@ export type TranscriptUserPayload = {
   attachments?: PendingChatAttachment[];
 };
 
-export type TranscriptPresentationPatch = Partial<Pick<UiChatMessage,
-  "content" | "reasoning" | "reasoningBlocks" | "processMessages" |
-  "agentRounds" | "taskDelegations" | "channelSource" | "sticker" |
-  "toolExecutions" | "runActivity" | "runSnapshot" | "ttsCacheKey" |
-  "ttsCacheVersion" | "musicCard" | "contextUsage"
->>;
+export type TranscriptPresentationPatch = ChatPresentationCheckpointPatch;
 
 /** Runtime gate for renderer-originated derived presentation data. */
 export function assertValidPresentationPatch(value: unknown): asserts value is TranscriptPresentationPatch {
@@ -56,14 +52,16 @@ export function assertValidPresentationPatch(value: unknown): asserts value is T
   const allowed = new Set([
     "content", "reasoning", "reasoningBlocks", "processMessages", "agentRounds",
     "taskDelegations", "channelSource", "sticker", "toolExecutions", "runActivity",
-    "runSnapshot", "ttsCacheKey", "ttsCacheVersion", "musicCard", "contextUsage",
+    "runSnapshot", "ttsCacheKey", "ttsCacheVersion", "musicCard", "contextUsage", "delta",
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) {
     throw new Error("TRANSCRIPT_INVALID_PRESENTATION_PATCH");
   }
   // Keep this shared gate as strict as the persisted ChatMessage contract.
   for (const [key, field] of Object.entries(value)) {
-    if (["content", "reasoning", "ttsCacheKey", "ttsCacheVersion"].includes(key)) {
+    if (key === "delta") {
+      if (!isPresentationDelta(field)) throw new Error("TRANSCRIPT_INVALID_PRESENTATION_PATCH");
+    } else if (["content", "reasoning", "ttsCacheKey", "ttsCacheVersion"].includes(key)) {
       if (typeof field !== "string") throw new Error("TRANSCRIPT_INVALID_PRESENTATION_PATCH");
     } else if (key === "sticker") {
       if (field !== null && typeof field !== "string") throw new Error("TRANSCRIPT_INVALID_PRESENTATION_PATCH");
@@ -92,6 +90,27 @@ export function assertValidPresentationPatch(value: unknown): asserts value is T
       throw new Error("TRANSCRIPT_INVALID_PRESENTATION_PATCH");
     }
   }
+}
+
+function isPresentationDelta(value: unknown): boolean {
+  if (!isRecord(value) || Object.keys(value).length === 0) return false;
+  const allowed = new Set([
+    "reasoningBlockUpserts", "reasoningBlockAppends", "processMessageUpserts",
+    "processMessageAppends", "agentRoundUpserts", "taskDelegationUpserts", "toolExecutionUpserts",
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) return false;
+  return optionalField(value, "reasoningBlockUpserts", (items) => Array.isArray(items) && items.every(isReasoningBlock)) &&
+    optionalField(value, "reasoningBlockAppends", (items) => Array.isArray(items) && items.every(isTextAppend)) &&
+    optionalField(value, "processMessageUpserts", (items) => Array.isArray(items) && items.every(isProcessMessage)) &&
+    optionalField(value, "processMessageAppends", (items) => Array.isArray(items) && items.every(isTextAppend)) &&
+    optionalField(value, "agentRoundUpserts", (items) => Array.isArray(items) && items.every(isAgentRound)) &&
+    optionalField(value, "taskDelegationUpserts", (items) => Array.isArray(items) && items.every(isTaskDelegation)) &&
+    optionalField(value, "toolExecutionUpserts", (items) => Array.isArray(items) && items.every(isToolExecution));
+}
+
+function isTextAppend(value: unknown): boolean {
+  return isRecord(value) && hasOnlyKeys(value, ["id", "content"]) &&
+    typeof value.id === "string" && value.id.length > 0 && typeof value.content === "string";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -204,6 +223,30 @@ export type TranscriptCompactionCheckpointPayload = {
   trigger: "automatic" | "manual";
 };
 
+export type TranscriptToolStartedPayload = {
+  assistantEntryId: string;
+  toolCallId: string;
+  toolName: string;
+  sideEffect: SideEffectKind;
+  fingerprint: string;
+  repeatAuthorizationId?: string;
+};
+
+export type TranscriptTaskStatePayload = {
+  assistantEntryId: string;
+  toolCallId: string;
+  items: TodoItem[];
+};
+
+export type TranscriptEffectResolutionPayload = {
+  assistantEntryId: string;
+  effectId: string;
+  action: "repeat_authorized";
+  authorizationId: string;
+  fingerprint: string;
+  grantedAt: number;
+};
+
 export type TranscriptArchiveRef = {
   fromSeq: number;
   throughSeq: number;
@@ -224,6 +267,9 @@ export type TranscriptEntry =
         fullRef?: string;
       };
     })
+  | (TranscriptEnvelopeBase & { kind: "tool_started"; payload: TranscriptToolStartedPayload })
+  | (TranscriptEnvelopeBase & { kind: "task_state"; payload: TranscriptTaskStatePayload })
+  | (TranscriptEnvelopeBase & { kind: "effect_resolution"; payload: TranscriptEffectResolutionPayload })
   | (TranscriptEnvelopeBase & {
       kind: "interruption";
       payload: { reason: "user_cancel" | "runtime_error" | "crashed" };

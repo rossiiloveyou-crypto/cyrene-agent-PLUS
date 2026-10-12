@@ -24,20 +24,20 @@
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: #4a4a4a;
+  color: var(--rb-text-primary);
   cursor: pointer;
   font: 500 13px/1.25 var(--rb-font-sans, sans-serif);
   text-align: left;
 }
 
 .cy-style-panel__option:hover {
-  background: #fff0f5;
+  background: var(--rb-surface-hover);
   color: var(--rb-accent);
 }
 
 .cy-style-panel__option.is-active {
-  background: #ffe4ee;
-  color: #d83165;
+  background: color-mix(in srgb, var(--rb-accent) 14%, transparent);
+  color: var(--rb-accent);
 }
 
 .cy-style-icon {
@@ -45,13 +45,6 @@
   height: 18px;
   flex: none;
   object-fit: contain;
-}
-
-.cy-style-popover .ant-popover-inner {
-  padding: 9px;
-  border: 1px solid #eeeeee;
-  border-radius: 14px;
-  box-shadow: 0 12px 32px rgba(29, 29, 31, 0.12);
 }
 
 .cy-style-control {

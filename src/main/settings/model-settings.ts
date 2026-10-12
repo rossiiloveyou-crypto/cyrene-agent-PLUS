@@ -15,6 +15,7 @@ import {
   type SessionModelBindingInput,
 } from "../../shared/session-model";
 import { addModelProfile, resolveDefaultModelProfile, updateModelProfile, type SavedModelProfile } from "./model-catalog";
+import { normalizeMemoryMode, type MemoryMode } from "../memory/memory-mode";
 
 /**
  * 统一模型配置入口：所有模块（包括 Code 模式）必须通过此函数读取。
@@ -119,7 +120,7 @@ function migrateProviderRenames(
 export interface ModelSettings {
   mode: "auto" | "manual";
   /**
-   * 配置文件 schema 版本。当前 2：multimodal 旧判定（syncWithMain / 无字段推断）已迁移落盘。
+   * 配置文件 schema 版本。2：multimodal 旧判定迁移；3：MiniMax Responses 端点迁移；4：兼容旧 MiniMax 厂商名。
    * 旧文件（无此字段）首次加载时执行一次性迁移并写回，之后走干净路径。
    */
   schemaVersion?: number;
@@ -150,11 +151,14 @@ export interface ModelSettings {
   modelProfiles?: SavedModelProfile[];
   defaultModelProfileId?: string;
   runtimeSync: "off" | "local" | "llm";
+  memoryMode: MemoryMode;
   stickerEnabled: boolean;
   stickerSize: StickerSize;
   stickerSimilarityThreshold: number;
   /** 整个聊天请求的总超时（秒）。30-1800，默认 300。 */
   chatRequestTimeoutSec: number;
+  /** 主模型请求的额外重试次数；0–10，默认 5。 */
+  modelRequestMaxRetries: number;
   /** CITA 结构化输出重试总预算（秒）。4-30，默认 8。 */
   citaRepairBudgetSec: number;
   rerankerMode: "standard" | "none";
@@ -181,8 +185,8 @@ export interface VisionModelConfig {
   model: string;
 }
 
-/** 当前配置文件 schema 版本。2 = multimodal 旧判定迁移完成标记。 */
-const MODEL_SETTINGS_SCHEMA_VERSION = 2;
+/** 当前配置文件 schema：2 = multimodal 迁移，3 = MiniMax Responses 端点迁移，4 = 兼容旧 MiniMax 厂商名，5 = 记忆模式设置。 */
+const MODEL_SETTINGS_SCHEMA_VERSION = 5;
 
 const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   mode: "auto",
@@ -195,10 +199,12 @@ const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   explicitTransport: "anthropic",
   perProvider: {},
   runtimeSync: "off",
+  memoryMode: "vector",
   stickerEnabled: true,
   stickerSize: "standard",
   stickerSimilarityThreshold: 0.55,
   chatRequestTimeoutSec: 300,
+  modelRequestMaxRetries: 5,
   citaRepairBudgetSec: 8,
   rerankerMode: "standard",
   embeddingModel: "bgem3",
@@ -232,8 +238,15 @@ function normalizeProviderProfile(
   input: Partial<ProviderProfile> | null | undefined,
   provider = DEFAULT_MODEL_SETTINGS.provider,
 ): ProviderProfile {
+  const normalizedProvider = PROVIDER_RENAMES[provider] ?? provider;
   const explicitTransport: ProviderProfile["explicitTransport"] =
-    migrateLegacyExplicitTransport(input, provider);
+    migrateLegacyExplicitTransport(input, normalizedProvider);
+  const baseUrl = typeof input?.baseUrl === "string" ? input.baseUrl.trim() : "";
+  const normalizedBaseUrl = normalizedProvider === "MiniMax（稀宇科技）"
+    && explicitTransport === "responses"
+    && baseUrl === "https://api.minimaxi.com/v1"
+    ? "https://api.minimax.cn/v1"
+    : baseUrl;
   const rawContextWindow = (input as { contextWindowTokens?: unknown })?.contextWindowTokens;
   const model = typeof input?.model === "string" ? input.model.trim() : "";
   // 模型清单六步契约（顺序是业务数据，删除当前模型后的顺位 fallback 依赖它）：
@@ -279,7 +292,7 @@ function normalizeProviderProfile(
     }
   }
   return {
-    baseUrl: typeof input?.baseUrl === "string" ? input.baseUrl.trim() : "",
+    baseUrl: normalizedBaseUrl,
     model: effectiveModel,
     ...(models ? { models } : {}),
     ...(Object.keys(modelOptions).length > 0 ? { modelOptions } : {}),
@@ -354,7 +367,7 @@ export function normalizeModelSettings(input: Partial<ModelSettings> | null | un
   // 而默认 false 会让多模态模型的用户发图莫名降级/看不了图（比发错更迷惑）。
   let multimodal = input?.multimodal !== false;
   const rawVision = input?.vision as Partial<VisionModelConfig> & { syncWithMain?: boolean } | undefined;
-  if ((input?.schemaVersion ?? 1) < MODEL_SETTINGS_SCHEMA_VERSION) {
+  if ((input?.schemaVersion ?? 1) < 2) {
     if (rawVision && rawVision.syncWithMain === true) {
       multimodal = true;
     } else if (
@@ -372,7 +385,10 @@ export function normalizeModelSettings(input: Partial<ModelSettings> | null | un
   const hasPersistedProfiles = Array.isArray(input?.modelProfiles);
   const modelProfiles: SavedModelProfile[] = hasPersistedProfiles
     ? input!.modelProfiles!.filter((item): item is SavedModelProfile => Boolean(item && typeof item === "object" && typeof item.id === "string" && typeof item.provider === "string"))
-      .map((item) => ({ ...normalizeProviderProfile(item, item.provider), id: item.id, provider: item.provider }))
+      .map((item) => {
+        const normalizedProvider = PROVIDER_RENAMES[item.provider] ?? item.provider;
+        return { ...normalizeProviderProfile(item, normalizedProvider), id: item.id, provider: normalizedProvider };
+      })
     : [];
 
   // 迁移补全：仅当 modelProfiles 字段从未持久化过（老版本配置首次升级）时执行。
@@ -410,6 +426,7 @@ export function normalizeModelSettings(input: Partial<ModelSettings> | null | un
     modelProfiles,
     defaultModelProfileId: typeof input?.defaultModelProfileId === "string" ? input.defaultModelProfileId : modelProfiles[0]?.id,
     runtimeSync: input?.runtimeSync === "llm" ? "llm" : input?.runtimeSync === "local" ? "local" : "off",
+    memoryMode: normalizeMemoryMode(input?.memoryMode),
     stickerEnabled: input?.stickerEnabled !== false,
     stickerSize: input?.stickerSize === "small" || input?.stickerSize === "large" ? input.stickerSize : "standard",
     stickerSimilarityThreshold: typeof input?.stickerSimilarityThreshold === "number"
@@ -419,6 +436,10 @@ export function normalizeModelSettings(input: Partial<ModelSettings> | null | un
       && Number.isFinite(input.chatRequestTimeoutSec)
       ? Math.max(30, Math.min(1800, Math.round(input.chatRequestTimeoutSec)))
       : 300,
+    modelRequestMaxRetries: typeof input?.modelRequestMaxRetries === "number"
+      && Number.isFinite(input.modelRequestMaxRetries)
+      ? Math.max(0, Math.min(10, Math.round(input.modelRequestMaxRetries)))
+      : 5,
     citaRepairBudgetSec: typeof input?.citaRepairBudgetSec === "number" && Number.isFinite(input.citaRepairBudgetSec)
       ? Math.max(4, Math.min(30, Math.round(input.citaRepairBudgetSec)))
       : 8,
@@ -543,8 +564,7 @@ function loadModelSettings0(): ModelSettings {
     const raw = fs.readFileSync(filePath, "utf8");
     const parsed = JSON.parse(raw) as Partial<ModelSettings>;
     const normalized = normalizeModelSettings(parsed);
-    // 一次性迁移落盘：旧文件（无 schemaVersion）迁移后立即写回 + 备份原文件，
-    // 下次加载看到 schemaVersion >= 2 就跳过全部旧判定，走干净路径。
+    // 一次性迁移落盘：旧文件迁移后立即写回 + 备份原文件；schemaVersion 记录最新迁移批次。
     if ((parsed?.schemaVersion ?? 1) < MODEL_SETTINGS_SCHEMA_VERSION) {
       try {
         fs.copyFileSync(filePath, `${filePath}.bak`);

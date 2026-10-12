@@ -1,11 +1,14 @@
 import { Sender } from "@ant-design/x";
 import { Popover } from "antd";
-import { FolderOpen } from "lucide-react";
+import { AlertTriangle, BookOpen, ChevronDown, ExternalLink, FolderOpen, Plus, ScanLine } from "lucide-react";
+import { Dialog } from "radix-ui";
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "../../../i18n";
 import { useUserCallPreference } from "../../../hooks/useUserNickname";
 import { resolveAsset } from "../../../../../shared/renderer-base";
+import type { BrowserElementSelection } from "../../../../../shared/browser-panel-types";
 import type { ContextUsageSnapshot } from "../../../../../shared/context-usage";
+import type { ModelFailureInfo } from "../../../../../shared/model-error";
 import { ContextUsageRing } from "./ContextUsageRing";
 import { ReasoningControl } from "./ReasoningControl";
 import { StyleControl } from "./StyleControl";
@@ -30,6 +33,8 @@ interface ChatComposerProps {
   attachments: ComposerAttachment[];
   attachmentBusy?: boolean;
   modelBusy?: boolean;
+  /** 压缩状态机回调：透传给 ContextUsageRing，让消息流渲染「正在触发压缩」占位条。 */
+  onCompactPhaseChange?: (phase: "idle" | "running" | "done" | "error") => void;
   pendingQueue?: PendingQueueDockItem[];
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
@@ -59,6 +64,7 @@ interface ChatComposerProps {
   onSelectSessionModel?: (model: string) => void;
   /** 上下文容量快照：运行中实时刷新，空闲时为最近一次终态快照；无快照不渲染圆环。 */
   contextUsage?: ContextUsageSnapshot;
+  mainModelFailure?: ModelFailureInfo;
 }
 
 export interface ComposerAttachment {
@@ -72,6 +78,7 @@ export interface ComposerAttachment {
   status?: string;
   reason?: string;
   imageSendMode?: "direct" | "caption";
+  element?: BrowserElementSelection;
 }
 
 const WELCOME_IMAGE_BY_MODE: Record<string, string> = {
@@ -112,22 +119,6 @@ function getNextWelcomeGreetingDelayMs(date: Date) {
 
 /** 粘贴图片 MIME 白名单：与主进程截图临时文件的校验口径一致。 */
 const PASTE_IMAGE_MIME_WHITELIST = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-
-function PlusIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>;
-}
-
-function ScreenshotIcon() {
-  return (
-    <svg className="cy-composer__screenshot-icon" width="24" height="24" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M16 6H8C6.89543 6 6 6.89543 6 8V16" />
-      <path d="M16 42H8C6.89543 42 6 41.1046 6 40V32" />
-      <path d="M32 42H40C41.1046 42 42 41.1046 42 40V32" />
-      <path d="M32 6H40C41.1046 6 42 6.89543 42 8V16" />
-      <rect x="14" y="14" width="20" height="20" rx="2" />
-    </svg>
-  );
-}
 
 interface EnabledSticker {
   id: string;
@@ -181,7 +172,8 @@ function StickerPicker({ onChoose }: { onChoose: (id: string) => void }) {
       onOpenChange={setOpen}
       trigger="click"
       placement="topLeft"
-      rootClassName="cy-sticker-popover"
+      arrow={false}
+      rootClassName="cy-composer-menu-popover"
       content={(
         <div className="cy-sticker-picker" aria-label={t("composer.stickerList")}>
           {stickers.length === 0 && <span className="cy-sticker-picker__empty">{t("composer.stickerEmpty")}</span>}
@@ -205,21 +197,6 @@ function StickerPicker({ onChoose }: { onChoose: (id: string) => void }) {
         <img src={resolveAsset("icons/sticker-picker.png")} alt="" aria-hidden="true" draggable={false} />
       </button>
     </Popover>
-  );
-}
-
-function ChevronIcon() {
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>;
-}
-
-function ObsidianVaultIcon() {
-  return (
-    <svg className="cy-composer__obsidian-icon" height="1em" style={{ flex: "none", lineHeight: 1 }} viewBox="0 0 24 24" width="1em" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <title>Obsidian</title>
-      <path d="M9.643 14.012c.615-.183 1.605-.465 2.745-.534-.684-1.725-.849-3.235-.716-4.579.153-1.552.7-2.847 1.234-3.95.114-.235.223-.454.328-.664.149-.297.289-.577.42-.86.217-.47.378-.885.46-1.27.08-.38.08-.719-.014-1.044-.095-.325-.297-.675-.681-1.06a1.6 1.6 0 00-1.475.36l-4.95 4.453a1.602 1.602 0 00-.512.952l-.427 2.83c.67.592 2.327 2.317 3.335 4.71.09.213.174.432.253.656zM5.855 9.937c-.024.1-.057.197-.099.29L3.14 16.058a1.602 1.602 0 00.313 1.772l4.117 4.24c2.102-3.102 1.795-6.02.835-8.3-.728-1.73-1.832-3.083-2.55-3.833z" fill="#A88BFA" />
-      <path d="M8.52 22.57c.073.01.146.018.22.02.781.023 2.095.091 3.16.288.87.16 2.593.642 4.011 1.056 1.082.316 2.197-.548 2.354-1.664.115-.814.33-1.735.725-2.58l-.009.004c-.67-1.87-1.523-3.077-2.417-3.847a5.294 5.294 0 00-2.777-1.258c-1.541-.216-2.952.189-3.841.45.532 2.218.368 4.828-1.425 7.53z" fill="#A88BFA" />
-      <path d="M19.676 18.538a69.072 69.072 0 001.858-2.952.811.811 0 00-.061-.901c-.516-.684-1.504-2.075-2.042-3.362-.554-1.323-.636-3.378-.64-4.378a1.708 1.708 0 00-.359-1.051L15.235 1.83a3.757 3.757 0 01-.076.545c-.107.503-.307 1.004-.536 1.498-.135.29-.29.601-.446.915-.105.21-.21.42-.31.626-.517 1.068-.998 2.227-1.132 3.59-.125 1.262.046 2.73.814 4.484.128.01.257.025.386.043a6.364 6.364 0 013.327 1.506c.916.79 1.743 1.921 2.414 3.5z" fill="#A88BFA" />
-    </svg>
   );
 }
 
@@ -251,12 +228,12 @@ function WorkspaceFolderButton({
       onClick={showMenu ? undefined : onChooseWorkspace}>
       {icon}
       <span>{label}</span>
-      <ChevronIcon />
+      <ChevronDown />
     </button>
   );
   if (!showMenu) return button;
   return (
-    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) onOpenRecentProjects?.(); }} trigger="click" placement="topLeft" rootClassName="cy-recent-projects-popover"
+    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) onOpenRecentProjects?.(); }} trigger="click" placement="topLeft" arrow={false} rootClassName="cy-composer-menu-popover"
       content={
         <div className="cy-recent-projects__menu">
           {projects.map((projectPath) => {
@@ -290,6 +267,7 @@ export function ChatComposer({
   attachments,
   attachmentBusy = false,
   modelBusy = false,
+  onCompactPhaseChange,
   pendingQueue = [],
   onChange,
   onSubmit,
@@ -312,6 +290,7 @@ export function ChatComposer({
   activeSessionModel,
   onSelectSessionModel,
   contextUsage,
+  mainModelFailure,
 }: ChatComposerProps) {
   const { t } = useTranslation();
   const preferredAddress = useUserCallPreference();
@@ -321,6 +300,9 @@ export function ChatComposer({
   const [enabledStickers, setEnabledStickers] = useState<EnabledSticker[]>([]);
   const supportsWorkFiles = ["work", "code"].includes(mode);
   const supportsObsidianLibrary = mode === "learn";
+  // 会话开启且已绑定工作区即锁定：工作区按钮只作为"开始对话前"的选择入口，
+  // 保留给未绑定会话仅作补救（换工作区 = 新开对话，避免运行中换绑与旧引用失效）
+  const workspaceSelectable = !conversationId || !workspaceRoot;
   const supportsPermission = supportsWorkFiles || supportsObsidianLibrary;
   const supportsPlanToggle = mode === "code";
   const supportsStyle = mode === "chat" || mode === "learn";
@@ -422,6 +404,7 @@ export function ChatComposer({
         onAdjust={onAdjustQueuedMessage}
         onRemove={onRemoveQueuedMessage}
       />
+      {mainModelFailure && <ModelFailureNotice failure={mainModelFailure} />}
       <div className="cy-composer-shell">
         <input
           ref={fileInputRef}
@@ -460,8 +443,13 @@ export function ChatComposer({
         header={hasComposerHeader ? (
           <div className="cy-composer__attachments" aria-label={t("composer.attachmentsLabel")}>
             {attachments.map((attachment, index) => (
-              <div className={`cy-composer__attachment ${attachment.kind === "image" && attachment.previewUrl ? "is-image" : ""}`} key={`${attachment.filePath ?? attachment.name}-${index}`}>
-                {attachment.kind === "image" && attachment.previewUrl ? (
+              <div className={`cy-composer__attachment ${attachment.kind === "image" && attachment.previewUrl ? "is-image" : ""}${attachment.kind === "web-element" ? " is-web-element" : ""}`} key={`${attachment.filePath ?? attachment.name}-${index}`}>
+                {attachment.kind === "web-element" && attachment.element ? (
+                  <span className="cy-composer__web-element" title={attachment.element.snapshotLine}>
+                    <ScanLine size={15} />
+                    <span><strong>{attachment.element.name}</strong><small>{attachment.element.pageTitle || attachment.element.pageUrl}</small></span>
+                  </span>
+                ) : attachment.kind === "image" && attachment.previewUrl ? (
                   <img src={attachment.previewUrl} alt="" draggable={false} />
                 ) : (
                   <span title={attachment.name}>{attachment.name}</span>
@@ -487,7 +475,7 @@ export function ChatComposer({
               disabled={attachmentBusy}
               onClick={() => fileInputRef.current?.click()}
             >
-              <PlusIcon />
+              <Plus size={20} aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -496,14 +484,14 @@ export function ChatComposer({
               title={t("composer.screenshotShortcut")}
               onClick={onScreenshot}
             >
-              <ScreenshotIcon />
+              <ScanLine size={20} aria-hidden="true" />
             </button>
             {supportsStickers && <StickerPicker onChoose={onChooseSticker} />}
           </div>
         }
         />
         <div className="cy-composer__footer">
-        {supportsWorkFiles && (
+        {supportsWorkFiles && workspaceSelectable && (
           <WorkspaceFolderButton
             icon={<FolderOpen />}
             label={workspaceName ?? (docked ? t("composer.workspaceFolder") : t("composer.workspaceEnter"))}
@@ -514,9 +502,9 @@ export function ChatComposer({
             onChooseWorkspace={onChooseWorkspace}
           />
         )}
-        {supportsObsidianLibrary && (
+        {supportsObsidianLibrary && workspaceSelectable && (
           <WorkspaceFolderButton
-            icon={<ObsidianVaultIcon />}
+            icon={<BookOpen />}
             label={workspaceName ?? t("composer.obsidianLibrary")}
             ariaLabel={t("composer.obsidianChoose")}
             recentProjects={recentProjects}
@@ -535,10 +523,61 @@ export function ChatComposer({
         {supportsStyle && <StyleControl />}
         {onSelectModelProfile && <ModelSelector activeProfileId={activeModelProfileId} sessionModel={activeSessionModel} onSelect={onSelectModelProfile} onSelectModel={onSelectSessionModel} />}
         <span className="cy-composer__footer-spacer" />
-        <ContextUsageRing usage={contextUsage} sessionId={conversationId} busy={modelBusy} />
+        <ContextUsageRing usage={contextUsage} sessionId={conversationId} busy={modelBusy} onCompactPhaseChange={onCompactPhaseChange} />
         <ReasoningControl sessionId={conversationId} modelProfileId={activeModelProfileId} model={activeSessionModel} />
         </div>
       </div>
     </div>
+  );
+}
+
+const MODEL_ERROR_CATEGORY_KEYS: Record<ModelFailureInfo["category"], string> = {
+  AUTH: "auth", PERMISSION: "permission", BILLING: "billing", QUOTA: "quota",
+  RATE_LIMIT: "rateLimit", INVALID_REQUEST: "invalidRequest", NOT_FOUND: "notFound",
+  CONTEXT_LIMIT: "contextLimit", PAYLOAD_TOO_LARGE: "payloadTooLarge", CONTENT_POLICY: "contentPolicy",
+  CONFLICT: "conflict", TIMEOUT: "timeout", NETWORK: "network", OVERLOADED: "overloaded",
+  SERVER_ERROR: "serverError", UNAVAILABLE: "unavailable", CANCELLED: "cancelled", UNKNOWN: "unknown",
+};
+
+function ModelFailureNotice({ failure }: { failure: ModelFailureInfo }) {
+  const { t } = useTranslation();
+  const categoryKey = MODEL_ERROR_CATEGORY_KEYS[failure.category] ?? "unknown";
+  return (
+    <Dialog.Root>
+      <div className="cy-model-error-item" data-slot="item" role="status">
+        <span className="cy-model-error-item__icon"><AlertTriangle size={16} aria-hidden="true" /></span>
+        <span className="cy-model-error-item__summary" data-slot="item-content">
+          {t(`composer.modelError.categories.${categoryKey}`)}
+          {failure.status ? <span className="cy-model-error-item__status">HTTP {failure.status}</span> : null}
+        </span>
+        <Dialog.Trigger asChild>
+          <button className="cy-model-error-item__action" type="button">{t("composer.modelError.viewDetails")}</button>
+        </Dialog.Trigger>
+      </div>
+      <Dialog.Portal>
+        <Dialog.Overlay className="cy-model-error-dialog__overlay" />
+        <Dialog.Content className="cy-model-error-dialog" aria-describedby="cy-model-error-description">
+          <Dialog.Title className="cy-model-error-dialog__title">{t("composer.modelError.title")}</Dialog.Title>
+          <Dialog.Description id="cy-model-error-description" className="cy-model-error-dialog__description">
+            {t(`composer.modelError.categories.${categoryKey}`)}
+          </Dialog.Description>
+          <dl className="cy-model-error-dialog__details">
+            <dt>{t("composer.modelError.provider")}</dt><dd>{failure.provider}</dd>
+            <dt>{t("composer.modelError.model")}</dt><dd>{failure.model}</dd>
+            {failure.status && <><dt>{t("composer.modelError.status")}</dt><dd>{failure.status}</dd></>}
+            {failure.vendorCode && <><dt>{t("composer.modelError.code")}</dt><dd>{failure.vendorCode}</dd></>}
+            {failure.vendorType && <><dt>{t("composer.modelError.type")}</dt><dd>{failure.vendorType}</dd></>}
+            {failure.requestId && <><dt>{t("composer.modelError.requestId")}</dt><dd>{failure.requestId}</dd></>}
+          </dl>
+          <p className="cy-model-error-dialog__hint">{failure.category === "UNKNOWN"
+            ? t("composer.modelError.unknownHint")
+            : t("composer.modelError.hint")}</p>
+          <div className="cy-model-error-dialog__footer">
+            {failure.docsUrl && <a href={failure.docsUrl} target="_blank" rel="noreferrer">{t("composer.modelError.vendorDocs")} <ExternalLink size={14} /></a>}
+            <Dialog.Close className="cy-model-error-dialog__close">{t("common.close")}</Dialog.Close>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

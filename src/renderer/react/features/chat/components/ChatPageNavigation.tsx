@@ -13,7 +13,6 @@ import { ToolConsoleButton } from "../../../components/ui/ToolConsoleButton";
 import { UserAvatar } from "../../../components/ui/UserAvatar";
 import { WindowControls } from "../../../components/ui/WindowControls";
 import { CharacterInfoPopover } from "../../character/CharacterInfoPopover";
-import { AppUpdateEntry } from "./AppUpdateEntry";
 import { ConversationSidebar } from "./ConversationSidebar";
 import { UsageBadge } from "./UsageBadge";
 import { SidebarSearchDialog } from "./SidebarSearchDialog";
@@ -32,6 +31,7 @@ export interface ChatPageNavigationProps {
   sidebarSessions: ChatSessionMeta[];
   sidebarOrganization: SidebarOrganizationSnapshot | null;
   activeSessionId?: string;
+  unreadSessionIds: ReadonlySet<string>;
   onToggleCollapsed: () => void;
   onModeChange: (mode: string) => void;
   onNewTask: () => void;
@@ -57,6 +57,7 @@ export const ChatPageNavigation = React.memo(function ChatPageNavigation({
   sidebarSessions,
   sidebarOrganization,
   activeSessionId,
+  unreadSessionIds,
   onToggleCollapsed,
   onModeChange,
   onNewTask,
@@ -141,6 +142,7 @@ export const ChatPageNavigation = React.memo(function ChatPageNavigation({
             organization={sidebarOrganization}
             onSaveOrganization={onSaveSidebarOrganization}
             activeSessionId={activeSessionId}
+            unreadSessionIds={unreadSessionIds}
             onSelect={onSelectSession}
             onOpenProject={onOpenProject}
             onRename={onRenameSession}
@@ -148,7 +150,6 @@ export const ChatPageNavigation = React.memo(function ChatPageNavigation({
             onTogglePin={onTogglePinSession}
           />
         </div>
-        <AppUpdateEntry />
         <div className="cy-page-sidebar-bottom">
           <UserAvatar />
           <SettingsButton onClick={onOpenSettings} />

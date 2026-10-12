@@ -12,7 +12,6 @@ function makeServices(): CoreServices {
     social: {} as never,
     tts: {} as never,
     ttsSession: {} as never,
-    embedding: { scheduleStartupRefreshes: vi.fn() } as never,
     proactive: {} as never,
     git: { dispose: vi.fn() } as never,
     lsp: { disposeAll: vi.fn() } as never,

@@ -57,8 +57,9 @@ export const IPC = {
   CHAT_TOGGLE_MAXIMIZE: "chat:toggle-maximize",
   CHAT_IS_MAXIMIZED: "chat:is-maximized",
   CHAT_INGEST_FILES: "chat:ingest-files",
-  CHAT_PROCESS_DOCUMENTS: "chat:process-documents",
   CHAT_DOCUMENT_INDEX_PROGRESS: "chat:document-index-progress",
+  // ── 附件文档索引链（M2 / J-04：官方 v1.3.0 删除了这两个通道，我方恢复）──
+  CHAT_PROCESS_DOCUMENTS: "chat:process-documents",
   CHAT_CANCEL_DOCUMENT_INDEX: "chat:cancel-document-index",
   CHAT_CAPTION_IMAGE: "chat:caption-image",
   CHAT_GET_IMAGE_PREVIEW: "chat:get-image-preview",
@@ -66,6 +67,25 @@ export const IPC = {
   // 推理下拉（chat 窗口：原子读 + providerKey 写）
   CHAT_GET_REASONING_STATE: "chat:get-reasoning-state",
   CHAT_SET_REASONING: "chat:set-reasoning",
+  // 右侧内嵌浏览器：页面由主进程隔离的持久化 Session 加载。
+  BROWSER_PANEL_GET_STATE: "browser-panel:get-state",
+  BROWSER_PANEL_SET_BOUNDS: "browser-panel:set-bounds",
+  BROWSER_PANEL_NAVIGATE: "browser-panel:navigate",
+  BROWSER_PANEL_BACK: "browser-panel:back",
+  BROWSER_PANEL_FORWARD: "browser-panel:forward",
+  BROWSER_PANEL_RELOAD: "browser-panel:reload",
+  BROWSER_PANEL_STOP: "browser-panel:stop",
+  BROWSER_PANEL_CLEAR_COOKIES: "browser-panel:clear-cookies",
+  BROWSER_PANEL_NEW_TAB: "browser-panel:new-tab",
+  BROWSER_PANEL_OPEN_IN_NEW_TAB: "browser-panel:open-in-new-tab",
+  BROWSER_PANEL_OPEN_EXAM: "browser-panel:open-exam",
+  BROWSER_PANEL_ACTIVATE_TAB: "browser-panel:activate-tab",
+  BROWSER_PANEL_CLOSE_TAB: "browser-panel:close-tab",
+  BROWSER_PANEL_STATE_CHANGED: "browser-panel:state-changed",
+  BROWSER_PANEL_START_ELEMENT_PICKER: "browser-panel:start-element-picker",
+  BROWSER_PANEL_CANCEL_ELEMENT_PICKER: "browser-panel:cancel-element-picker",
+  BROWSER_PANEL_ELEMENT_SELECTED: "browser-panel:element-selected",
+  BROWSER_PANEL_OPEN_FOR_CONTROL: "browser-panel:open-for-control",
 
   // AG-UI 事件流
   AGUI_RUN: "agui:run",
@@ -109,6 +129,8 @@ export const IPC = {
   // settings window
   // main → settings 窗口：要求切到指定标签（已打开时用）
   SETTINGS_SWITCH_SECTION: "settings:switch-section",
+  // renderer → main：请求打开设置页并定位到指定标签（main 回推上面的 switch-section）
+  SETTINGS_REQUEST_SWITCH_SECTION: "settings:request-switch-section",
   SETTINGS_GET_CONFIG: "settings:get-config",
   SETTINGS_SAVE_CONFIG: "settings:save-config",
   SETTINGS_MODEL_PROFILES_LIST: "settings:model-profiles:list",
@@ -126,16 +148,9 @@ export const IPC = {
   UI_THEME_CHANGED: "ui-theme:changed",
   UI_THEME_RADIUS_GET: "ui-theme-radius:get",
   UI_THEME_RADIUS_CHANGED: "ui-theme-radius:changed",
-  UI_WINDOW_CORNER_RADIUS_GET: "ui-window-corner-radius:get",
-  UI_WINDOW_CORNER_RADIUS_CHANGED: "ui-window-corner-radius:changed",
-  UI_FONT_GET: "ui-font:get",
-  UI_FONT_CHANGED: "ui-font:changed",
   // 对话用量徽章：按会话查询 + 变化推送（main → renderer）
   CHAT_SESSION_USAGE_GET: "chat:session-usage:get",
   CHAT_SESSION_USAGE_CHANGED: "chat:session-usage:changed",
-  SETTINGS_PICK_UI_FONT: "settings:pick-ui-font",
-  SETTINGS_IMPORT_UI_FONT: "settings:import-ui-font",
-  SETTINGS_RESET_UI_FONT: "settings:reset-ui-font",
   SETTINGS_SET_PET_ALWAYS_ON_TOP: "settings:set-pet-always-on-top",
   SETTINGS_SET_PET_VISIBLE: "settings:set-pet-visible",
   SETTINGS_SET_PET_ZOOM: "settings:set-pet-zoom",
@@ -150,11 +165,14 @@ export const IPC = {
   // chat sessions (multi-conversation history, persisted to userData/cyrene-chats/)
   CHATS_LIST: "chats:list",
   CHATS_GET: "chats:get",
+  TASK_SESSION_GET: "task-session:get",
   CHATS_GET_PAGE: "chats:get-page",
   CHATS_CREATE: "chats:create",
   CTA_PRESENTATION_CHECKPOINT: "cta:presentation-checkpoint",
   // renderer → main：主动压缩会话上下文（模型窗口内旧消息摘要成一条记忆）
   CHATS_COMPACT: "chats:compact",
+  // dev-only：一键生成"压缩演示"会话（假历史 + 真实压缩检查点链路，零 token）
+  CHATS_SEED_COMPACTION_DEMO: "chats:seedCompactionDemo",
   CHATS_RENAME: "chats:rename",
   CHATS_DELETE: "chats:delete",
   // 会话级待发队列（运行中排队、未派发；独立于正式 messages 历史）
@@ -221,6 +239,9 @@ export const IPC = {
   CHATS_INIT_LEARN_WORKSPACE: "chats:init-learn-workspace",
   // main → 所有窗口：工作区绑定变更广播
   CHATS_WORKSPACE_CHANGED: "chats:workspace-changed",
+  // main → 所有窗口：上下文压缩阶段（running/finished），驱动消息流尾部的呼吸提示。
+  // 自动压缩发生在 run 开始前的主进程侧，渲染端拿不到 AG-UI 事件，只能靠这条推送。
+  CHATS_COMPACTION_PHASE: "chats:compaction-phase",
 
   // Review 快照（不可变文件变更审查）
   // renderer → main：获取指定 Run 的 ReviewSnapshot（不存在时按 halted 补生成）
@@ -279,12 +300,36 @@ export const IPC = {
   USER_GET_AVATAR: "user:get-avatar",
   USER_PROFILE_CHANGED: "user:profile-changed",
   USER_AVATAR_CHANGED: "user:avatar-changed",
+  CYRENE_AVATAR_GET: "cyrene-avatar:get",
+  CYRENE_AVATAR_UPLOAD: "cyrene-avatar:upload",
+  CYRENE_AVATAR_RESET: "cyrene-avatar:reset",
+  CYRENE_AVATAR_CHANGED: "cyrene-avatar:changed",
 
   // memory panel
   MEMORY_PANEL_GET_DATA: "memory-panel:get-data",
   MEMORY_PANEL_DELETE_IMPORTED_DOC: "memory-panel:delete-imported-doc",
+  MEMORY_PANEL_GET_SUMMARY: "memory-panel:get-summary",
   MEMORY_PANEL_SAVE_L0: "memory-panel:save-l0",
   MEMORY_PANEL_SAVE_L1: "memory-panel:save-l1",
+  MEMORY_WIKI_LIST_PAGES: "memory-wiki:list-pages",
+  MEMORY_WIKI_SEARCH: "memory-wiki:search",
+  MEMORY_WIKI_READ_PAGE: "memory-wiki:read-page",
+  MEMORY_WIKI_LIST_CONFLICTS: "memory-wiki:list-conflicts",
+  MEMORY_WIKI_CORRECT_CLAIM: "memory-wiki:correct-claim",
+  MEMORY_WIKI_DELETE_CLAIM: "memory-wiki:delete-claim",
+  KNOWLEDGE_GET_STATE: "knowledge:get-state",
+  KNOWLEDGE_SET_ENABLED: "knowledge:set-enabled",
+  KNOWLEDGE_LIST_WORKSPACES: "knowledge:list-workspaces",
+  KNOWLEDGE_CREATE_COLLECTION: "knowledge:create-collection",
+  KNOWLEDGE_DELETE_COLLECTION: "knowledge:delete-collection",
+  KNOWLEDGE_SET_COLLECTION_ENABLED: "knowledge:set-collection-enabled",
+  KNOWLEDGE_PICK_PATHS: "knowledge:pick-paths",
+  KNOWLEDGE_ADD_PATHS: "knowledge:add-paths",
+  KNOWLEDGE_REMOVE_PATH: "knowledge:remove-path",
+  KNOWLEDGE_REFRESH_COLLECTION: "knowledge:refresh-collection",
+  KNOWLEDGE_LIST_DOCUMENTS: "knowledge:list-documents",
+  KNOWLEDGE_SEARCH: "knowledge:search",
+  KNOWLEDGE_OPEN_SOURCE: "knowledge:open-source",
   MEMORY_EXPORT_OBSIDIAN_VAULT: "memory:export-obsidian-vault",
   OBSIDIAN_VAULT_BIND: "obsidian-vault:bind",
   OBSIDIAN_VAULT_UNBIND: "obsidian-vault:unbind",
@@ -424,6 +469,23 @@ export const IPC = {
   // main → renderer：结算广播（提交/跳过/run 取消），渲染端据此清卡
   POP_QUIZ_SETTLED: "pop-quiz:settled",
 
+  // Learn 正式试卷：短工具创建，用户本地作答，交卷后新一轮批改
+  LEARN_EXAM_CREATED: "learn-exam:created",
+  LEARN_EXAM_CHANGED: "learn-exam:changed",
+  LEARN_EXAM_LIST: "learn-exam:list",
+  LEARN_EXAM_GET: "learn-exam:get",
+  LEARN_EXAM_SAVE_ANSWER: "learn-exam:save-answer",
+  LEARN_EXAM_SAVE_NAVIGATION: "learn-exam:save-navigation",
+  LEARN_EXAM_SUBMIT: "learn-exam:submit",
+  LEARN_EXAM_RETRY: "learn-exam:retry",
+  LEARN_EXAM_MARK_GRADING_FAILED: "learn-exam:mark-grading-failed",
+  LEARN_EXAM_PAGE_GET: "learn-exam-page:get",
+  LEARN_EXAM_PAGE_SAVE_ANSWER: "learn-exam-page:save-answer",
+  LEARN_EXAM_PAGE_SAVE_NAVIGATION: "learn-exam-page:save-navigation",
+  LEARN_EXAM_PAGE_SUBMIT: "learn-exam-page:submit",
+  LEARN_EXAM_PAGE_RETRY: "learn-exam-page:retry",
+  LEARN_EXAM_PAGE_CHANGED: "learn-exam-page:changed",
+
   // call window (voice call)
   CALL_OPEN: "call:open",                 // 角色信息浮层 → main：打开通话窗口
   CALL_START: "call:start",               // renderer → main：开始通话（初始化 ASR）
@@ -545,6 +607,12 @@ export const IPC = {
   /** 设置面板桥的统一转发通道：仅面板宿主窗口可用，pluginId 由宿主侧绑定 */
   PLUGINS_PANEL_INVOKE: "plugins:panel:invoke",
   PLUGINS_MARKET_LIST: "plugins:market:list",
+  PLUGINS_MARKET_DETAILS: "plugins:market:details",
   PLUGINS_MARKET_INSTALL: "plugins:market:install",
+
+  // 项目公告（远端 Markdown 文本）
+  NEWS_GET: "news:get",
+  /** 主进程拉到新版本时反向推送给窗口，渲染端据此更新未读提示 */
+  NEWS_UPDATED: "news:updated",
 
 } as const;

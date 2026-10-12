@@ -13,7 +13,6 @@ export interface ExternalContentPaths {
   installRoot: string;
   promptDirectories: string[];
   builtinSkillDirectory: string;
-  installSkillDirectory?: string;
   userSkillDirectories: string[];
 }
 
@@ -27,8 +26,7 @@ export interface SkillScanSource {
  * Packaged builds put user-editable content under userData (survives upgrades:
  * the NSIS uninstaller wipes the whole install directory on reinstall) and read
  * shipped content from folders beside Cyrene.exe, which the installer refreshes
- * on every update. Old packages placed shipped skills directly in <install>/skills;
- * that directory remains a builtin source for backward compatibility.
+ * on every update. Shipped skills live directly in <install>/skills.
  */
 export function resolveExternalContentPaths(input: ExternalContentPathInput): ExternalContentPaths {
   if (!input.isPackaged) {
@@ -41,15 +39,14 @@ export function resolveExternalContentPaths(input: ExternalContentPathInput): Ex
   }
 
   const installRoot = path.dirname(input.executablePath);
-  const installSkillDirectory = path.join(installRoot, "skills");
   return {
     installRoot,
     promptDirectories: [
       path.join(input.userDataPath, "prompts"),
       path.join(installRoot, "prompts"),
     ],
-    builtinSkillDirectory: path.join(installRoot, "defaults", "skills"),
-    installSkillDirectory,
+    // 内置技能随安装包放在 exe 同级的 skills/（安装器每次升级刷新）
+    builtinSkillDirectory: path.join(installRoot, "skills"),
     userSkillDirectories: [path.join(input.userDataPath, "skills")],
   };
 }
@@ -133,26 +130,13 @@ export function findSkillPath(
   return null;
 }
 
-/**
- * Build low-to-high priority scan sources. Old packages placed shipped skills
- * directly in <install>/skills; when defaults/skills is absent that directory
- * remains a builtin source for backward compatibility.
- */
+/** 构建低→高优先级的技能扫描来源：内置目录在前，用户目录在后（按路径去重）。 */
 export function resolveSkillScanSources(
-  paths: Pick<ExternalContentPaths, "builtinSkillDirectory" | "installSkillDirectory" | "userSkillDirectories"> = getExternalContentPaths(),
+  paths: Pick<ExternalContentPaths, "builtinSkillDirectory" | "userSkillDirectories"> = getExternalContentPaths(),
 ): SkillScanSource[] {
   const sources: SkillScanSource[] = [];
-  const builtinExists = fs.existsSync(paths.builtinSkillDirectory);
-  const legacyBuiltin = !builtinExists
-    && paths.installSkillDirectory
-    && fs.existsSync(paths.installSkillDirectory)
-    ? paths.installSkillDirectory
-    : undefined;
-
-  if (builtinExists) {
+  if (fs.existsSync(paths.builtinSkillDirectory)) {
     sources.push({ directory: paths.builtinSkillDirectory, source: "builtin" });
-  } else if (legacyBuiltin) {
-    sources.push({ directory: legacyBuiltin, source: "builtin" });
   }
 
   const seen = new Set(sources.map((entry) => path.resolve(entry.directory).toLowerCase()));

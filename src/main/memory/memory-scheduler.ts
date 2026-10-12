@@ -11,6 +11,7 @@ import { memoryStore } from "./memory-store"
 import type { MemoryJudgeResult } from "./memory-schemas"
 import type { L1Profile, MemoryCandidate, MemoryJudgeTurn, TurnAttribution } from "./memory-types"
 import { resolveScopeId, rootScope, type MemoryScopeId } from "../zones/scope"
+import { isMemoryEnabled } from "./memory-mode"
 
 const MEMORY_JUDGE_INTERVAL = 6
 const MEMORY_JUDGE_CONTEXT_TURNS = 8
@@ -54,6 +55,7 @@ export class MemoryScheduler {
     conversationId?: string,
     attribution?: TurnAttribution,
   ): void {
+    if (!isMemoryEnabled()) return;
     const scopeId = resolveScopeId(conversationId)
     const seq = ++this.nextTurnSeq
     const bucket = this.turnsByScope.get(scopeId) ?? []
@@ -83,6 +85,7 @@ export class MemoryScheduler {
     seq: number,
     conversationId?: string,
   ): Promise<void> {
+    if (!isMemoryEnabled()) return;
     const l1 = await this.deps.getL1()
     // roundCount 仍全局累加：它只决定"判定频率"，不参与记忆归属。
     // judge 的**输入**（turns）按 scope 隔离，所以抽取结果不会跨域。
@@ -108,6 +111,7 @@ export class MemoryScheduler {
           // `!isOwnerScope(scope) → 丢弃 L0/L1` 是同一条判据，只是提前到提示词里说。
           l2Only: scopeId !== rootScope(),
         })
+        if (!isMemoryEnabled()) return;
 
         // 归属注入：LLM 只给「关于谁的人名」与「来自第几轮」，这里映射回 personKey 与消息 id。
         // 同时钉上记忆域：LLM 不产出 scope，归属由调度层负责。
@@ -128,6 +132,7 @@ export class MemoryScheduler {
     await this.deps.replaceL1Field("roundCount", newCount)
 
     if (newCount % 5 === 0) {
+      if (!isMemoryEnabled()) return;
       try {
         await this.deps.runResolverQueueOnce()
       } catch (err) {
@@ -136,11 +141,13 @@ export class MemoryScheduler {
     }
 
     if (newCount % 20 === 0) {
+      if (!isMemoryEnabled()) return;
       console.log("[PMRS/Scheduler] 达到 20 轮，触发回顾 + 片段压缩")
       await this.deps.runReflectionAndCompression()
     }
 
     if (newCount % 50 === 0) {
+      if (!isMemoryEnabled()) return;
       try {
         await this.deps.runDecay()
       } catch (err) {

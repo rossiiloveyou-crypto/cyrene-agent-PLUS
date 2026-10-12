@@ -124,3 +124,49 @@ describe("ChatComposer Code sticker policy", () => {
     expect(html).toContain("cy-plan-control");
   });
 });
+
+describe("ChatComposer workspace switch lock", () => {
+  const baseProps = {
+    value: "",
+    docked: true,
+    attachments: [],
+    onChange: vi.fn(),
+    onSubmit: vi.fn(),
+    onChooseWorkspace: vi.fn(),
+    onChooseFiles: vi.fn(),
+    onRemoveAttachment: vi.fn(),
+    onScreenshot: vi.fn(),
+    onChooseSticker: vi.fn(),
+  };
+
+  it("会话开启且已绑定工作区后隐藏切换入口：换工作区 = 新开对话", () => {
+    const html = renderToStaticMarkup(createElement(ChatComposer, {
+      ...baseProps,
+      mode: "code",
+      conversationId: "session-1",
+      workspaceRoot: "E:/proj",
+      workspaceName: "proj",
+    }));
+
+    expect(html).not.toContain('aria-label="选择工作文件夹"');
+  });
+
+  it("开始对话前（无会话）保留工作区选择入口", () => {
+    const html = renderToStaticMarkup(createElement(ChatComposer, {
+      ...baseProps,
+      mode: "code",
+    }));
+
+    expect(html).toContain('aria-label="选择工作文件夹"');
+  });
+
+  it("会话存在但未绑定（绑定失败的补救场景）仍显示选择入口", () => {
+    const html = renderToStaticMarkup(createElement(ChatComposer, {
+      ...baseProps,
+      mode: "code",
+      conversationId: "session-1",
+    }));
+
+    expect(html).toContain('aria-label="选择工作文件夹"');
+  });
+});

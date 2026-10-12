@@ -178,7 +178,7 @@ export function ReasoningControl({ sessionId, modelProfileId, model }: { session
         setOpen(nextOpen);
         if (nextOpen) void refresh();
       }}
-      overlayClassName="cy-reasoning-popover"
+      rootClassName="cy-composer-menu-popover cy-reasoning-popover"
     >
       <button type="button" className="cy-composer__agent-button cy-reasoning-control" disabled={!view || view.disabled}>
         <img className="cy-reasoning-icon" src={thinkingIconUrl} alt="" />

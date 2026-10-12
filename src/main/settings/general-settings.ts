@@ -1,6 +1,6 @@
-import type { UiTheme } from "../../shared/ui-theme";
-import type { UiFont } from "../../shared/ui-font";
+import type { UiThemeChoice } from "../../shared/ui-theme";
 import type { UiIcon } from "../../shared/ui-icon";
+import type { UiLanguage } from "../../shared/ui-language";
 import type { MessageTypography } from "../../shared/message-typography";
 import type {
   DefaultChatMode,
@@ -23,6 +23,11 @@ export interface GeneralSettings {
   plugins: Record<string, boolean>;
   /** Harness 同时执行已明确安全工具的上限；1 表示完全串行。 */
   maxParallelToolCalls: number;
+  /** 子代理系统提示词是否叠加所选黄金裔的人设。 */
+  taskCharacterPersonaEnabled: boolean;
+  /** 子代理固定使用的模型档案与档案内模型；未设置时跟随主 Agent。 */
+  taskModelProfileId?: string;
+  taskModel?: string;
   citaEnabled: boolean;
   citaSemanticEngine: "remote";
   /** Chat 模式的轻量社交上下文；默认关闭，开启后每轮最多多一次异步抽取调用。 */
@@ -54,13 +59,11 @@ export interface GeneralSettings {
   /** 提醒中心音效总开关：关闭后所有 toast 静音，弹窗行为不受影响。 */
   toastSoundEnabled: boolean;
   launchAtLogin: boolean;
-  /** 界面语言：目前支持中文与英文，其余语言待翻译补齐后开放。 */
-  language: "zh-CN" | "en";
-  uiTheme: UiTheme;
-  windowCornerRadius: number;
+  /** 界面语言：已支持中文、英文、日文，其余语言待翻译补齐后开放。 */
+  language: UiLanguage;
+  uiTheme: UiThemeChoice;
   /** @deprecated 旧版透明窗口开关，仅保留用于配置兼容。 */
   uiThemeRadius: boolean;
-  uiFont: UiFont;
   uiIcon: UiIcon;
   /** 昔涟回复正文的排版（字号/行距/字距/字重），只作用于 AI 回复气泡。 */
   messageTypography: MessageTypography;
@@ -151,14 +154,16 @@ export interface GeneralSettings {
   emailSmtpPass: string;
   /** 发件人显示名（可选） */
   emailFromName: string;
-  /** 🎧ASR 服务商：off(关闭) | aliyun(阿里云) | mossland(MOSI) | local(本地,占位) */
-  asrEngine: "off" | "aliyun" | "mossland" | "local";
+  /** 🎧ASR 服务商：off(关闭) | aliyun(阿里云) | mossland(MOSI) | minimax | local(本地,占位) */
+  asrEngine: "off" | "aliyun" | "mossland" | "minimax" | "local";
   /** 阿里云智能语音交互 AppKey */
   asrAliyunAppKey: string;
   /** 阿里云 RAM AccessKey ID */
   asrAliyunAccessKeyId: string;
   /** 阿里云 RAM AccessKey Secret */
   asrAliyunAccessKeySecret: string;
+  /** MiniMax 语音识别 API Key */
+  asrMinimaxKey: string;
   /** ASR 识别语言：zh(中文) | en(英文) | auto(自动) */
   asrLanguage: "zh" | "en" | "auto";
   /** VAD 静默检测阈值（毫秒），500~2000，默认 1000 */

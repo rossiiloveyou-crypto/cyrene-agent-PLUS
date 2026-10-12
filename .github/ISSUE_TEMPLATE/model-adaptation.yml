@@ -1,0 +1,61 @@
+name: 模型适配 / 贡献认领
+description: 新型号支持、能力修正或贡献方向讨论
+title: "[模型适配] 厂商 / 型号"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        有依据的单厂商声明更新可以直接提 PR（合并请求），无需等待认领。先看英文版 [贡献指南](https://github.com/Playa-Cyrene/Cyrene-Agent/blob/master/docs/contributing/model-adaptation.en.md) 和 [适配清单](https://github.com/Playa-Cyrene/Cyrene-Agent/blob/master/docs/references/adapted-models.en.md)。
+        不要提供密钥、授权头、私人对话或带凭证的端点地址。
+  - type: input
+    id: provider-model
+    attributes:
+      label: 厂商与准确型号
+      description: 填接口实际接受的型号名，包含版本或后缀。
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: 实际调用协议
+      options:
+        - openai（聊天补全）
+        - anthropic（消息接口）
+        - responses（响应接口）
+        - 尚未确认
+    validations:
+      required: true
+  - type: dropdown
+    id: endpoint-kind
+    attributes:
+      label: 端点类型
+      options:
+        - 官方标准接口
+        - 官方订阅 / 编码接口
+        - 第三方中转 / 托管
+        - 本地服务
+        - 尚未确认
+    validations:
+      required: true
+  - type: textarea
+    id: capability
+    attributes:
+      label: 希望补充或修正的能力
+      description: 型号候选、推理、采样、结构化输出、工具或视觉；写清现象、期望及端点公开域名。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 依据与未知项
+      description: 官方资料链接，或脱敏的请求/响应、错误、协议、核验日期；没有核验的能力写“未知”。
+    validations:
+      required: true
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: 是否计划提交贡献
+      options:
+        - 愿意提交 PR
+        - 需要协助定位声明或补用例
+        - 暂时只提供资料或问题反馈

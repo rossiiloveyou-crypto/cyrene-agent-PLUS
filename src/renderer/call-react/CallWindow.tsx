@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowLeft, AudioLines, Mic, PhoneOff, Sparkles, X } from "lucide-react";
-import { getCharacterAvatar } from "../react/character-avatars";
+import { useCyreneAvatar } from "../react/hooks/useCyreneAvatar";
 import { useCallSession } from "./useCallSession";
-
-const AVATAR = getCharacterAvatar("昔涟") ?? "";
 
 function formatDuration(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1000);
@@ -28,6 +26,7 @@ function statusLabel(state: string, error: string): string {
 }
 
 export function CallWindow() {
+  const avatar = useCyreneAvatar();
   const { state, messages, elapsed, error, volume, submitTurn, hangup } = useCallSession();
   const [showConversation, setShowConversation] = useState(false);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -91,7 +90,7 @@ export function CallWindow() {
                 <span className="cy-call-window__orbit cy-call-window__orbit--outer" aria-hidden="true" />
                 <span className="cy-call-window__orbit cy-call-window__orbit--inner" aria-hidden="true" />
                 <button type="button" className="cy-call-window__avatar" onClick={() => setShowConversation(true)} aria-label="查看通话对话">
-                  {AVATAR && <img src={AVATAR} alt="昔涟" draggable={false} />}
+                  {avatar && <img src={avatar} alt="昔涟" draggable={false} />}
                 </button>
                 <span className="cy-call-window__sparkle cy-call-window__sparkle--one" aria-hidden="true">✦</span>
                 <span className="cy-call-window__sparkle cy-call-window__sparkle--two" aria-hidden="true">✧</span>

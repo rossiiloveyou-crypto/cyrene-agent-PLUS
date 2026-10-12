@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 
 export interface FloatingCardPosition { x: number; y: number }
 
@@ -13,11 +13,17 @@ export function clampFloatingCardPosition(
   };
 }
 
-export function useFloatingCard(options: { width: number; top?: number; right?: number }) {
-  const { width, top = 80, right = 24 } = options;
+export function useFloatingCard(options: { width: number; top?: number; right?: number; containerRef?: RefObject<HTMLElement | null> }) {
+  const { width, top = 80, right = 24, containerRef } = options;
+  const getViewport = () => {
+    const container = containerRef?.current;
+    return container
+      ? { width: container.clientWidth, height: container.clientHeight }
+      : { width: window.innerWidth, height: window.innerHeight };
+  };
   const [collapsed, setCollapsed] = useState(false);
   const [position, setPosition] = useState<FloatingCardPosition>({
-    x: typeof window !== "undefined" ? window.innerWidth - width - right : 0,
+    x: typeof window !== "undefined" ? getViewport().width - width - right : 0,
     y: top,
   });
   const [isDragging, setIsDragging] = useState(false);
@@ -27,6 +33,19 @@ export function useFloatingCard(options: { width: number; top?: number; right?: 
     initialX: number;
     initialY: number;
   } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!containerRef?.current) return;
+    const container = containerRef.current;
+    const updateBounds = () => {
+      const viewport = getViewport();
+      setPosition((current) => clampFloatingCardPosition(current, { width, minVisibleHeight: 48 }, viewport));
+    };
+    updateBounds();
+    const observer = new ResizeObserver(updateBounds);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [containerRef, width]);
 
   useEffect(() => {
     const handleMove = (event: MouseEvent) => {
@@ -38,10 +57,7 @@ export function useFloatingCard(options: { width: number; top?: number; right?: 
       setPosition(clampFloatingCardPosition({
         x: drag.initialX + dx,
         y: drag.initialY + dy,
-      }, { width, minVisibleHeight: 48 }, {
-        width: window.innerWidth,
-        height: window.innerHeight,
-      }));
+      }, { width, minVisibleHeight: 48 }, getViewport()));
     };
     const handleUp = () => {
       dragRef.current = null;
@@ -53,7 +69,7 @@ export function useFloatingCard(options: { width: number; top?: number; right?: 
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
-  }, [width]);
+  }, [containerRef, width]);
 
   return {
     collapsed,

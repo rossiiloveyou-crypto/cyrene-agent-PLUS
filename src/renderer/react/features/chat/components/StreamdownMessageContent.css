@@ -23,3 +23,77 @@
   color: inherit;
   font: inherit;
 }
+
+/* Ant Design X supplies a light Prism pre background inline; keep the wrapper and
+   code surface on the app theme tokens while leaving Prism's syntax colors intact. */
+.cy-message-code-block pre[class*="language-"] {
+  background: var(--rb-code-bg) !important;
+  color: var(--rb-text-primary) !important;
+}
+
+.cy-message-code-block code[class*="language-"] {
+  background: transparent !important;
+  color: var(--rb-text-primary) !important;
+}
+
+/* CodeHighlighter forwards its custom class to a wrapper. Override the inline
+   Prism surface on the actual pre/code elements inside that wrapper. */
+.cy-message-code-block pre,
+.cy-message-code-block pre[class*="language-"] {
+  background-color: var(--rb-code-bg) !important;
+  color: var(--rb-text-primary) !important;
+}
+
+.cy-message-code-block pre code { background: transparent !important; }
+
+.cy-demo-file-code {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.cy-demo-file-action,
+.cy-demo-file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  white-space: nowrap;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cy-demo-file-code__icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  object-fit: contain;
+  vertical-align: -0.12em;
+}
+
+.cy-demo-file-name__icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  object-fit: contain;
+  vertical-align: -0.12em;
+}
+
+.cy-demo-file-action:hover,
+.cy-demo-file-name:hover {
+  color: var(--cy-color-primary, #ff5b8a);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.cy-demo-file-action:focus-visible,
+.cy-demo-file-name:focus-visible {
+  border-radius: 2px;
+  outline: 2px solid var(--cy-color-primary, #ff5b8a);
+  outline-offset: 2px;
+}

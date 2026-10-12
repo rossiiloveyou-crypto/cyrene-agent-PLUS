@@ -33,32 +33,30 @@
   font: 400 12px/1.35 var(--rb-font-sans, sans-serif);
 }
 
-.cy-plan-popover .ant-popover-inner {
-  border: 1px solid #eeeeee;
-  border-radius: 14px;
-  box-shadow: 0 12px 32px rgba(29, 29, 31, 0.12);
-}
-
 .cy-plan-popover .ant-segmented {
   padding: 3px;
   border-radius: 10px;
-  background: #f7f7f7;
+  background: color-mix(in srgb, var(--rb-text-primary) 5%, var(--rb-surface-elevated));
 }
 
 .cy-plan-popover .ant-segmented-item {
   min-width: 44px;
-  color: #5d5d5d;
+  color: var(--rb-text-secondary, #5d5d5d);
   font: 500 12px/28px var(--rb-font-sans, sans-serif);
 }
 
-.cy-plan-popover .ant-segmented-item-selected {
-  color: #fff;
+/* 与 thinking 强度下拉同一处理：antd v6 的滑块是 .ant-segmented-thumb
+   （v4 时代的 item::after 写法已失效，默认白色块会盖住选中文字） */
+.cy-plan-popover .ant-segmented-thumb {
+  border-radius: 8px;
+  background: rgba(255, 91, 138, 0.22);
+  background: color-mix(in srgb, var(--rb-accent, #FF5B8A) 22%, transparent);
+  box-shadow: none;
 }
 
-.cy-plan-popover .ant-segmented-item-selected::after {
-  border-radius: 8px;
-  background: var(--rb-accent);
-  box-shadow: none;
+.cy-plan-popover .ant-segmented-item-selected {
+  color: var(--rb-accent, #FF5B8A);
+  font-weight: 600;
 }
 
 /* 激活态：按钮文字+图标轻微染色，区别于 thinking 按钮 */

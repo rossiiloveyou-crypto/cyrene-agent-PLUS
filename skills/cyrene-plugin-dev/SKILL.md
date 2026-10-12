@@ -108,7 +108,7 @@ await ctx.dispose();
 
 - 把插件目录压成 zip：`Compress-Archive -Path <plugin-id>/* -DestinationPath <plugin-id>-<version>.zip`
 - zip 限制：≤50 MiB、≤2000 条目、解压总量 ≤200 MiB；不能有符号链接和 `..` 路径
-- 开发期也可以直接把文件复制到 `%APPDATA%\live2d-cyrene\plugins\<plugin-id>\`（与 zip 导入等价）
+- 开发期也可以直接把文件复制到 `%APPDATA%\Cyrene\plugins\<plugin-id>\`（与 zip 导入等价）
 - 安装后**默认停用**，需用户在聊天窗口的“插件”面板中手动启用
 
 ### 6. 安装后实测

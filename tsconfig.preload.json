@@ -1,4 +1,4 @@
-﻿{
+{
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",
@@ -10,6 +10,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    // TS 6.0 起 types 默认为空（不再自动注入 @types/*），Node 类型需显式声明
+    "types": ["node"],
     "declaration": false,
     "sourceMap": true
   },

@@ -8,7 +8,7 @@ import { buildEnvironmentContext } from "./environment";
 
 describe("buildEnvironmentContext timezone", () => {
   it("treats the preferred address and gender as trusted wording constraints", () => {
-    const ctx = buildEnvironmentContext(undefined, {
+    const ctx = buildEnvironmentContext({
       callPreference: "伙伴",
       gender: "male",
     });
@@ -19,7 +19,6 @@ describe("buildEnvironmentContext timezone", () => {
 
   it("uses profile.timezone when valid and includes time label", () => {
     const ctx = buildEnvironmentContext(
-      undefined,
       { timezone: "Asia/Tokyo" },
     );
     // 时间行格式：- 当前时间：YYYY-MM-DD 周X HH:MM（时区 Asia/Tokyo）
@@ -31,19 +30,18 @@ describe("buildEnvironmentContext timezone", () => {
   });
 
   it("falls back to Asia/Shanghai when profile.timezone missing or invalid (never reads system tz)", () => {
-    const ctx1 = buildEnvironmentContext(undefined, undefined);
+    const ctx1 = buildEnvironmentContext();
     expect(ctx1).toMatch(/时区 Asia\/Shanghai/);
 
-    const ctx2 = buildEnvironmentContext(undefined, { timezone: "bad/timezone" });
+    const ctx2 = buildEnvironmentContext({ timezone: "bad/timezone" });
     expect(ctx2).toMatch(/时区 Asia\/Shanghai/);
 
-    const ctx3 = buildEnvironmentContext(undefined, { timezone: "" });
+    const ctx3 = buildEnvironmentContext({ timezone: "" });
     expect(ctx3).toMatch(/时区 Asia\/Shanghai/);
   });
 
   it("emits the timezone-not-location disclaimer", () => {
     const ctx = buildEnvironmentContext(
-      undefined,
       { defaultCity: "上海", timezone: "Asia/Shanghai" },
     );
     expect(ctx).toContain("用户时区仅用于时间计算");
@@ -56,11 +54,9 @@ describe("buildEnvironmentContext timezone", () => {
     // buildEnvironmentContext 用 new Date() 不可控；改为直接验证输出格式契约：
     // 行格式严格匹配 YYYY-MM-DD 周X HH:MM（时区 X），无 locale-dependent 标点
     const ctx = buildEnvironmentContext(
-      undefined,
       { timezone: "Asia/Shanghai" },
     );
     const ctxNyc = buildEnvironmentContext(
-      undefined,
       { timezone: "America/New_York" },
     );
 
@@ -80,8 +76,8 @@ describe("buildEnvironmentContext timezone", () => {
   });
 
   it("survives illegal IANA timezone (resolver returns Asia/Shanghai, no RangeError)", () => {
-    expect(() => buildEnvironmentContext(undefined, { timezone: "Foo/Bar" })).not.toThrow();
-    const ctx = buildEnvironmentContext(undefined, { timezone: "Foo/Bar" });
+    expect(() => buildEnvironmentContext({ timezone: "Foo/Bar" })).not.toThrow();
+    const ctx = buildEnvironmentContext({ timezone: "Foo/Bar" });
     expect(ctx).toMatch(/时区 Asia\/Shanghai/);
   });
 });
@@ -105,21 +101,21 @@ describe("buildEnvironmentContext tool list removal (方案 B)", () => {
   ];
 
   it("does not emit any per-permission tool list lines", () => {
-    const ctx = buildEnvironmentContext(undefined, undefined);
+    const ctx = buildEnvironmentContext();
     expect(ctx).not.toContain("可直接调用的工具");
     expect(ctx).not.toContain("需先弹审批的工具");
     expect(ctx).not.toContain("被拒绝的工具");
   });
 
   it("does not mention any registered tool id in the environment section", () => {
-    const ctx = buildEnvironmentContext(undefined, undefined);
+    const ctx = buildEnvironmentContext();
     for (const toolId of REPRESENTATIVE_TOOL_IDS) {
       expect(ctx).not.toContain(toolId);
     }
   });
 
   it("keeps the permission level line and the generic rule note", () => {
-    const ctx = buildEnvironmentContext(undefined, undefined);
+    const ctx = buildEnvironmentContext();
     // 档位行保留（含 label + level），规则说明保留通用语义
     expect(ctx).toMatch(/- 文件权限档位：.+/);
     expect(ctx).toContain("工具能否调用以本轮提供的工具清单为准");

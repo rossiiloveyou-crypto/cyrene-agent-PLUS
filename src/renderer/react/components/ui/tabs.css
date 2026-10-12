@@ -1,0 +1,26 @@
+[data-slot="tabs-list"] {
+  display: inline-flex;
+  align-items: center;
+}
+
+[data-slot="tabs-trigger"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  outline: none;
+}
+
+[data-slot="tabs-trigger"]:focus-visible {
+  outline: 2px solid var(--rb-accent, #e75d87);
+  outline-offset: 2px;
+}
+
+[data-slot="tabs-content"]:focus-visible {
+  outline: 2px solid var(--rb-accent, #e75d87);
+  outline-offset: 2px;
+}
+
+[data-slot="tabs-content"][data-state="inactive"] {
+  display: none;
+}

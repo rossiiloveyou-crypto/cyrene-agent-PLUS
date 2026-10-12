@@ -9,6 +9,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import crossSpawn from "cross-spawn";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const sdkDir = path.join(repoRoot, "packages", "plugin-sdk");
@@ -18,11 +19,15 @@ function fail(message) {
   process.exit(1);
 }
 
-// npm 的 cli 入口：优先取 npm run 注入的 npm_execpath（跨平台指向真实 npm-cli.js，
-// Linux CI 上 node 与 npm 不在同一目录）；直接跑 node 脚本时回退 Windows 安装器布局。
-// 始终用 node 驱动该 js 入口，避免 Windows 上派生 .cmd 的已知问题
-const npmCli = process.env.npm_execpath
-  ?? path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+// 插件 SDK 会发布到 npm 仓库，因此用已安装的 npm CLI 检查最终 tarball。
+function runNpm(args, options = {}) {
+  const result = crossSpawn.sync("npm", args, { encoding: "utf8", ...options });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`npm ${args.join(" ")} 失败，退出码 ${result.status}`);
+  }
+  return result.stdout ?? "";
+}
 
 // 1. Schema 无漂移
 execFileSync(
@@ -35,15 +40,11 @@ execFileSync(
 const hostApi = await readFile(path.join(repoRoot, "src/plugins/api.ts"), "utf8");
 const vendoredApi = await readFile(path.join(sdkDir, "src/api.ts"), "utf8");
 if (hostApi !== vendoredApi) {
-  fail("packages/plugin-sdk/src/api.ts 与 src/plugins/api.ts 不一致，请运行 npm run build:plugin-sdk");
+  fail("packages/plugin-sdk/src/api.ts 与 src/plugins/api.ts 不一致，请运行 pnpm run build:plugin-sdk");
 }
 
 // 3. npm pack 文件清单
-const packOutput = execFileSync(
-  process.execPath,
-  [npmCli, "pack", "--dry-run"],
-  { cwd: sdkDir, encoding: "utf8" },
-);
+const packOutput = runNpm(["pack", "--dry-run"], { cwd: sdkDir });
 const packedFiles = [...packOutput.matchAll(/^\s+\S*\s+(\S+)$/gm)].map((m) => m[1]).filter((f) => f.includes("/"));
 const allowed = /^(dist\/|package\.json$|README\.md$)/;
 const unexpected = packedFiles.filter((f) => !allowed.test(f.replace(/\\/g, "/")));

@@ -1,18 +1,17 @@
 :root {
-  --bg: #f6f4f5;
-  --bg-elev: #ffffff;
-  --bg-panel: #faf8f9;
-  --border: rgba(0, 0, 0, 0.08);
-  --text: #333335;
-  --text-dim: #77777c;
-  --text-faint: #a8a8ac;
-  --accent: #f06292;
-  --accent-hover: #f48fb1;
-  --accent-deep: #d6336c;
-  --accent-soft: rgba(240, 98, 146, 0.1);
+  --bg: var(--rb-surface-page);
+  --bg-elev: var(--rb-surface-elevated);
+  --bg-panel: var(--rb-surface-workspace);
+  --border: var(--rb-border-default);
+  --text: var(--rb-text-primary);
+  --text-dim: var(--rb-text-secondary);
+  --text-faint: var(--rb-text-disabled);
+  --accent: var(--rb-accent);
+  --accent-hover: var(--rb-accent-hover);
+  --accent-deep: var(--rb-accent-hover);
+  --accent-soft: color-mix(in srgb, var(--rb-accent) 12%, transparent);
   --radius: 10px;
-  --font:
-    "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font: var(--rb-font-sans, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif);
 }
 
 * {
@@ -74,7 +73,7 @@ body {
 }
 
 .win-btn:hover {
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--rb-surface-hover);
   color: var(--text);
 }
 
@@ -192,7 +191,7 @@ body {
 
 .playlist-chip:hover {
   color: var(--accent);
-  border-color: rgba(240, 98, 146, 0.4);
+  border-color: color-mix(in srgb, var(--rb-accent) 38%, var(--rb-border-default));
 }
 
 .playlist-chip.is-active {
@@ -490,7 +489,7 @@ body {
 }
 
 .panel-search:focus-within {
-  border-color: rgba(240, 98, 146, 0.5);
+  border-color: color-mix(in srgb, var(--rb-accent) 45%, var(--rb-border-default));
 }
 
 .panel-search-icon {
@@ -598,7 +597,7 @@ body {
 }
 
 .queue-item:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--rb-surface-hover);
 }
 
 .queue-item.is-active {
@@ -830,7 +829,7 @@ body {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--rb-surface-elevated);
   border: 3px solid var(--accent);
   transform: translateX(-50%) scale(0);
   transition: transform 0.12s;

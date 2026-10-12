@@ -8,6 +8,7 @@ const perfMain = resolve(__dirname, "main.tsx");
 const baselineScript = resolve(projectRoot, "scripts/perf/chat-renderer-baseline.mjs");
 const packageJson = JSON.parse(readFileSync(resolve(projectRoot, "package.json"), "utf8")) as {
   dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
 };
 const spikeFiles = [
   "streamdown-spike.tsx",
@@ -25,10 +26,15 @@ describe("react perf harness cleanup", () => {
     }
   });
 
-  it("declares Streamdown runtime dependencies without the retired renderer", () => {
-    expect(packageJson.dependencies?.streamdown).toBeDefined();
-    expect(packageJson.dependencies?.["@streamdown/math"]).toBeDefined();
-    expect(packageJson.dependencies?.katex).toBeDefined();
+  it("declares Streamdown as a renderer build dependency without the retired renderer", () => {
+    // Vite bundles renderer imports into dist/renderer; Electron only packages
+    // production dependencies for the main process.
+    expect(packageJson.devDependencies?.streamdown).toBeDefined();
+    expect(packageJson.devDependencies?.["@streamdown/math"]).toBeDefined();
+    expect(packageJson.devDependencies?.katex).toBeDefined();
+    expect(packageJson.dependencies?.streamdown).toBeUndefined();
+    expect(packageJson.dependencies?.["@streamdown/math"]).toBeUndefined();
+    expect(packageJson.dependencies?.katex).toBeUndefined();
     expect(packageJson.dependencies?.["@ant-design/x-markdown"]).toBeUndefined();
   });
 });

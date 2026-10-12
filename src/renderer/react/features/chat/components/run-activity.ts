@@ -30,7 +30,10 @@ export function resolveRunActivityExpanded(
   activityId: string,
   activity: RunActivityRecord,
 ): boolean {
-  return expandedById[activityId] ?? (activity.completedAt === undefined || activity.keepExpanded === true);
+  // 运行中默认展开过程，让用户看得到 agent 正在做什么；结算后默认折叠，只在对话里留下最终回复。
+  // 取消/超时/失败以及没产出正式回答的运行用 keepExpanded 保持展开，避免藏掉唯一的执行证据。
+  // 用户手动点过的以用户选择为准。
+  return expandedById[activityId] ?? (activity.keepExpanded === true || activity.completedAt === undefined);
 }
 
 export function shouldAutoCollapseRunActivity(

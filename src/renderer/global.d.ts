@@ -54,6 +54,8 @@ interface ChatWindowApi {
  *  只声明聊天页技能/工具模式面板用到的子集，完整实现见 src/preload/index.ts。 */
 interface SettingsWindowApi {
   onSwitchSection?: (callback: (section: string) => void) => (() => void) | void;
+  /** 请求主进程打开设置页并定位到指定标签（main 回推 onSwitchSection） */
+  openSection?: (section?: string) => Promise<unknown>;
   getSkillCatalog: () => Promise<unknown>;
   getSkillModeOverrides: () => Promise<unknown>;
   /** 重新扫描技能目录；失败返回 ok=false + error */
@@ -72,9 +74,6 @@ interface SettingsWindowApi {
   getPermissionLevel: () => Promise<{ level: string }>;
   setPermissionLevel: (level: string) => Promise<{ ok: boolean; level?: string; error?: string }>;
   openChromeGpu: () => void;
-  pickUiFont: () => Promise<string | null>;
-  importUiFont: (sourcePath: string) => Promise<import("../shared/ui-font").UiFont>;
-  resetUiFont: () => Promise<import("../shared/ui-font").UiFont>;
   openCustomStylePrompt: () => Promise<unknown>;
   channelsGetStatus: () => Promise<unknown>;
   setPetAlwaysOnTop: (value: boolean) => void;
@@ -112,9 +111,11 @@ interface SettingsWindowApi {
   deleteModelProfile: (id: string) => Promise<unknown>;
   setDefaultModelProfile: (id: string) => Promise<unknown>;
   getConfig: () => Promise<{
+    memoryMode?: "vector" | "summary" | "wiki" | "off";
     vision?: { baseUrl: string; apiKey: string; model: string };
     thinkingOverride?: -1 | 0 | 1;
     disableMaxToken?: boolean;
+    modelRequestMaxRetries?: number;
   }>;
   saveConfig: (config: Record<string, unknown>) => Promise<unknown>;
   testConnection: (config: {
@@ -140,12 +141,40 @@ interface SettingsWindowApi {
   saveTimeoutSettings: (config: Partial<import("../shared/timeout-types").TimeoutSettings>) => Promise<import("../shared/timeout-types").TimeoutSettings>;
 }
 
+interface BrowserPanelApi {
+  getState: () => Promise<import("../shared/browser-panel-types").BrowserPanelState | null>;
+  setBounds: (bounds: import("../shared/browser-panel-types").BrowserPanelBounds | null) => Promise<boolean>;
+  navigate: (url: string) => Promise<import("../shared/browser-panel-types").BrowserPanelResult>;
+  goBack: () => Promise<boolean>;
+  goForward: () => Promise<boolean>;
+  reload: () => Promise<boolean>;
+  stop: () => Promise<boolean>;
+  clearCookies: () => Promise<import("../shared/browser-panel-types").BrowserPanelResult>;
+  newTab: () => Promise<boolean>;
+  openInNewTab: (url: string) => Promise<import("../shared/browser-panel-types").BrowserPanelResult>;
+  openExam: (examId: string, conversationId: string) => Promise<boolean>;
+  activateTab: (tabId: string) => Promise<boolean>;
+  closeTab: (tabId: string) => Promise<boolean>;
+  startElementPicker: () => Promise<boolean>;
+  cancelElementPicker: () => Promise<boolean>;
+  onStateChanged: (callback: (state: import("../shared/browser-panel-types").BrowserPanelState) => void) => () => void;
+  onElementSelected: (callback: (element: import("../shared/browser-panel-types").BrowserElementSelection) => void) => () => void;
+  onOpenForControl: (callback: () => void) => () => void;
+}
+
 declare global {
   interface Window {
     cyrene?: {
       quit: () => void;
     };
+    cyreneAvatar?: {
+      get: () => Promise<string | null>;
+      upload: () => Promise<boolean>;
+      reset: () => Promise<void>;
+      onChanged: (callback: () => void) => () => void;
+    };
     system?: SystemApi;
+    news?: import("../shared/news-types").NewsApi;
     review?: ReviewApi;
     workspaceFiles?: WorkspaceFilesApi;
     openInApp?: OpenInAppApi;
@@ -156,7 +185,10 @@ declare global {
     toast?: ToastRendererApi;
     chat?: ChatWindowApi;
     settings?: SettingsWindowApi;
+    browserPanel?: BrowserPanelApi;
+    learnExamPage: import("../../shared/learn-exam").LearnExamPageApi;
     memoryPanel?: import("./settings/shared/types").MemoryPanelApi;
+    knowledgeBase?: import("../shared/knowledge-base-types").KnowledgeBaseApi;
     tts?: {
       loadSettings: () => Promise<Record<string, unknown>>;
       saveSettings: (patch: Record<string, unknown>) => Promise<unknown>;

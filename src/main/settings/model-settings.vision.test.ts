@@ -1,6 +1,6 @@
 // multimodal 旧配置一次性迁移的回归测试：
-// 旧文件（无 schemaVersion）首次 normalize 时执行三层判定并把结果随 schemaVersion: 2 落盘；
-// 已迁移文件（schemaVersion >= 2）不再进迁移分支，multimodal 只认显式字段。
+// 旧文件（无 schemaVersion）首次 normalize 时执行三层判定；
+// 已迁移文件（schemaVersion >= 2）不再进该迁移分支，multimodal 只认显式字段。
 // Anthropic 协议降级场景由 image-router.test.ts 的 resolveCaptionVisionConfig 用例覆盖。
 import { describe, expect, it, vi } from "vitest";
 
@@ -25,11 +25,11 @@ const COMPLETE_VISION: LegacyVision = {
   model: "MiniMax-M3",
 };
 
-describe("normalizeModelSettings 旧配置一次性迁移（schemaVersion 1 → 2）", () => {
-  it("旧配置无 multimodal 字段 + 独立视觉模型齐全 → multimodal 落 false（不静默旁路），并打上 schemaVersion: 2", () => {
+describe("normalizeModelSettings 旧配置一次性迁移（schemaVersion 1 → 5）", () => {
+  it("旧配置无 multimodal 字段 + 独立视觉模型齐全 → multimodal 落 false（不静默旁路），并升级 schema", () => {
     const s = normalizeModelSettings({ ...MINIMAX_BASE, vision: COMPLETE_VISION });
     expect(s.multimodal).toBe(false);
-    expect(s.schemaVersion).toBe(2);
+    expect(s.schemaVersion).toBe(5);
   });
 
   it("旧配置 syncWithMain=true → multimodal 落 true（与主模型同步）", () => {
@@ -38,7 +38,7 @@ describe("normalizeModelSettings 旧配置一次性迁移（schemaVersion 1 → 
       vision: { ...COMPLETE_VISION, syncWithMain: true },
     });
     expect(s.multimodal).toBe(true);
-    expect(s.schemaVersion).toBe(2);
+    expect(s.schemaVersion).toBe(5);
   });
 
   it("旧配置无视觉模型 → multimodal 维持默认 true", () => {
@@ -69,7 +69,7 @@ describe("normalizeModelSettings 旧配置一次性迁移（schemaVersion 1 → 
       vision: { ...COMPLETE_VISION, syncWithMain: true },
     } as Partial<ModelSettings>);
     expect(s.multimodal).toBe(false);
-    expect(s.schemaVersion).toBe(2);
+    expect(s.schemaVersion).toBe(5);
   });
 
   it("schemaVersion: 2 且无 multimodal 字段 → 缺省 true，不被视觉模型配置旁路", () => {

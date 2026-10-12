@@ -33,14 +33,20 @@ export function modelText(message: UiChatMessage): string {
 
 /** UI 附件只保留稳定元数据；previewUrl / status 等瞬态字段不落轨迹。 */
 export function stableAttachments(message: UiChatMessage): PendingChatAttachment[] | undefined {
-  const items = message.attachments?.map(({ kind, name, filePath, ...rest }) => ({
-    kind,
-    name,
-    filePath,
-    ...(kind === "image" && "mime" in rest && rest.mime ? { mime: rest.mime } : {}),
-    ...(kind === "image" && "caption" in rest && rest.caption ? { caption: rest.caption } : {}),
-    ...(kind === "image" && "hasAnnotations" in rest && rest.hasAnnotations ? { hasAnnotations: true } : {}),
-  }));
+  const items = message.attachments?.flatMap((attachment): PendingChatAttachment[] => {
+    if (attachment.kind === "web-element" && "element" in attachment) {
+      return [{ kind: "web-element", name: attachment.name, element: attachment.element }];
+    }
+    if (!attachment.filePath) return [];
+    return [{
+      kind: attachment.kind === "image" ? "image" : "document",
+      name: attachment.name,
+      filePath: attachment.filePath,
+      ...(attachment.kind === "image" && "mime" in attachment && attachment.mime ? { mime: attachment.mime } : {}),
+      ...(attachment.kind === "image" && "caption" in attachment && attachment.caption ? { caption: attachment.caption } : {}),
+      ...(attachment.kind === "image" && "hasAnnotations" in attachment && attachment.hasAnnotations ? { hasAnnotations: true } : {}),
+    }];
+  });
   return items?.length ? items : undefined;
 }
 
@@ -59,7 +65,7 @@ export function buildLegacyBackfillDrafts(
   messages: UiChatMessage[],
   excludedTurnId?: string,
 ): LegacyBackfillDraft[] {
-  const patchKeys: Array<keyof TranscriptPresentationPatch> = [
+  const patchKeys: Array<Exclude<keyof TranscriptPresentationPatch, "delta">> = [
     "content", "reasoning", "reasoningBlocks", "processMessages", "agentRounds",
     "taskDelegations", "channelSource", "sticker", "toolExecutions", "runActivity",
     "runSnapshot", "ttsCacheKey", "ttsCacheVersion", "musicCard", "contextUsage",

@@ -1,0 +1,146 @@
+.cy-news__overlay {
+  position: fixed;
+  z-index: 1450;
+  inset: 0;
+  app-region: no-drag;
+  background: rgb(18 16 22 / 38%);
+  backdrop-filter: blur(3px);
+}
+
+.cy-news {
+  position: fixed;
+  z-index: 1451;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  width: min(560px, calc(100vw - 28px));
+  max-height: min(680px, calc(100vh - 28px));
+  flex-direction: column;
+  overflow: hidden;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--rb-border-elevated, var(--rb-border-default, #ded9de));
+  border-radius: 17px;
+  outline: none;
+  background: var(--rb-surface-workspace, #fff);
+  color: var(--rb-text-primary, #25252a);
+  box-shadow: var(--rb-shadow-elevated, 0 24px 72px rgb(25 22 31 / 22%));
+  app-region: no-drag;
+}
+
+.cy-news__header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 17px 20px;
+  border-bottom: 1px solid var(--rb-border-subtle, #eee9ec);
+}
+
+.cy-news__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font: 600 18px/1.35 var(--rb-font-sans, inherit);
+}
+
+.cy-news__title > svg { color: var(--rb-accent, #ff5b8a); }
+
+.cy-news__description {
+  margin-top: 4px;
+  color: var(--rb-text-secondary, #85858d);
+  font: 400 12px/1.45 var(--rb-font-sans, inherit);
+}
+
+.cy-news__close {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--rb-text-secondary, #85858d);
+  cursor: pointer;
+}
+
+.cy-news__close:hover {
+  background: var(--rb-surface-hover, #f4f1f3);
+  color: var(--rb-text-primary, #25252a);
+}
+
+.cy-news__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 16px 20px 20px;
+}
+
+/* 一条消息一张卡片；未读的在左侧补一条粉色竖条 */
+.cy-news__item {
+  position: relative;
+  padding: 13px 15px;
+  border: 1px solid var(--rb-border-subtle, #eee9ec);
+  border-radius: 12px;
+  background: var(--rb-surface-elevated, #fff);
+}
+
+.cy-news__item[data-unread="true"] {
+  border-color: rgb(255 91 138 / 38%);
+}
+
+.cy-news__item[data-unread="true"]::before {
+  position: absolute;
+  top: 13px;
+  bottom: 13px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--rb-accent, #ff5b8a);
+  content: "";
+}
+
+.cy-news__item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cy-news__item-date {
+  flex: 0 0 auto;
+  color: var(--rb-text-secondary, #85858d);
+  font: 400 11px/1.4 var(--rb-font-sans, inherit);
+}
+
+.cy-news__item-title {
+  margin: 0;
+  font: 600 14px/1.4 var(--rb-font-sans, inherit);
+}
+
+.cy-news__placeholder {
+  margin: 0;
+  padding: 22px 0;
+  color: var(--rb-text-secondary, #85858d);
+  font: 400 13px/1.5 var(--rb-font-sans, inherit);
+  text-align: center;
+}
+
+/* 公告正文：沿用聊天消息的排版密度，只收一下首尾留白 */
+.cy-news__markdown {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.cy-news__markdown > :first-child { margin-top: 0; }
+.cy-news__markdown > :last-child { margin-bottom: 0; }
+
+.cy-news__markdown a {
+  color: var(--rb-accent, #ff5b8a);
+  cursor: pointer;
+}

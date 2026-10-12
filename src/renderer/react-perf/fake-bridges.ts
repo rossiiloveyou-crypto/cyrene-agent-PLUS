@@ -123,6 +123,8 @@ export function installFakeBridges(options: FakeBridgeOptions): FakeBridgeRuntim
 
   const fakeStore: ChatStoreApi = {
     list: async () => [perfSessionMeta(session)],
+    // perf 环境没有任务会话，桩返回 null 即可
+    getTaskSession: async () => null,
     getSidebarOrganization: async () => sidebarOrganization,
     applySidebarOrganization: async (_expectedRevision: number, draft: SidebarOrganizationDraft) => {
       sidebarOrganization = { version: 1, revision: sidebarOrganization.revision + 1, ...draft };
@@ -193,6 +195,7 @@ export function installFakeBridges(options: FakeBridgeOptions): FakeBridgeRuntim
     listRecentProjects: async () => [],
     validateWorkspacePath: async () => ({ ok: true }),
     setWorkspace: async () => ({ ok: true }),
+    onCompactionPhase: () => () => {},
     initLearnWorkspace: async () => ({ ok: true }),
     openWorkspace: async () => ({ ok: true }),
     shellFile: async () => ({ ok: true }),

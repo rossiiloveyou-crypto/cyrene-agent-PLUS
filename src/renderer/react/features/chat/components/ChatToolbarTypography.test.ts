@@ -35,7 +35,7 @@ describe("chat toolbar typography", () => {
     const markdownStyle = getComputedStyle(markdown);
     expect(toolbarStyle.fontSize).toBe("13px");
     expect(toolbarStyle.fontWeight).toBe("500");
-    expect(toolbarStyle.color).toBe("rgb(13, 13, 13)");
+    expect(toolbarStyle.color).toBe("var(--rb-text-primary)");
     // jsdom 不解析 CSS 变量，getComputedStyle 返回原始声明；
     // 断言变量写法本身即验证「默认 15px 且可被设置页覆盖」的机制
     expect(markdownStyle.fontSize).toBe("var(--cy-msg-size, 15px)");

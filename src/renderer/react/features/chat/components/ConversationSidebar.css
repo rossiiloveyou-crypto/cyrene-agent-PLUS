@@ -265,6 +265,7 @@
 
 .cy-session-label__title {
   min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -274,6 +275,43 @@
   flex: none;
   color: var(--rb-accent, #ff5b8a);
   font-size: 10px;
+  opacity: 0.85;
+}
+
+/* 会话行右侧的最近聊天时间：固定宽度不参与收缩，标题自动让位出省略号 */
+.cy-session-time {
+  flex: none;
+  color: var(--rb-text-secondary, #8e8e93);
+  font-size: 10.5px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* 未读圆点：非当前查看的会话收到新消息时显示在标题前，切换进入后消失 */
+.cy-session-unread-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--rb-radius-full, 9999px);
+  background: var(--rb-accent, #ff5b8a);
+}
+
+/* 时间悬停气泡：与输入框下方下拉菜单（cy-composer-menu-popover）同款浮层配色——
+   浅色白底灰描边黑字，深色灰底白字偏白灰描边；去掉默认投影，改用卡片阴影 */
+.cy-session-time-tip.ant-tooltip {
+  --ant-tooltip-overlay-color: var(--rb-text-primary);
+  filter: none;
+}
+
+.cy-session-time-tip .ant-tooltip-container {
+  background: var(--rb-surface-elevated);
+  border: 1px solid var(--rb-border-elevated);
+  border-radius: 10px;
+  box-shadow: var(--rb-shadow-elevated);
+}
+
+.cy-session-time-tooltip__hint {
+  margin-top: 2px;
   opacity: 0.85;
 }
 
@@ -292,17 +330,14 @@
   background: #ddd;
 }
 
-.cy-project-popover .ant-popover-inner {
+/* 项目信息卡是满幅卡片（头尾需要贴边），所以外壳只负责底色/描边/圆角/阴影，
+   内边距清零并裁掉溢出，圆角由外壳统一提供 */
+.cy-project-popover.ant-popover {
   width: 310px;
-  padding: 0;
   overflow: hidden;
-  border: 1px solid rgb(43 34 37 / 8%);
-  border-radius: 14px;
-  background: #fff;
-  box-shadow: 0 14px 38px rgb(65 45 52 / 15%);
 }
 
-.cy-project-popover .ant-popover-inner-content {
+.cy-project-popover .ant-popover-container {
   padding: 0;
 }
 
@@ -347,14 +382,14 @@
 }
 
 .cy-project-card__details dt {
-  color: #999196;
+  color: var(--rb-text-secondary);
 }
 
 .cy-project-card__details dd {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
-  color: #4b4548;
+  color: var(--rb-text-primary);
 }
 
 .cy-project-card__open {
@@ -364,21 +399,21 @@
   gap: 8px;
   padding: 11px 15px 12px;
   border: 0;
-  border-top: 1px solid #f0edef;
-  background: #fff;
-  color: #514a4e;
+  border-top: 1px solid var(--rb-border-subtle);
+  background: transparent;
+  color: var(--rb-text-primary);
   cursor: pointer;
   font: 600 12px/1.2 var(--rb-font-sans, sans-serif);
   text-align: left;
 }
 
 .cy-project-card__open:hover {
-  background: #fff6f8;
+  background: var(--rb-surface-hover);
   color: var(--rb-accent, #ff5b8a);
 }
 
 .cy-project-card__open:disabled {
-  color: #bbb5b8;
+  color: var(--rb-text-disabled);
   cursor: default;
 }
 

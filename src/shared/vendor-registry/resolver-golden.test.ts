@@ -7,6 +7,16 @@ import { resolveReasoningCapability } from "../reasoning";
 import { UNKNOWN_REASONING_CAPABILITY } from "./fallback";
 
 describe("resolveReasoningCapability — 行为基准", () => {
+  test.each(["other-thinking", "not-qwen3-thinking", "qwenish-thinking"])("外来型号 %s 不按后缀推断为通义千问", (model) => {
+    expect(resolveReasoningCapability("unknown-provider", model)).toBe(UNKNOWN_REASONING_CAPABILITY);
+  });
+
+  test("真实千问家族仍可跨厂商推断；厂商内后缀规则优先", () => {
+    expect(resolveReasoningCapability("unknown-provider", "qwen3-thinking").control).toBe("fixed-on");
+    expect(resolveReasoningCapability("unknown-provider", "qwen-plus-thinking").control).toBe("fixed-on");
+    expect(resolveReasoningCapability("qwen", "custom-thinking").control).toBe("fixed-on");
+  });
+
   test("同厂商精确命中：glm + glm-5.3 → 强制思考 + autoEffort=high", () => {
     const cap = resolveReasoningCapability("glm", "glm-5.3");
     expect(cap.control).toBe("toggle-effort");

@@ -40,6 +40,13 @@ describe("general window state persistence setting", () => {
   });
 });
 
+describe("general theme choice persistence", () => {
+  it("keeps the system choice while preserving the legacy light default", () => {
+    expect(normalizeGeneralSettings({}).uiTheme).toBe("pearl-white");
+    expect(normalizeGeneralSettings({ uiTheme: "system" }).uiTheme).toBe("system");
+  });
+});
+
 describe("general LSP settings", () => {
   it("keeps valid user server overrides and safely drops malformed settings", () => {
     const settings = normalizeGeneralSettings({
@@ -67,7 +74,7 @@ describe("general Harness tool concurrency settings", () => {
   it("defaults to four and normalizes the configured safe range", () => {
     expect(normalizeGeneralSettings({}).maxParallelToolCalls).toBe(4);
     expect(normalizeGeneralSettings({ maxParallelToolCalls: 0 } as never).maxParallelToolCalls).toBe(1);
-    expect(normalizeGeneralSettings({ maxParallelToolCalls: 99 } as never).maxParallelToolCalls).toBe(8);
+    expect(normalizeGeneralSettings({ maxParallelToolCalls: 99 } as never).maxParallelToolCalls).toBe(12);
     expect(normalizeGeneralSettings({ maxParallelToolCalls: 3.8 } as never).maxParallelToolCalls).toBe(3);
     expect(normalizeGeneralSettings({ maxParallelToolCalls: "invalid" } as never).maxParallelToolCalls).toBe(4);
   });
@@ -228,17 +235,22 @@ describe("general interface language settings", () => {
     expect(normalizeGeneralSettings({ language: "en" } as never).language).toBe("en");
   });
 
+  it("keeps an explicit Japanese choice", () => {
+    expect(normalizeGeneralSettings({ language: "ja-JP" } as never).language).toBe("ja-JP");
+  });
+
   it("falls back to Chinese for languages that are not translated yet", () => {
     expect(normalizeGeneralSettings({ language: "ja" } as never).language).toBe("zh-CN");
+    expect(normalizeGeneralSettings({ language: "ko" } as never).language).toBe("zh-CN");
     expect(normalizeGeneralSettings({ language: "" } as never).language).toBe("zh-CN");
   });
 
-  it("keeps the English choice across a simulated restart", async () => {
+  it.each(["en", "ja-JP"] as const)("keeps the %s choice across a simulated restart", async (language) => {
     const first = await import("./settings-facade");
-    first.saveGeneralSettings({ language: "en" });
+    first.saveGeneralSettings({ language });
 
     vi.resetModules();
     const reloaded = await import("./settings-facade");
-    expect(reloaded.loadGeneralSettings().language).toBe("en");
+    expect(reloaded.loadGeneralSettings().language).toBe(language);
   });
 });

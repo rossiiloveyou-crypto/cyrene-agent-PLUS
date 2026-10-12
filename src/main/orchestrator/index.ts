@@ -9,6 +9,7 @@ import { buildGroupContextBlock } from "../channels/history-log";
 import type { ChannelTraceContext } from "./build-options";
 import { toolRegistry } from "./tools/registry/tool-registry";
 import { resolveScopeId, rootScope, shouldInjectOwnerProfile, type MemoryScopeId } from "../zones/scope";
+import { isMemoryEnabled } from "../memory/memory-mode";
 
 /** 群近期上下文取多少条。够覆盖"上一条问句 → 本条引用"的来回，又不至于喧宾夺主。 */
 const DEFAULT_GROUP_CONTEXT_LIMIT = 10;
@@ -24,7 +25,7 @@ export { buildToneInjection } from "./tone-injector";
 // topicState TTL 已移除——由 DMAE Activation 状态机接管（见 rag/worldbook.ts）
 
 /**
- * 构建相关记忆注入：返回经 V5 DMAE 排序后的 active L2 记忆，以及导入文档/实体关系。
+ * 构建相关记忆注入：返回经 V5 DMAE 排序后的 active L2 记忆，以及实体关系。
  * L2 DMAE 状态更新由调用方（call-prompt-builder.ts）在调用本函数前完成。
  *
  * @param scopeId 本轮所属记忆域；缺省视为 root（语音通话与主动聊天都是 owner 域）。
@@ -33,6 +34,7 @@ export async function buildMemoryInjection(
   userInput: string,
   scopeId?: MemoryScopeId,
 ): Promise<string> {
+  if (!isMemoryEnabled()) return "";
   const scope = scopeId ?? rootScope();
   const parts: string[] = [];
 
@@ -161,48 +163,52 @@ export async function buildAlwaysOnContext(
     }
   }
 
-  // ── L0/L1 画像 — 仅 owner 域 ─────────────────────────
-  // 默认值是"注入"，但对未归区的外部会话（尤其群）必须关掉：
-  // L0/L1 是用户本人的画像，不能出现在陌生群里。
-  const scopeId = resolveScopeId(trace?.sessionId);
-  let injectProfile = true;
-  try {
-    injectProfile = shouldInjectOwnerProfile(scopeId);
-  } catch (err) {
-    console.warn("[Orchestrator] scope resolve failed:", err);
-  }
-
-  if (injectProfile) {
+  // ── L0/L1 画像 — 仅 owner 域，且记忆模式开启时 ────────
+  // 两道门都必须留：官方管"开不开记忆"（isMemoryEnabled），
+  // 我方管"给谁看画像"（限域）。默认值是"注入"，
+  // 但对未归区的外部会话（尤其群）必须关掉：L0/L1 是用户本人的画像，
+  // 不能出现在陌生群里。
+  if (isMemoryEnabled()) {
+    const scopeId = resolveScopeId(trace?.sessionId);
+    let injectProfile = true;
     try {
-      const l0 = await memoryStore.getL0();
-      const l1 = await memoryStore.getL1();
-
-      const l0Lines = [
-        l0.preferredName && `称呼：${l0.preferredName}`,
-        l0.occupation && `职业：${l0.occupation}`,
-        l0.longTermInterests && `长期兴趣：${l0.longTermInterests}`,
-        l0.language && `常用语言：${l0.language}`,
-        l0.permanentNote && `备注：${l0.permanentNote}`,
-      ].filter(Boolean);
-
-      const l1Lines = [
-        l1.recentGoals && `最近目标：${l1.recentGoals}`,
-        l1.recentPreferences && `近期偏好：${l1.recentPreferences}`,
-        l1.currentProject && `当前项目：${l1.currentProject}`,
-      ].filter(Boolean);
-
-      if (l0Lines.length > 0 || l1Lines.length > 0) {
-        let memoryContext = "";
-        if (l0Lines.length > 0) {
-          memoryContext += `[用户画像]\n${l0Lines.join("\n")}\n\n`;
-        }
-        if (l1Lines.length > 0) {
-          memoryContext += `[近期状态]\n${l1Lines.join("\n")}\n\n`;
-        }
-        parts.push(memoryContext.trim());
-      }
+      injectProfile = shouldInjectOwnerProfile(scopeId);
     } catch (err) {
-      console.warn("[Orchestrator] memory load failed:", err);
+      console.warn("[Orchestrator] scope resolve failed:", err);
+    }
+
+    if (injectProfile) {
+      try {
+        const l0 = await memoryStore.getL0();
+        const l1 = await memoryStore.getL1();
+
+        const l0Lines = [
+          l0.preferredName && `称呼：${l0.preferredName}`,
+          l0.occupation && `职业：${l0.occupation}`,
+          l0.longTermInterests && `长期兴趣：${l0.longTermInterests}`,
+          l0.language && `常用语言：${l0.language}`,
+          l0.permanentNote && `备注：${l0.permanentNote}`,
+        ].filter(Boolean);
+
+        const l1Lines = [
+          l1.recentGoals && `最近目标：${l1.recentGoals}`,
+          l1.recentPreferences && `近期偏好：${l1.recentPreferences}`,
+          l1.currentProject && `当前项目：${l1.currentProject}`,
+        ].filter(Boolean);
+
+        if (l0Lines.length > 0 || l1Lines.length > 0) {
+          let memoryContext = "";
+          if (l0Lines.length > 0) {
+            memoryContext += `[用户画像]\n${l0Lines.join("\n")}\n\n`;
+          }
+          if (l1Lines.length > 0) {
+            memoryContext += `[近期状态]\n${l1Lines.join("\n")}\n\n`;
+          }
+          parts.push(memoryContext.trim());
+        }
+      } catch (err) {
+        console.warn("[Orchestrator] memory load failed:", err);
+      }
     }
   }
 

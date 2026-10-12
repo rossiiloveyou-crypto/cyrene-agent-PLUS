@@ -6,16 +6,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import crossSpawn from "cross-spawn";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const sdkDir = path.join(repoRoot, "packages", "plugin-sdk");
 const examplesDir = path.join(repoRoot, "examples");
 const exampleIds = ["weather-tool", "long-term-memory", "scheduled-automation", "local-asr-contract"];
 
-// npm 的 cli 入口：优先取 npm run 注入的 npm_execpath（跨平台指向真实 npm-cli.js，
-// Linux CI 上 node 与 npm 不在同一目录）；直接跑 node 脚本时回退 Windows 安装器布局
-const npmCli = process.env.npm_execpath
-  ?? path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 const tscJs = path.join(repoRoot, "node_modules", "typescript", "bin", "tsc");
 
 function fail(message) {
@@ -27,12 +24,19 @@ function run(cmd, args, opts = {}) {
   execFileSync(cmd, args, { stdio: "inherit", ...opts });
 }
 
+// 示例项目验证的是已发布到 npm 的 SDK，因此这里用 npm 安装打包产物。
+function runNpm(args, opts = {}) {
+  const result = crossSpawn.sync("npm", args, { encoding: "utf8", ...opts });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`npm ${args.join(" ")} 失败，退出码 ${result.status}`);
+  }
+  return result.stdout ?? "";
+}
+
 // 1. 构建 SDK 并打包（保证 tarball 来自当前源码）
 run(process.execPath, [path.join(repoRoot, "scripts/plugin-sdk/build-sdk.mjs")]);
-const packOutput = execFileSync(process.execPath, [npmCli, "pack"], {
-  cwd: sdkDir,
-  encoding: "utf8",
-});
+const packOutput = runNpm(["pack"], { cwd: sdkDir });
 const tarballName = packOutput.trim().split("\n").at(-1)?.trim();
 if (!tarballName?.endsWith(".tgz")) fail("npm pack 未返回 tarball 文件名");
 const tarball = path.join(sdkDir, tarballName);
@@ -46,8 +50,9 @@ try {
   }, null, 2));
 
   // 3. 安装打包后的 SDK（ ajv 由 npm 从 registry/缓存解析）
-  run(process.execPath, [npmCli, "install", "--no-save", "--no-audit", "--no-fund", tarball], {
+  runNpm(["install", "--no-save", "--no-audit", "--no-fund", tarball], {
     cwd: projectDir,
+    stdio: "inherit",
   });
 
   // 4. 复制示例源码（manifest、tsconfig、index.ts）

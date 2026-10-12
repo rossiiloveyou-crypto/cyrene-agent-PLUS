@@ -27,7 +27,7 @@ const {
 const runCount = Math.max(1, Number(process.argv[2] || 10));
 const modelOverride = String(process.argv[3] || "").trim();
 const delayBetweenRunsMs = Math.max(0, Number(process.argv[4] || 0));
-const settingsPath = path.join(process.env.APPDATA, "live2d-cyrene", "model-settings.json");
+const settingsPath = path.join(process.env.APPDATA, "Cyrene", "model-settings.json");
 const savedSettings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
 if (!savedSettings.apiKey) throw new Error("LOCAL_API_KEY_MISSING");
 const config = {

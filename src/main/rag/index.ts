@@ -9,23 +9,88 @@ import { HybridRetriever } from "./retriever";
 import { WorldbookManager } from "./worldbook";
 import { logger, LogTag } from "../logger";
 export { INJECTION_HEADER, INJECTION_PREAMBLE } from "./worldbook-constants";
-import { chunkText } from "./chunk";
 import { feedEntityNamesToJieba } from "../memory/entity-graph";
 import { isL2LocallyRecallable } from "../memory/memory-types";
-import type { DocumentImportControl } from "./file-ingest";
 import { findPromptPath } from "../external-content-paths";
 import type { MemoryScopeId } from "../zones/types";
+import { isMemoryEnabled } from "../memory/memory-mode";
+// ── 附件文档链（M2 / J-04：官方 v1.3.0 删除了这套导入索引，我方保留）──
+import { chunkText } from "./chunk";
+import type { DocumentImportControl } from "./file-ingest";
 
 // ── Global RAG instances ──
 let store: JsonVectorStore | null = null;
 let retriever: HybridRetriever | null = null;
 let worldbook: WorldbookManager | null = null;
 let provider: EmbeddingProvider | null = null;
+let activeVectorOperations = 0;
+const vectorOperationsDrained = new Set<() => void>();
 // 每轮对话递增，用于 DMAE repeatWindow 统计（worldbook 状态不持久化，重启回 0 可接受）
 let worldbookTurnCounter = 0;
 
 function getDataDir(): string {
   return path.join(app.getPath("userData"), "rag-data");
+}
+
+function stripImportedDocumentEntries(filePath: string): number {
+  if (!fs.existsSync(filePath)) return 0;
+  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+  if (!Array.isArray(parsed)) return 0;
+  const filtered = parsed.filter((entry) =>
+    !entry || typeof entry !== "object" || (entry as { source?: unknown }).source !== "imported_doc",
+  );
+  const deleted = parsed.length - filtered.length;
+  if (deleted === 0) return 0;
+  const temporaryPath = `${filePath}.cleanup`;
+  fs.writeFileSync(temporaryPath, JSON.stringify(filtered, null, 2), "utf8");
+  fs.renameSync(temporaryPath, filePath);
+  return deleted;
+}
+
+async function removeImportedDocumentData(dataDir: string): Promise<number> {
+  let removed = 0;
+
+  for (const filePath of [
+    path.join(dataDir, "memory-store.json"),
+    path.join(dataDir, "memory-store.json.tmp"),
+  ]) {
+    try {
+      removed += stripImportedDocumentEntries(filePath);
+    } catch (error) {
+      logger.warn(LogTag.RAG, "failed to remove imported document vectors from pending store:", filePath, error);
+    }
+  }
+
+  for (const filePath of [
+    path.join(dataDir, "memory-store.json.tmp.cleanup"),
+    path.join(dataDir, "document-cache.json"),
+    path.join(dataDir, "document-cache.json.tmp"),
+  ]) {
+    try {
+      fs.rmSync(filePath, { force: true });
+    } catch (error) {
+      logger.warn(LogTag.RAG, "failed to remove imported document cache:", filePath, error);
+    }
+  }
+
+  const backupDir = path.join(path.dirname(dataDir), "memory-reconcile-backups");
+  try {
+    for (const name of fs.readdirSync(backupDir)) {
+      if (!name.startsWith("memory-store.") || !name.endsWith(".json")) continue;
+      const filePath = path.join(backupDir, name);
+      try {
+        removed += stripImportedDocumentEntries(filePath);
+      } catch (error) {
+        logger.warn(LogTag.RAG, "failed to remove imported document vectors from backup:", filePath, error);
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(LogTag.RAG, "failed to scan memory reconciliation backups:", error);
+    }
+  }
+
+  return removed;
 }
 
 // ── Init ──
@@ -36,13 +101,59 @@ export async function initRAG(
   embeddingModel?: string,
   cloudDimensions?: number,
 ): Promise<void> {
+  if (isMemoryEnabled()) {
+    await initVectorMemory(ragMode, cloudBaseUrl, cloudApiKey, embeddingModel, cloudDimensions);
+  }
+  await initWorldbook();
+}
+
+async function trackVectorOperation<T>(operation: () => Promise<T>): Promise<T> {
+  activeVectorOperations++;
+  try {
+    return await operation();
+  } finally {
+    activeVectorOperations--;
+    if (activeVectorOperations === 0) {
+      for (const resolve of vectorOperationsDrained) resolve();
+      vectorOperationsDrained.clear();
+    }
+  }
+}
+
+async function waitForVectorOperations(): Promise<void> {
+  if (activeVectorOperations === 0) return;
+  await new Promise<void>((resolve) => { vectorOperationsDrained.add(resolve); });
+}
+
+export async function initVectorMemory(
+  ragMode: "auto" | "local" | "cloud" = "auto",
+  cloudBaseUrl?: string,
+  cloudApiKey?: string,
+  embeddingModel?: string,
+  cloudDimensions?: number,
+): Promise<void> {
   const dataDir = getDataDir();
   provider = getEmbeddingProvider(ragMode, cloudBaseUrl, cloudApiKey, embeddingModel, cloudDimensions);
+  const removedImportedDocumentVectors = await removeImportedDocumentData(dataDir);
   store = new JsonVectorStore(dataDir);
+  if (removedImportedDocumentVectors > 0) {
+    logger.info(LogTag.RAG, `removed ${removedImportedDocumentVectors} imported document vectors`);
+  }
   // 只有 provider 存在时才创建 retriever（向量检索依赖 embedding）
   if (provider) {
     retriever = new HybridRetriever(store, provider);
   }
+  logger.info(
+    LogTag.RAG,
+    "vector memory initialized. Mode:", ragMode,
+    "Provider:", provider?.name ?? "none",
+    "Dims:", provider?.dims ?? "N/A",
+    "Memories:", store.stats.total,
+    provider ? "" : " [Vector retrieval disabled]"
+  );
+}
+
+export async function initWorldbook(): Promise<void> {
   worldbook = new WorldbookManager(
     findPromptPath("worldbook") ?? path.join(app.getPath("userData"), "empty-worldbook"),
     { stateFile: path.join(app.getPath("userData"), "worldbook-state.json") }
@@ -52,15 +163,17 @@ export async function initRAG(
   // 把实体图谱中的已有实体名灌入 jieba 自定义词典
   // 防止 "昔涟"、"小鹿" 等 AI 伴侣核心名词被错误切分
   await feedEntityNamesToJieba();
+  logger.info(LogTag.RAG, "worldbook initialized");
+}
 
-  logger.info(
-    LogTag.RAG,
-    "initialized. Mode:", ragMode,
-    "Provider:", provider?.name ?? "none",
-    "Dims:", provider?.dims ?? "N/A",
-    "Memories:", store.stats.total,
-    provider ? "" : " [Vector retrieval disabled]"
-  );
+/** 关闭向量记忆并释放当前进程持有的索引和嵌入模型引用；不删除磁盘数据。 */
+export async function disposeVectorMemory(): Promise<void> {
+  await waitForVectorOperations();
+  await store?.flush();
+  store = null;
+  retriever = null;
+  provider = null;
+  resetEmbeddingProvider();
 }
 
 /** 受控退出（before-quit 链路）时调用：把防抖中的记忆数据刷盘。 */
@@ -75,6 +188,7 @@ export function flushRAGStoreSync(): void {
 
 // ── Switch embedding model (hot-swap) ──
 export async function switchEmbeddingModel(modelKey: string): Promise<{ ok: boolean; clearedEntries: number; error?: string }> {
+  if (!isMemoryEnabled()) return { ok: false, clearedEntries: 0, error: "记忆模式已关闭" };
   try {
     // Switch the embedding pipeline first
     switchModel(modelKey);
@@ -160,9 +274,14 @@ export async function addMemory(
   source = "user_memory",
   metadata?: Record<string, unknown>
 ): Promise<string> {
+  if (!isMemoryEnabled()) throw new Error("记忆模式已关闭");
   if (!store || !provider) throw new Error("RAG not initialized");
-  const entry = await store.add(text, source, provider, metadata);
-  return entry.id;
+  const currentStore = store;
+  const currentProvider = provider;
+  return trackVectorOperation(async () => {
+    const entry = await currentStore.add(text, source, currentProvider, metadata);
+    return entry.id;
+  });
 }
 
 export async function addL2MemoryVector(
@@ -171,14 +290,19 @@ export async function addL2MemoryVector(
   metadata?: Record<string, unknown>,
   scopeId?: MemoryScopeId,
 ): Promise<string> {
+  if (!isMemoryEnabled()) throw new Error("记忆模式已关闭");
   if (!store || !provider) throw new Error("RAG not initialized");
   if (!l2Id.trim()) throw new Error("l2Id is required");
-  const entry = await store.addUnique(text, "user_memory", provider, {
-    ...metadata,
-    l2Id,
-    ...(scopeId ? { scope: scopeId } : {}),
+  const currentStore = store;
+  const currentProvider = provider;
+  return trackVectorOperation(async () => {
+    const entry = await currentStore.addUnique(text, "user_memory", currentProvider, {
+      ...metadata,
+      l2Id,
+      ...(scopeId ? { scope: scopeId } : {}),
+    });
+    return entry.id;
   });
-  return entry.id;
 }
 
 // ── Memory search ──
@@ -197,6 +321,16 @@ export async function searchMemoryEntries(
   source?: string,
   topK = 5,
   options?: { recordRecall?: boolean; scopeId?: MemoryScopeId }
+): Promise<Array<{ id: string; text: string; createdAt: number; score: number; metadata?: Record<string, unknown> }>> {
+  if (!isMemoryEnabled()) return [];
+  return trackVectorOperation(() => searchMemoryEntriesEnabled(query, source, topK, options));
+}
+
+async function searchMemoryEntriesEnabled(
+  query: string,
+  source?: string,
+  topK = 5,
+  options?: { recordRecall?: boolean; scopeId?: MemoryScopeId },
 ): Promise<Array<{ id: string; text: string; createdAt: number; score: number; metadata?: Record<string, unknown> }>> {
   if (!retriever) return [];
   const scopeId = options?.scopeId;
@@ -258,76 +392,7 @@ async function recordUserMemoryRecalls(results: Array<{ entry: MemoryEntry }>): 
   }
 }
 
-// ── History search with metadata（供 recall_history 工具用）──
-// 跟 searchMemory 的区别：返回完整 entry（含 createdAt / metadata），
-// 让召回工具能按时间排序、展示时间戳。
-export async function searchHistoryEntries(
-  query: string,
-  topK = 5,
-  scopeId?: MemoryScopeId
-): Promise<Array<{ text: string; createdAt: number; score: number; metadata?: Record<string, unknown> }>> {
-  if (!retriever) return [];
-  let allowedEntryIds: string[] | undefined;
-  if (scopeId !== undefined) {
-    allowedEntryIds = getEntriesBySource("chat_history")
-      .filter((entry) => entry.metadata?.scope === scopeId)
-      .map((entry) => entry.id);
-  }
-  const results = await retriever.retrieve(query, "chat_history", topK, { allowedEntryIds });
-  return results.map((r) => ({
-    text: r.entry.text,
-    createdAt: r.entry.createdAt,
-    score: r.score,
-    metadata: r.entry.metadata,
-  }));
-}
-
-// ── Worldbook DMAE：每轮打分（本轮用户输入 + 上轮模型回复）──
-export function updateWorldbookActivation(userText: string, modelText: string, turn?: number): void {
-  if (!worldbook) return;
-  const t = turn ?? ++worldbookTurnCounter;
-  worldbook.updateActivation(userText, modelText, t);
-}
-
-// ── Worldbook DMAE：取 Active 条目内容（阈值门控 + 注入）──
-export function getActiveWorldbookEntries(): string[] {
-  if (!worldbook) return [];
-  return worldbook.getActiveEntries();
-}
-
-// ── Worldbook One-Shot：取本轮 cascade 触发的条目（不入 DMAE 状态表）──
-// 返回带条目标题的完整内容（与 getActiveWorldbookEntries 一致格式，便于合并注入）
-export function getCascadeWorldbookEntries(): string[] {
-  if (!worldbook) return [];
-  return worldbook.getCascadeEntries().map(e => {
-    const title = e.id.replace(/^wb_[^_]+_/, "").replace(/_/g, " ");
-    return `【${title}】\n${e.content}`;
-  });
-}
-
-// ── Get permanent worldbook entries ──
-export function getPermanentWorldbookEntries(): string[] {
-  if (!worldbook) return [];
-  return worldbook.getPermanentEntries();
-}
-
-// ── Worldbook 关键词直查：后台轻量调用（Moments 反应/发帖等）用，不经 DMAE 状态机 ──
-// 文本命中任一触发词即注入该条目，调用方自行决定合并常驻条目。
-export function getKeywordMatchedWorldbookEntries(text: string): string[] {
-  if (!worldbook) return [];
-  const t = text ?? "";
-  if (!t.trim()) return [];
-  return worldbook.getEntries()
-    .filter((e) => e.enabled && !e.permanent && e.keywords.length > 0)
-    .filter((e) => e.keywords.some((kw) => t.includes(kw)))
-    .sort((a, b) => b.priority - a.priority)
-    .map((e) => {
-      const title = e.id.replace(/^wb_[^_]+_/, "").replace(/_/g, " ");
-      return `【${title}】\n${e.content}`;
-    });
-}
-
-// ── Import document ──
+// ── 附件文档链：导入 / 追加 / 检索（M2 / J-04 保留；官方 v1.3.0 已删除）──
 export type ImportedDocumentResult = {
   importId: string;
   chunkCount: number;
@@ -425,6 +490,80 @@ export async function searchImportedDocumentChunksForImportIds(
   }));
 }
 
+// ── History search with metadata（供 recall_history 工具用）──
+// 跟 searchMemory 的区别：返回完整 entry（含 createdAt / metadata），
+// 让召回工具能按时间排序、展示时间戳。
+export async function searchHistoryEntries(
+  query: string,
+  topK = 5,
+  scopeId?: MemoryScopeId
+): Promise<Array<{ text: string; createdAt: number; score: number; metadata?: Record<string, unknown> }>> {
+  if (!isMemoryEnabled()) return [];
+  // 限域的 id 白名单只读索引、不是向量操作 ⇒ 必须在 trackVectorOperation 之外计算，
+  // 否则会被算成一次向量操作（影响 drain 判定）。
+  let allowedEntryIds: string[] | undefined;
+  if (scopeId !== undefined) {
+    allowedEntryIds = getEntriesBySource("chat_history")
+      .filter((entry) => entry.metadata?.scope === scopeId)
+      .map((entry) => entry.id);
+  }
+  return trackVectorOperation(async () => {
+    if (!retriever) return [];
+    const results = await retriever.retrieve(query, "chat_history", topK, { allowedEntryIds });
+    return results.map((r) => ({
+      text: r.entry.text,
+      createdAt: r.entry.createdAt,
+      score: r.score,
+      metadata: r.entry.metadata,
+    }));
+  });
+}
+
+// ── Worldbook DMAE：每轮打分（本轮用户输入 + 上轮模型回复）──
+export function updateWorldbookActivation(userText: string, modelText: string, turn?: number): void {
+  if (!worldbook) return;
+  const t = turn ?? ++worldbookTurnCounter;
+  worldbook.updateActivation(userText, modelText, t);
+}
+
+// ── Worldbook DMAE：取 Active 条目内容（阈值门控 + 注入）──
+export function getActiveWorldbookEntries(): string[] {
+  if (!worldbook) return [];
+  return worldbook.getActiveEntries();
+}
+
+// ── Worldbook One-Shot：取本轮 cascade 触发的条目（不入 DMAE 状态表）──
+// 返回带条目标题的完整内容（与 getActiveWorldbookEntries 一致格式，便于合并注入）
+export function getCascadeWorldbookEntries(): string[] {
+  if (!worldbook) return [];
+  return worldbook.getCascadeEntries().map(e => {
+    const title = e.id.replace(/^wb_[^_]+_/, "").replace(/_/g, " ");
+    return `【${title}】\n${e.content}`;
+  });
+}
+
+// ── Get permanent worldbook entries ──
+export function getPermanentWorldbookEntries(): string[] {
+  if (!worldbook) return [];
+  return worldbook.getPermanentEntries();
+}
+
+// ── Worldbook 关键词直查：后台轻量调用（Moments 反应/发帖等）用，不经 DMAE 状态机 ──
+// 文本命中任一触发词即注入该条目，调用方自行决定合并常驻条目。
+export function getKeywordMatchedWorldbookEntries(text: string): string[] {
+  if (!worldbook) return [];
+  const t = text ?? "";
+  if (!t.trim()) return [];
+  return worldbook.getEntries()
+    .filter((e) => e.enabled && !e.permanent && e.keywords.length > 0)
+    .filter((e) => e.keywords.some((kw) => t.includes(kw)))
+    .sort((a, b) => b.priority - a.priority)
+    .map((e) => {
+      const title = e.id.replace(/^wb_[^_]+_/, "").replace(/_/g, " ");
+      return `【${title}】\n${e.content}`;
+    });
+}
+
 // ── Build memory context (legacy, kept for compatibility) ──
 // 注意：单参签名无 modelText，故 model 奖励不触发（降级行为）。
 // 主流程已改用 orchestrator 的 buildAlwaysOnContext（会传上轮模型回复）。
@@ -442,7 +581,7 @@ export async function buildMemoryContext(userInput: string, scopeId?: MemoryScop
   // 2. Imported docs
   const docResults = await searchMemory(userInput, "imported_doc", 5);
   if (docResults.length > 0) {
-    parts.push("\u3010\u76f8\u5173\u6587\u4ef6\u7247\u6bb5\u3011\n" + docResults.map((m) => "- " + m).join("\n"));
+    parts.push("【相关文件片段】\n" + docResults.map((m) => "- " + m).join("\n"));
   }
 
   // 3. User memory（按域过滤：调用方必须显式给域，否则等于全库召回）

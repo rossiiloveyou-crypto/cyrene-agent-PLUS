@@ -63,11 +63,13 @@ export function ModelSelector({
   return (
     <>
     <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) void load(); }} trigger="click" placement="topLeft"
+      arrow={false} rootClassName="cy-composer-menu-popover"
       content={<div className="cy-model-selector__menu">{profiles.length ? profiles.map((profile) => <button type="button" key={profile.id} onClick={() => { onSelect(profile.id); setOpen(false); }}><strong>{profile.displayName || profile.provider}</strong><small>{profile.model}</small></button>) : <span>{t("modelSelector.emptyHint")}</span>}</div>}>
       <button type="button" className="cy-composer__agent-button cy-model-selector" title={t("modelSelector.switchTitle")}><span>{active?.displayName || active?.model || t("modelSelector.chooseModel")}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg></button>
     </Popover>
     {showModelMenu && (
       <Popover open={modelMenuOpen} onOpenChange={setModelMenuOpen} trigger="click" placement="topLeft"
+        arrow={false} rootClassName="cy-composer-menu-popover"
         content={<div className="cy-model-selector__menu cy-model-selector__models">{selectable.map((model) => (
           <button type="button" key={model} data-current={model === effectiveModel || undefined} onClick={() => { onSelectModel?.(model); setModelMenuOpen(false); }}>
             <code>{model}</code>

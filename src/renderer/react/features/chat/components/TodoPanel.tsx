@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type RefObject } from "react";
 import { useTranslation } from "../../../i18n";
 import type { TodoState } from "../../../../../shared/todo-types";
 import workTodoPngUrl from "../../../assets/status-moods/提醒.png?url";
@@ -9,6 +9,7 @@ import "./TodoPanel.css";
 export interface TodoPanelProps {
   state: TodoState | null;
   mode: "work" | "learn";
+  containerRef?: RefObject<HTMLElement | null>;
 }
 
 const DEFAULT_WIDTH = 240;
@@ -64,9 +65,9 @@ function ModeCapsule({ mode }: { mode: TodoPanelProps["mode"] }) {
   );
 }
 
-export function TodoPanel({ state, mode }: TodoPanelProps) {
+export function TodoPanel({ state, mode, containerRef }: TodoPanelProps) {
   const { t } = useTranslation();
-  const floating = useFloatingCard({ width: DEFAULT_WIDTH });
+  const floating = useFloatingCard({ width: DEFAULT_WIDTH, containerRef });
 
   const todos = state?.todos ?? [];
   const total = todos.length;
@@ -75,7 +76,7 @@ export function TodoPanel({ state, mode }: TodoPanelProps) {
 
   return (
     <div
-      className={`cy-todo ${floating.collapsed ? "cy-todo--collapsed" : ""}`}
+      className={`cy-todo${containerRef ? " cy-todo--workspace" : ""}${floating.collapsed ? " cy-todo--collapsed" : ""}`}
       style={{ left: floating.position.x, top: floating.position.y }}
       role="region"
       aria-label={t("todo.panelAria")}
@@ -158,12 +159,6 @@ export function TodoPanel({ state, mode }: TodoPanelProps) {
             <span className="cy-todo__progress-text">{progress}%</span>
           </div>
 
-          {mode === "work" && (
-            <div className="cy-todo__extension-slot" data-testid="todo-extension-slot">
-              <span className="cy-todo__extension-label">{t("todo.projectStatus")}</span>
-              <span className="cy-todo__extension-hint">{t("todo.gitComingSoon")}</span>
-            </div>
-          )}
         </div>
       </div>
     </div>

@@ -9,7 +9,7 @@ export interface MemoryEntry {
   id: string;
   text: string;
   embedding: number[];
-  source: string;       // "user_memory" | "worldbook" | "imported_doc"
+  source: string;
   weight: number;       // 1.0 初始，每次召回 +0.1，24h 未提 ×0.95
   createdAt: number;    // timestamp
   lastRecalledAt: number;
@@ -22,7 +22,6 @@ export interface SearchResult {
 }
 
 export interface VectorSearchOptions {
-  importIds?: string[];
   allowedEntryIds?: string[];
 }
 
@@ -327,7 +326,7 @@ export class JsonVectorStore {
     return this.addPreparedBatch([{ text, source, embedding, metadata }])[0];
   }
 
-  // 批量添加（用于导入文档 chunk）
+  // 批量添加嵌入条目。
   async addBatch(
     items: Array<{ text: string; source: string; metadata?: Record<string, unknown> }>,
     provider: EmbeddingProvider,
@@ -394,11 +393,8 @@ export class JsonVectorStore {
 
     const now = Date.now();
     const results: SearchResult[] = [];
-    const allowedImportIds = new Set(options.importIds ?? []);
     const allowedEntryIds = options.allowedEntryIds ? new Set(options.allowedEntryIds) : null;
-    const shouldKeep = (entry: MemoryEntry) =>
-      (!allowedImportIds.size || allowedImportIds.has(String(entry.metadata?.importId ?? ""))) &&
-      (!allowedEntryIds || allowedEntryIds.has(entry.id));
+    const shouldKeep = (entry: MemoryEntry) => !allowedEntryIds || allowedEntryIds.has(entry.id);
 
     // 全量扫描：实测 1 万条仅约 9ms，无需近似索引（IVF 已移除）
     for (const entry of this.entries) {
@@ -452,7 +448,15 @@ export class JsonVectorStore {
     return deleted;
   }
 
-  // 删除导入文档
+  deleteEntriesBySource(source: string): number {
+    const before = this.entries.length;
+    this.entries = this.entries.filter((entry) => entry.source !== source);
+    const deleted = before - this.entries.length;
+    if (deleted > 0) this.scheduleSave();
+    return deleted;
+  }
+
+  // 删除导入文档（M2 / J-04 保留：官方 v1.3.0 删除了整条附件索引链路）
   deleteImportedDoc(importId: string, fileName?: string): number {
     const before = this.entries.length;
     this.entries = this.entries.filter((e) => {

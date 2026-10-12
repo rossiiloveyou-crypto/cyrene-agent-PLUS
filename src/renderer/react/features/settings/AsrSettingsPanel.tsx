@@ -1,20 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, AudioLines, Headphones, LoaderCircle, Mic2, X } from "lucide-react";
-import { siAlibabacloud } from "simple-icons";
+import { siAlibabacloud, siMinimax } from "simple-icons";
 import { BrandIcon } from "../../components/ui/BrandIcon";
 import { SettingsInput, SettingsPasswordInput, SettingsSelect, SettingsSlider, SettingsSwitch } from "../../components/ui/SettingsControls";
 import { useTranslation } from "../../i18n";
 import { Card } from "../../components/ui/Card";
 
-type AsrEngine = "off" | "aliyun" | "mossland" | "local";
+type AsrEngine = "off" | "aliyun" | "mossland" | "minimax" | "local";
 type AsrLanguage = "zh" | "en";
-type SecretField = "asrAliyunAppKey" | "asrAliyunAccessKeyId" | "asrAliyunAccessKeySecret" | "ttsMosslandKey";
+type SecretField = "asrAliyunAppKey" | "asrAliyunAccessKeyId" | "asrAliyunAccessKeySecret" | "ttsMosslandKey" | "asrMinimaxKey";
 type AsrValues = {
   asrEngine: AsrEngine;
   asrAliyunAppKey: string;
   asrAliyunAccessKeyId: string;
   asrAliyunAccessKeySecret: string;
   ttsMosslandKey: string;
+  asrMinimaxKey: string;
   asrLanguage: AsrLanguage;
   asrVadSilenceMs: number;
   asrVadThreshold: number;
@@ -27,6 +28,7 @@ const defaults: AsrValues = {
   asrAliyunAccessKeyId: "",
   asrAliyunAccessKeySecret: "",
   ttsMosslandKey: "",
+  asrMinimaxKey: "",
   asrLanguage: "zh",
   asrVadSilenceMs: 1000,
   asrVadThreshold: 0.01,
@@ -35,11 +37,12 @@ const defaults: AsrValues = {
 
 function readAsrValues(config: Record<string, unknown>): AsrValues {
   return {
-    asrEngine: config.asrEngine === "aliyun" || config.asrEngine === "mossland" || config.asrEngine === "local" ? config.asrEngine : "off",
+    asrEngine: config.asrEngine === "aliyun" || config.asrEngine === "mossland" || config.asrEngine === "minimax" || config.asrEngine === "local" ? config.asrEngine : "off",
     asrAliyunAppKey: typeof config.asrAliyunAppKey === "string" ? config.asrAliyunAppKey : "",
     asrAliyunAccessKeyId: typeof config.asrAliyunAccessKeyId === "string" ? config.asrAliyunAccessKeyId : "",
     asrAliyunAccessKeySecret: typeof config.asrAliyunAccessKeySecret === "string" ? config.asrAliyunAccessKeySecret : "",
     ttsMosslandKey: typeof config.ttsMosslandKey === "string" ? config.ttsMosslandKey : "",
+    asrMinimaxKey: typeof config.asrMinimaxKey === "string" ? config.asrMinimaxKey : "",
     asrLanguage: config.asrLanguage === "en" ? "en" : "zh",
     asrVadSilenceMs: typeof config.asrVadSilenceMs === "number" ? config.asrVadSilenceMs : 1000,
     asrVadThreshold: typeof config.asrVadThreshold === "number" ? config.asrVadThreshold : 0.01,
@@ -118,7 +121,7 @@ export function AsrSettingsPanel() {
 
   function update<K extends keyof AsrValues>(key: K, value: AsrValues[K]) {
     setValues((current) => ({ ...current, [key]: value }));
-    if (key === "asrAliyunAppKey" || key === "asrAliyunAccessKeyId" || key === "asrAliyunAccessKeySecret" || key === "ttsMosslandKey") {
+    if (key === "asrAliyunAppKey" || key === "asrAliyunAccessKeyId" || key === "asrAliyunAccessKeySecret" || key === "ttsMosslandKey" || key === "asrMinimaxKey") {
       scheduleSecret(key, String(value));
     } else {
       void persist(key, value);
@@ -132,17 +135,17 @@ export function AsrSettingsPanel() {
     {loading ? <div className="cy-asr-loading" role="status" aria-label={t("settingsPage.asr.loading")}><LoaderCircle size={18} aria-hidden="true" /></div> : <>
       <section className="cy-settings-section">
         <div className="cy-settings-section__heading"><h2><AudioLines size={18} />{t("settingsPage.asr.engineTitle")}</h2><p>{t("settingsPage.asr.engineDescription")}</p></div>
-        <Card>
-          <div className="cy-settings-row">
-            <div className="cy-settings-row__copy"><strong>{t("settingsPage.asr.engineLabel")}</strong><span>{t("settingsPage.asr.engineHint")}</span></div>
-            <div className="cy-asr-select"><SettingsSelect ariaLabel={t("settingsPage.asr.engineLabel")} value={values.asrEngine} options={[
-              { value: "off", label: t("settingsPage.asr.engineOff") },
-              { value: "aliyun", label: t("settingsPage.asr.engineAliyun") },
-              { value: "mossland", label: t("settingsPage.asr.engineMossland") },
-              { value: "local", label: t("settingsPage.asr.engineLocal") },
-            ]} onChange={(value) => update("asrEngine", value)} /></div>
-          </div>
-        </Card>
+        <div className="cy-asr-engine-grid" role="group" aria-label={t("settingsPage.asr.engineLabel")}>
+          {([
+            { value: "off", label: t("settingsPage.asr.engineOff"), icon: <AudioLines size={19} /> },
+            { value: "aliyun", label: t("settingsPage.asr.engineAliyun"), icon: <BrandIcon icon={siAlibabacloud} size={20} label="Alibaba Cloud" /> },
+            { value: "mossland", label: t("settingsPage.asr.engineMossland"), icon: <Mic2 size={19} /> },
+            { value: "minimax", label: t("settingsPage.asr.engineMinimax"), icon: <BrandIcon icon={siMinimax} size={20} label="MiniMax" /> },
+            { value: "local", label: t("settingsPage.asr.engineLocal"), icon: <Headphones size={19} /> },
+          ] as const).map((engine) => <button key={engine.value} type="button" aria-pressed={values.asrEngine === engine.value} className={`cy-asr-engine ${values.asrEngine === engine.value ? "is-active" : ""}`} onClick={() => update("asrEngine", engine.value)}>
+            <span className="cy-asr-engine__icon">{engine.icon}</span><span>{engine.label}</span>
+          </button>)}
+        </div>
       </section>
 
       {values.asrEngine === "aliyun" && <section className="cy-settings-section">
@@ -158,6 +161,11 @@ export function AsrSettingsPanel() {
       {values.asrEngine === "mossland" && <section className="cy-settings-section">
         <div className="cy-settings-section__heading"><h2><Mic2 size={18} />{t("settingsPage.asr.mosslandTitle")}</h2><p>{t("settingsPage.asr.mosslandHint")}</p></div>
         <Card className="cy-asr-fields"><label><span>{t("settingsPage.asr.mosslandKey")}</span><SettingsPasswordInput showLabel={t("settingsPage.asr.showSecret")} hideLabel={t("settingsPage.asr.hideSecret")} value={values.ttsMosslandKey} onChange={(event) => update("ttsMosslandKey", event.target.value)} onBlur={() => flushSecret("ttsMosslandKey")} autoComplete="off" /></label></Card>
+      </section>}
+
+      {values.asrEngine === "minimax" && <section className="cy-settings-section">
+        <div className="cy-settings-section__heading"><h2><Mic2 size={18} />{t("settingsPage.asr.minimaxTitle")}</h2><p>{t("settingsPage.asr.minimaxHint")}</p></div>
+        <Card className="cy-asr-fields"><label><span>{t("settingsPage.asr.minimaxKey")}</span><SettingsPasswordInput showLabel={t("settingsPage.asr.showSecret")} hideLabel={t("settingsPage.asr.hideSecret")} value={values.asrMinimaxKey} onChange={(event) => update("asrMinimaxKey", event.target.value)} onBlur={() => flushSecret("asrMinimaxKey")} autoComplete="off" /></label></Card>
       </section>}
 
       <section className="cy-settings-section">

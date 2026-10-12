@@ -65,6 +65,7 @@ function installSettings(profiles: unknown[], defaultId?: string) {
     getTimeoutSettings: vi.fn(async () => ({ userChoiceTimeout: 45000, testTimeout: 15000 })),
     getGeneral: vi.fn(async () => ({})),
     saveTimeoutSettings: vi.fn(async () => ({})),
+    saveGeneral: vi.fn(async () => ({})),
     saveModelProfile,
     saveConfig: vi.fn(async () => ({})),
     deleteModelProfile: vi.fn(async () => ({})),
@@ -142,6 +143,23 @@ afterEach(async () => {
 });
 
 describe("模型清单编辑组件", () => {
+  it("在运行设置中默认显示并保存 5 次模型请求重试", async () => {
+    const settings = installSettings([], undefined);
+    await renderPanel();
+    const runtimeHeader = document.querySelector<HTMLElement>(".cy-model-runtime-section .ant-collapse-header");
+    expect(runtimeHeader).toBeTruthy();
+    await act(async () => { runtimeHeader?.click(); });
+
+    const retryLabel = Array.from(document.querySelectorAll(".cy-model-field"))
+      .find((label) => label.querySelector("span")?.textContent === "模型请求重试次数");
+    expect(retryLabel).toBeTruthy();
+    const saveButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent?.replace(/\s/g, "") === "保存运行设置");
+    expect(saveButton).toBeTruthy();
+    await act(async () => { saveButton?.click(); });
+    expect(settings.saveConfig).toHaveBeenCalledWith({ modelRequestMaxRetries: 5 });
+  });
+
   it("保留未收录模型的手动推理规则并随档案保存", async () => {
     const manualReasoning = {
       style: "openai-effort",

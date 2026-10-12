@@ -1,0 +1,29 @@
+/* shadcn Marker 的局部样式入口。
+   与 StreamdownMessageContent.css 同策略：只为本目录组件生成 tailwind 工具类
+   （source(none) + 显式 @source），theme/utility 分别落独立 layer，
+   不把全局 preflight 或全量 utility 带进 React 渲染页。 */
+@import "tailwindcss/theme.css" layer(cyrene-marker-theme);
+@import "tailwindcss/utilities.css" layer(cyrene-marker-utilities) source(none);
+
+@source "./marker.tsx";
+
+/* separator 变体：居中标签 + 两侧分隔线（对标 shadcn 文档 "Conversation compacted" 示例）。
+   布局与线条都写死在这里，不依赖 scoped tailwind 工具类的生成时机，
+   伪元素的 flex:1 才能稳定撑开两侧线条。 */
+[data-slot="marker"][data-variant="separator"] {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+[data-slot="marker"][data-variant="separator"]::before,
+[data-slot="marker"][data-variant="separator"]::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  min-width: 24px;
+  background: var(--rb-border-strong, rgba(236, 72, 153, 0.4));
+}

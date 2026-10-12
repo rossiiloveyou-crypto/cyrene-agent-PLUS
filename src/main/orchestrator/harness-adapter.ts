@@ -28,6 +28,9 @@ export { sendHarnessEventAsAgui, sendTaskLifecycleAsAgui } from "./harness/adapt
 import { completePlanRun } from "./harness/adapter/plan-lifecycle";
 import { prepareHarnessRun } from "./harness/adapter/run-preparation";
 import { prepareToolRuntime } from "./harness/adapter/tool-runtime";
+import { getTimeoutSettings } from "../timeout-manager";
+import { resolveModelRequestTimeoutMs } from "./config/model-timeout";
+import { getBrowserPanelController } from "../browser/browser-panel-runtime";
 
 const LOG_PREFIX = "[HarnessAdapter]";
 export { filterToolsForConversationMode } from "./harness/adapter/run-preparation";
@@ -47,7 +50,7 @@ export async function runHarnessWithAdapter(
   signal: AbortSignal,
   sendBaseEvent: (event: BaseEvent) => void,
 ): Promise<AgentLoopResult> {
-  // 准备阶段创建唯一的 runStore 实例；checkpoint、工具生命周期和终态都写入它。
+  // 准备阶段创建唯一的 runStore 实例；它只保存运行元数据和终态。
   const prepared = await prepareHarnessRun(options, signal);
   const {
     messageId,
@@ -64,7 +67,7 @@ export async function runHarnessWithAdapter(
   } = prepared;
 
   const toolRuntime = prepareToolRuntime({ options, signal, prepared, sendBaseEvent });
-  const { toolContext, checkPermission, toolOutputStore, taskExecutor } = toolRuntime;
+  const { toolContext, checkPermission, toolOutputStore, taskExecutor, closeTaskExecutor, openTaskCompanions } = toolRuntime;
 
   // ── 构建 HarnessInput ──
   const harnessInput: HarnessInput = {
@@ -74,12 +77,15 @@ export async function runHarnessWithAdapter(
     messages: runMessages,
     runId,
     tools,
+    ...(options.initialHarnessState ? { initialState: options.initialHarnessState } : {}),
     vendorConfig,
     config: {
       maxParallelToolCalls: options.maxParallelToolCalls,
       // 0 表示禁用整轮执行时钟；单次模型/工具超时仍由各自策略处理。
       totalTimeoutMs: 0,
       contextWindowTokens: options.settings.contextWindowTokens,
+      modelRequestMaxRetries: options.settings.modelRequestMaxRetries ?? 5,
+      modelRequestIdleTimeoutMs: resolveModelRequestTimeoutMs(getTimeoutSettings()),
     },
     signal,
     onEvent: (event: HarnessEvent) => {
@@ -87,23 +93,6 @@ export async function runHarnessWithAdapter(
         sendHarnessEventAsAgui(event, messageId, threadId, runId, sendBaseEvent);
       }
     },
-    onCheckpoint: (checkpoint) => {
-      runStore.checkpoint(runId, {
-        messages: checkpoint.messages,
-        state: checkpoint.state,
-        toolOutputs: checkpoint.toolOutputs,
-        rounds: checkpoint.rounds,
-      });
-    },
-    onToolLifecycle: (event) => {
-      runStore.recordTool(runId, {
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        sideEffect: event.toolSideEffect,
-        status: event.status,
-      });
-    },
-    onCompactionLifecycle: (event) => runStore.recordCompaction(runId, event),
     ...(options.onToolFinished ? { onToolFinished: options.onToolFinished } : {}),
     ...(options.pollRunAdjustments ? { pollRunAdjustments: options.pollRunAdjustments } : {}),
     requestUserClarification: options.requestUserClarification
@@ -112,10 +101,13 @@ export async function runHarnessWithAdapter(
     includeInteractiveTools: options.harnessInteractiveTools,
     planState,
     toolContext,
+    browserControlState: () => getBrowserPanelController()?.getControlState(toolContext.conversationId, runId) ?? "inactive",
     toolOutputStore,
     executionLedger: options.executionLedger,
     checkPermission,
     taskExecutor,
+    closeTaskExecutor,
+    openTaskCompanions,
     ...(options.transcriptSink ? { transcriptSink: options.transcriptSink } : {}),
   };
 
@@ -141,7 +133,7 @@ export async function runHarnessWithAdapter(
     : terminal.status === "cancelled" ? "cancelled" : "failed";
 
   // ── 中断轨迹闭合（先于 runStore 终态结算）──
-  // cancelled：为 started / planned 工具补确定性闭合条目并写 interruption 边界；
+  // 从权威轨迹闭合已声明但没有结果的工具，并写 interruption 边界；
   // 闭合失败不得声称轨迹协议完整 → 转 runtime_error 终态（fail-closed）。
   if (terminal.status === "cancelled" || result.terminateReason === "cancelled") {
     try {
@@ -202,18 +194,15 @@ export async function runHarnessWithAdapter(
     `${LOG_PREFIX} harness run complete, rounds=${result.rounds} terminated=${result.terminated} terminal=${terminal.status}`,
   );
 
-  // ── 终态后轨迹快照：失败不改已确定终态，下次读取从 JSONL 重放增量 ──
-  try {
-    await options.transcriptSink?.checkpoint();
-  } catch (error) {
-    console.error("[ConversationTranscriptStore] snapshot checkpoint failed:", error);
-  }
+  // ── 终态后安排空闲投影快照，不阻塞本次 Run 的完成返回 ──
+  options.transcriptSink?.scheduleCheckpoint?.();
 
   return {
     reply: result.finalAnswer,
     toolResults,
     completionReason,
     terminal,
+    ...(result.modelFailure ? { modelFailure: result.modelFailure } : {}),
     totalUsage: undefined,
   };
 }

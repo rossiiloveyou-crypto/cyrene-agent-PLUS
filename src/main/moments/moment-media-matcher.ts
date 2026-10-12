@@ -1,12 +1,12 @@
 // Moments 后置配图匹配：动态文本 → 贴图素材。
 //
-// 直接复用贴图系统已有资产（描述表、embedding 索引、相似度阈值），
+// 直接复用贴图系统已有资产（描述表、文本排序、匹配阈值），
 // 不为 Moments 单独维护素材库：匹配命中 sticker id 后解析成
 // 渲染端可直接消费的媒体引用（内置贴图 = public 相对路径，用户贴图 = local-sticker:// 协议）。
 // 匹配失败（无索引 / 无 provider / 低于阈值 / id 解析不出）一律返回 null——
 // 纯文字发帖，不硬凑图。
 
-import { extractStickerEmbeddingText } from "../sticker-query";
+import { extractStickerMatchText } from "../sticker-query";
 import { BUILT_IN_STICKER_FILES } from "../sticker-descriptions";
 import { buildLocalStickerUrl } from "../sticker-protocol";
 import { loadUserStickerManifest } from "../sticker-storage";
@@ -14,7 +14,7 @@ import type { MomentMedia } from "../../shared/moments-types";
 
 // ── 查询构建 ─────────────────────────────────────────────────────
 
-/** 时间上下文给 embedding 的场景提示（贴图覆盖昼夜/情绪等场景）。 */
+/** 时间上下文给文本匹配的场景提示（贴图覆盖昼夜/情绪等场景）。 */
 function timeOfDayContext(hour: number): string {
   if (hour >= 23 || hour < 5) return "深夜";
   if (hour < 8) return "清晨";
@@ -27,7 +27,7 @@ function timeOfDayContext(hour: number): string {
 
 /**
  * 配图查询 = 动态文案 + 触发摘录 + 时间上下文。
- * 复用 extractStickerEmbeddingText 清洗（代码/公式剔除），截断 1000 字符。
+ * 复用贴纸文本清洗（代码/公式剔除），截断 1000 字符。
  */
 export function buildMomentImageQuery(
   postText: string,
@@ -36,8 +36,8 @@ export function buildMomentImageQuery(
   maxLength = 1000,
 ): string {
   const parts = [
-    extractStickerEmbeddingText(postText),
-    extractStickerEmbeddingText(summary),
+    extractStickerMatchText(postText),
+    extractStickerMatchText(summary),
     timeOfDayContext(localNow.getHours()),
   ].filter(Boolean);
   return parts.join("\n").slice(0, maxLength);

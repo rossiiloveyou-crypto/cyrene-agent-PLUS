@@ -31,6 +31,7 @@ import {
   type PendingWithdrawalState,
 } from "../../shared/chat-types";
 import type { ContextUsageSnapshot } from "../../shared/context-usage";
+import { normalizeBrowserElementSelection } from "../../shared/browser-panel-types";
 
 const ROOT_DIR_NAME = "cyrene-chats";
 const SESSIONS_SUBDIR = "sessions";
@@ -160,6 +161,18 @@ function readSessionRecordFile(id: string): ChatSessionRecord | null {
         || typeof (parsed as ChatSessionRecordV2).messageCount !== "number") return null;
     } else if (parsed.schemaVersion !== 1 || !Array.isArray((parsed as ChatSession).messages)) {
       return null;
+    }
+    const rawProgress = (parsed as ChatSessionRecordV2).summaryMemoryProgress;
+    if (rawProgress && typeof rawProgress === "object" && Array.isArray(rawProgress.pendingTurns)) {
+      rawProgress.pendingTurns = rawProgress.pendingTurns.filter((turn) => (
+        turn && typeof turn === "object"
+        && typeof turn.assistantEntryId === "string"
+        && typeof turn.userText === "string"
+        && typeof turn.assistantText === "string"
+      ));
+      if (typeof rawProgress.lastProcessedAssistantId !== "string") delete rawProgress.lastProcessedAssistantId;
+    } else {
+      delete (parsed as ChatSessionRecordV2).summaryMemoryProgress;
     }
     parsed.mode = normalizePersistedMode(parsed.mode, parsed.purpose);
     delete (parsed as ChatSession & { codeSession?: unknown }).codeSession;
@@ -322,6 +335,46 @@ export function getSessionRecord(id: string): ChatSessionRecord | null {
   return readSessionRecordFile(id);
 }
 
+export function getSummaryMemoryProgress(id: string): ChatSession["summaryMemoryProgress"] {
+  const progress = readSessionRecordFile(id)?.summaryMemoryProgress;
+  return progress ? { ...progress, pendingTurns: progress.pendingTurns.map((turn) => ({ ...turn })) } : undefined;
+}
+
+export function appendSummaryMemoryTurn(
+  id: string,
+  turn: NonNullable<ChatSession["summaryMemoryProgress"]>["pendingTurns"][number],
+): boolean {
+  if (!turn.assistantEntryId) return false;
+  const record = readSessionRecordFile(id);
+  if (!record) return false;
+  const progress = record.summaryMemoryProgress ?? { pendingTurns: [] };
+  if (progress.pendingTurns.some((item) => item.assistantEntryId === turn.assistantEntryId)
+    || progress.lastProcessedAssistantId === turn.assistantEntryId) return true;
+  if (turn.userTurnId) {
+    progress.pendingTurns = progress.pendingTurns.filter((item) => item.userTurnId !== turn.userTurnId);
+  }
+  progress.pendingTurns.push({ ...turn });
+  record.summaryMemoryProgress = progress;
+  writeWritableSession(record);
+  return true;
+}
+
+/** Advance only through the IDs included in a successful summary write. */
+export function markSummaryMemoryProcessed(id: string, processedTurns: Array<{ assistantEntryId: string }>): boolean {
+  if (processedTurns.length === 0) return false;
+  const record = readSessionRecordFile(id);
+  if (!record) return false;
+  const current = record.summaryMemoryProgress ?? { pendingTurns: [] };
+  const throughId = processedTurns[processedTurns.length - 1].assistantEntryId;
+  const processed = new Set(processedTurns.map((turn) => turn.assistantEntryId));
+  record.summaryMemoryProgress = {
+    lastProcessedAssistantId: throughId,
+    pendingTurns: current.pendingTurns.filter((turn) => !processed.has(turn.assistantEntryId)),
+  };
+  writeWritableSession(record);
+  return true;
+}
+
 /** 迁移器的原子提交点：只接受 v1 → v2 的一次性元数据改写。 */
 function recordsEqual(left: ChatSessionRecord, right: ChatSessionRecord): boolean {
   if (left.schemaVersion !== right.schemaVersion) return false;
@@ -460,18 +513,51 @@ export function renameSession(id: string, title: string): ChatSession | null {
 }
 
 export function setGeneratedTitle(id: string, firstUserMessageId: string, title: string): boolean {
-  const session = readSessionFile(id);
-  if (!session || session.titleIsCustom) return false;
-  const firstUserMessage = session.messages.find(
+  const record = readSessionRecordFile(id);
+  if (!record || record.titleIsCustom) return false;
+  const trimmed = title.trim();
+  if (!trimmed) return false;
+  if (record.schemaVersion === 2) {
+    // v2：messages 在轨迹投影里，无法同步取首条消息做防串校验；
+    // 首条校验由 titleService.schedule 经 getSessionView（pendingDispatch 快照）完成
+    record.title = trimmed.slice(0, 80);
+    writeSessionRecordFile(record);
+    upsertMeta(metaFromSession(record));
+    return true;
+  }
+  const firstUserMessage = record.messages.find(
     (message) => message.role === "user" && message.content.trim(),
   );
   if (firstUserMessage?.id !== firstUserMessageId) return false;
-  const trimmed = title.trim();
-  if (!trimmed) return false;
-  session.title = trimmed.slice(0, 80);
-  writeSessionFile(session);
-  upsertMeta(metaFromSession(session));
+  record.title = trimmed.slice(0, 80);
+  writeSessionFile(record);
+  upsertMeta(metaFromSession(record));
   return true;
+}
+
+/**
+ * 标题生成用的会话视图：v1 原样返回；v2 磁盘无 messages，
+ * 把 pendingDispatch 里刚认领的用户消息快照组合成首条消息，
+ * 供 titleService 做"首条用户消息"校验（claim → AGUI_RUN 迁移 v2 后
+ * readSessionFile 返回 null 会让整条标题链路静默中断）。
+ * 视图统一呈现为 v1 形状（titleService 只读 title/titleIsCustom/messages）。
+ */
+export function getSessionView(id: string): ChatSession | null {
+  const record = readSessionRecordFile(id);
+  if (!record) return null;
+  if (record.schemaVersion === 1) return record;
+  const { schemaVersion: _v2, messageCount: _count, ...meta } = record;
+  const claimed = record.pendingDispatch?.userMessage;
+  return {
+    ...meta,
+    schemaVersion: 1,
+    messages: claimed ? [{
+      id: claimed.id,
+      role: "user" as const,
+      content: claimed.visibleContent ?? claimed.text ?? "",
+      at: claimed.at,
+    }] : [],
+  };
 }
 
 export function setSessionPinned(id: string, pinned: boolean): ChatSession | null {
@@ -481,6 +567,34 @@ export function setSessionPinned(id: string, pinned: boolean): ChatSession | nul
   writeWritableSession(session);
   upsertMeta(metaFromSession(session));
   return sessionView(session);
+}
+
+/**
+ * run 终态后从轨迹投影同步会话统计（assistant 回复不经过本 store 落盘，
+ * messageCount/updatedAt 在此对齐投影实际值）：刷新侧栏最近聊天时间、
+ * 排序与未读检测。写盘失败仅告警——列表缓存滞后可在下次写盘自然追平。
+ */
+export function syncSessionStats(sessionId: string, messageCount: number): boolean {
+  const record = readSessionRecordFile(sessionId);
+  // 只对 v2 生效：v1 的 messages 由本 store 自己落盘，claim 的 v1 分支已刷新索引
+  if (!record || record.schemaVersion !== 2) return false;
+  if (!Number.isInteger(messageCount) || messageCount < 0) return false;
+  const nextUpdatedAt = Math.max(record.updatedAt, Date.now());
+  if (messageCount === record.messageCount && nextUpdatedAt === record.updatedAt) return false;
+  record.messageCount = messageCount;
+  record.updatedAt = nextUpdatedAt;
+  try {
+    writeSessionRecordFile(record);
+  } catch (err) {
+    console.warn("[chats-store] run 终态统计同步落盘失败:", sessionId, err);
+    return false;
+  }
+  try {
+    upsertMeta(metaFromSession(record));
+  } catch (err) {
+    console.warn("[chats-store] run 终态统计同步后索引写入失败:", sessionId, err);
+  }
+  return true;
 }
 
 // ── 会话模型状态写点（全部经 enqueueSessionModelMutation 串行提交）──────
@@ -676,8 +790,12 @@ export type PendingChatMessageInput = Omit<PendingChatMessage, "enqueuedAt">;
 function normalizePendingAttachment(value: unknown): PendingChatAttachment | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Partial<PendingChatAttachment>;
-  const kind = raw.kind === "image" || raw.kind === "document" ? raw.kind : null;
+  const kind = raw.kind === "image" || raw.kind === "document" || raw.kind === "web-element" ? raw.kind : null;
   if (!kind || typeof raw.name !== "string" || !raw.name.trim()) return null;
+  if (kind === "web-element") {
+    const element = normalizeBrowserElementSelection(raw.element);
+    return element ? { kind, name: raw.name.trim(), element } : null;
+  }
   if (typeof raw.filePath !== "string" || !raw.filePath.trim()) return null;
   return {
     kind,
@@ -829,10 +947,14 @@ function pendingUserMessageFromSnapshot(snapshot: PendingDispatchUserSnapshot): 
     at: snapshot.at,
     ...(snapshot.sticker ? { sticker: snapshot.sticker } : {}),
     ...(snapshot.attachments && snapshot.attachments.length > 0 ? {
-      attachments: snapshot.attachments.map((attachment) => attachment.kind === "image" ? {
+      attachments: snapshot.attachments.map((attachment) => attachment.kind === "web-element" ? {
+        kind: "web-element" as const,
+        name: attachment.name,
+        element: attachment.element!,
+      } : attachment.kind === "image" ? {
         kind: "image" as const,
         name: attachment.name,
-        filePath: attachment.filePath,
+        filePath: attachment.filePath!,
         mime: attachment.mime ?? "application/octet-stream",
         caption: attachment.caption,
         status: "pending" as const,
@@ -840,7 +962,7 @@ function pendingUserMessageFromSnapshot(snapshot: PendingDispatchUserSnapshot): 
       } : {
         kind: "document" as const,
         name: attachment.name,
-        filePath: attachment.filePath,
+        filePath: attachment.filePath!,
         status: "pending" as const,
       }),
     } : {}),
@@ -899,11 +1021,23 @@ export function claimPendingMessage(sessionId: string): ClaimPendingResult {
         ...(head.userSticker ? { sticker: head.userSticker } : {}),
       },
     };
+    // 认领即真实历史消息入册（messageCount+1）：与 v1 分支一致地刷新 updatedAt 与索引，
+    // 否则侧栏列表（排序/最近聊天时间/未读检测）在 v2 会话上永远停留在旧值
+    record.messageCount = (record.messageCount ?? 0) + 1;
+    record.updatedAt = claimedAt;
+    // 与 v1 分支一致：非自定义标题时先落首条消息推导的临时标题（生成标题 3 秒后覆盖）
+    if (!record.titleIsCustom) record.title = deriveTitle([userMessage]);
     try {
       writeSessionRecordFile(record);
     } catch (err) {
       console.warn("[chats-store] v2 待发消息认领落盘失败:", sessionId, err);
       return { ok: false, error: "write-failed" };
+    }
+    // 会话文件已写成功即成立；index.json 只是列表缓存，写失败仅告警（与 v1 分支同语义）
+    try {
+      upsertMeta(metaFromSession(record));
+    } catch (err) {
+      console.warn("[chats-store] v2 待发消息认领后索引写入失败（会话列表计数可能滞后）:", sessionId, err);
     }
     return {
       ok: true,

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN" data-ui-theme="pearl-white">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>计划批准卡预览</title>
+    <link rel="stylesheet" href="/ui/theme.css" />
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: var(--rb-bg-1, #f5f5f7); color: var(--rb-text-primary, #1d1d1f); font-family: var(--rb-font-sans, system-ui, sans-serif); }
+      main { display: grid; gap: 18px; width: min(100%, 820px); margin: 0 auto; padding: 34px 22px; }
+      header { display: grid; gap: 5px; }
+      h1 { margin: 0; font-size: 19px; font-weight: 650; }
+      header p { margin: 0; color: var(--rb-text-secondary, #817b82); font-size: 13px; }
+      .preview-context { padding: 16px 18px; border: 1px solid var(--rb-border-default, #e7e2e5); border-radius: 14px; background: var(--rb-card-bg, #fff); }
+      .preview-context__title { margin: 0 0 6px; font-size: 14px; font-weight: 650; }
+      .preview-context__copy { margin: 0; color: var(--rb-text-secondary, #817b82); font-size: 13px; line-height: 1.55; }
+      .preview-panel { width: 100%; }
+      .preview-result { min-height: 20px; color: var(--rb-text-secondary, #817b82); font-size: 12px; }
+      @media (max-width: 560px) { main { padding: 20px 12px; } }
+    </style>
+  </head>
+  <body>
+    <main id="preview-root"></main>
+    <script type="module" src="/react/features/chat/components/PlanApprovalPreview.tsx"></script>
+  </body>
+</html>

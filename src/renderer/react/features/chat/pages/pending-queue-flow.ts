@@ -122,8 +122,8 @@ export function createPendingQueueFlow(getHost: () => PendingQueueFlowHost): Pen
     // 附件完整性守卫：不完整的附件（缺文件路径/种类非法）整条拒绝——
     // 静默丢弃会让消息"看起来发出去了"却少了附件，此处保留草稿让用户处理
     const invalid = (entry.attachments ?? []).find(
-      (attachment) => (attachment.kind !== "image" && attachment.kind !== "document")
-        || !attachment.filePath
+      (attachment) => (attachment.kind !== "image" && attachment.kind !== "document" && attachment.kind !== "web-element")
+        || (attachment.kind === "web-element" ? !attachment.element : !attachment.filePath)
         || !attachment.name,
     );
     if (invalid) {
@@ -134,7 +134,11 @@ export function createPendingQueueFlow(getHost: () => PendingQueueFlowHost): Pen
     // 若上次其实已成功，主进程幂等比较会返回现有队列而不重复写入
     const cacheKey = `${mode}::${entry.rawContent}`;
     const id = failedEnqueueIds.get(cacheKey) ?? entry.id;
-    const stableAttachments = (entry.attachments ?? []).map((attachment) => attachment.kind === "image" ? {
+    const stableAttachments = (entry.attachments ?? []).map((attachment) => attachment.kind === "web-element" ? {
+      kind: "web-element" as const,
+      name: attachment.name,
+      element: attachment.element!,
+    } : attachment.kind === "image" ? {
       kind: "image" as const,
       name: attachment.name,
       filePath: attachment.filePath!,

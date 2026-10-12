@@ -137,6 +137,114 @@ describe("chats store", () => {
     expect(disk).not.toHaveProperty("messages");
   });
 
+  it("v2 claim 与 run 终态同步都刷新 messageCount/updatedAt 与列表索引", async () => {
+    const store = await import("./chats-store");
+    store.initialize();
+    const session = store.createSession({ title: "统计同步" });
+    const file = path.join(store.getRootDir(), "sessions", `${session.id}.json`);
+    const persisted = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, any>;
+    delete persisted.messages;
+    persisted.schemaVersion = 2;
+    persisted.messageCount = 0;
+    persisted.updatedAt = 1;
+    fs.writeFileSync(file, JSON.stringify(persisted));
+
+    // v2 claim：用户消息入册 → messageCount+1、updatedAt 刷新、索引可见
+    store.enqueuePendingMessage(session.id, {
+      id: "stats-claim",
+      rawContent: "原始输入",
+      visibleContent: "原始输入",
+    });
+    expect(store.claimPendingMessage(session.id)).toEqual(expect.objectContaining({ ok: true, claimed: true }));
+    let disk = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, any>;
+    expect(disk.messageCount).toBe(1);
+    expect(disk.updatedAt).toBeGreaterThan(1);
+    let listed = store.listSessions().find((item) => item.id === session.id);
+    expect(listed).toEqual(expect.objectContaining({ messageCount: 1 }));
+
+    // run 终态同步：投影消息总数覆盖写入（assistant 回复入投影）
+    expect(store.syncSessionStats(session.id, 2)).toBe(true);
+    disk = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, any>;
+    expect(disk.messageCount).toBe(2);
+    listed = store.listSessions().find((item) => item.id === session.id);
+    expect(listed).toEqual(expect.objectContaining({ messageCount: 2 }));
+
+    // 重复同步无害：计数不回退，时间戳单调不减（两次调用间 Date.now 前进属正常）
+    expect(store.syncSessionStats(session.id, 2)).toBe(true);
+    disk = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, any>;
+    expect(disk.messageCount).toBe(2);
+    // 不存在的会话/非法计数安全返回
+    expect(store.syncSessionStats("no-such-session", 5)).toBe(false);
+    expect(store.syncSessionStats(session.id, -1)).toBe(false);
+  });
+
+  it("v2 会话的标题链路：claim 落临时标题、getSessionView 组合首条、setGeneratedTitle 写回", async () => {
+    const store = await import("./chats-store");
+    store.initialize();
+    const session = store.createSession({ title: "新任务" });
+    const file = path.join(store.getRootDir(), "sessions", `${session.id}.json`);
+    const persisted = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, any>;
+    delete persisted.messages;
+    persisted.schemaVersion = 2;
+    persisted.messageCount = 0;
+    fs.writeFileSync(file, JSON.stringify(persisted));
+
+    // 迁移成 v2 后 getSession（readSessionFile）返回 null，标题服务旧链路会静默中断
+    expect(store.getSession(session.id)).toBeNull();
+
+    // v2 claim：落首条消息推导的临时标题（与 v1 行为一致）
+    store.enqueuePendingMessage(session.id, {
+      id: "title-claim",
+      rawContent: "原始输入",
+      visibleContent: "展示输入",
+    });
+    expect(store.claimPendingMessage(session.id)).toEqual(expect.objectContaining({ ok: true, claimed: true }));
+    let disk = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, any>;
+    expect(disk.title).toBe("原始输入");
+
+    // getSessionView：把 pendingDispatch 的用户消息快照组合成首条消息（titleService 校验用）
+    const view = store.getSessionView(session.id);
+    expect(view?.messages).toEqual([
+      expect.objectContaining({ id: "title-claim", role: "user", content: "展示输入" }),
+    ]);
+
+    // setGeneratedTitle：v2 无同步 messages 可校验，靠 schedule 侧校验，写回成功
+    expect(store.setGeneratedTitle(session.id, "title-claim", "生成的标题")).toBe(true);
+    disk = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, any>;
+    expect(disk.title).toBe("生成的标题");
+    expect(store.listSessions().find((item) => item.id === session.id)).toEqual(
+      expect.objectContaining({ title: "生成的标题" }),
+    );
+
+    // 用户改过标题（titleIsCustom）后不再覆盖
+    store.renameSession(session.id, "用户手动标题");
+    expect(store.setGeneratedTitle(session.id, "title-claim", "迟到的生成标题")).toBe(false);
+  });
+
+  it("getSessionView 对 v1 原样返回、无 pendingDispatch 的 v2 返回空消息", async () => {
+    const store = await import("./chats-store");
+    store.initialize();
+    // v1：原样（含真实 messages）
+    const v1 = store.createSession({ title: "v1 会话" });
+    const v1View = store.getSessionView(v1.id);
+    expect(v1View?.schemaVersion).toBe(1);
+    expect(v1View?.messages).toEqual([]);
+
+    // v2 且认领已完成（pendingDispatch 清除）：空 messages，视图统一为 v1 形状
+    const v2 = store.createSession({ title: "v2 会话" });
+    const file = path.join(store.getRootDir(), "sessions", `${v2.id}.json`);
+    const persisted = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, any>;
+    delete persisted.messages;
+    persisted.schemaVersion = 2;
+    persisted.messageCount = 3;
+    fs.writeFileSync(file, JSON.stringify(persisted));
+    const v2View = store.getSessionView(v2.id);
+    expect(v2View?.schemaVersion).toBe(1);
+    expect(v2View?.messages).toEqual([]);
+
+    expect(store.getSessionView("no-such-session")).toBeNull();
+  });
+
   it("用稳定 withdrawal id 原子标记并提交 v1/v2 pending 撤回", async () => {
     const store = await import("./chats-store");
     store.initialize();

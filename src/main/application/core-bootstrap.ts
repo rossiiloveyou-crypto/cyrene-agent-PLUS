@@ -17,7 +17,6 @@ import type { AgentRuntime } from "../orchestrator/agent-runtime";
 import type { RuntimeStateService } from "../orchestrator/runtime-state-service";
 import type { TtsSynthesisService } from "../services/tts/tts-synthesis-service";
 import type { TtsSessionService } from "../tts/tts-session-service";
-import type { EmbeddingIndexService } from "../services/embedding/embedding-index-service";
 import type { ProactiveLifecycle } from "../proactive/proactive-lifecycle";
 import type { GitService } from "../code-git/git-service";
 import type { LspManager } from "../lsp/manager";
@@ -42,7 +41,6 @@ export interface CoreServices {
   social: SocialContextService;
   tts: TtsSynthesisService;
   ttsSession: TtsSessionService;
-  embedding: EmbeddingIndexService;
   proactive: ProactiveLifecycle;
   git: GitService;
   lsp: LspManager;

@@ -30,7 +30,7 @@ userData/plugins/<plugin-id>/
 打包版 Windows 默认对应：
 
 ```text
-%APPDATA%\live2d-cyrene\plugins\<plugin-id>\
+%APPDATA%\Cyrene\plugins\<plugin-id>\
 ```
 
 运行时始终以 Electron `app.getPath("userData")` 的实际返回值为准；如果开发者或测试显式
@@ -596,8 +596,8 @@ state，避免每次启动重复尝试。
 ## 验证
 
 ```bash
-npx vitest run src/plugins src/main/plugin-llm.test.ts src/main/channels/manager.test.ts
-npm run build
+pnpm exec vitest run src/plugins src/main/plugin-llm.test.ts src/main/channels/manager.test.ts
+pnpm run build
 ```
 
 建议人工验收：

@@ -9,6 +9,7 @@ export interface FileLinkEnv {
   sessionId?: string;
   workspaceRoot?: string;
   openFile?: (relPath: string, line?: number) => void;
+  openWebLink?: (url: string, destination: "cyrene" | "external") => void | Promise<void>;
 }
 
 export const FileLinkContext = createContext<FileLinkEnv>({});

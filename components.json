@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/renderer/react/components/ui/marker.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "aliases": {
+    "components": "src/renderer/react/components",
+    "utils": "src/renderer/react/lib/utils",
+    "ui": "src/renderer/react/components/ui",
+    "lib": "src/renderer/react/lib",
+    "hooks": "src/renderer/react/hooks"
+  },
+  "iconLibrary": "lucide"
+}

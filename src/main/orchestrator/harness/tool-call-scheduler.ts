@@ -2,7 +2,7 @@ import type { ToolCall } from "../vendors/types";
 import { resolveEffectKind, type ToolDefinition } from "../tools/registry/tool-registry";
 import { parseToolCallArgs } from "./types";
 import { resolveSideEffect } from "./side-effect-resolver";
-import { isHarnessBuiltin } from "./builtin-tools";
+import { isHarnessBuiltin, TASK_TOOL_ID } from "./builtin-tools";
 import { READ_TOOL_RESULT_TOOL_ID } from "./tool-output/read-tool-result";
 
 export type ToolExecutionMode = "parallel" | "exclusive";
@@ -32,14 +32,22 @@ export interface ToolCallScheduleResult {
 
 /**
  * 并发默认拒绝：普通工具必须显式声明当前参数安全，且只能是读操作。
- * Harness 内置工具中仅 read_tool_result 不会改父状态，允许并发。
+ * Harness 内置工具中 read_tool_result 与显式只读 task 可并发；其余内置工具排他执行。
  */
 export function classifyToolExecutionMode(
   call: ToolCall,
   tools: ToolDefinition[],
 ): ToolExecutionMode {
   if (isHarnessBuiltin(call.name)) {
-    return call.name === READ_TOOL_RESULT_TOOL_ID ? "parallel" : "exclusive";
+    if (call.name === READ_TOOL_RESULT_TOOL_ID) return "parallel";
+    if (call.name === TASK_TOOL_ID) {
+      try {
+        return parseToolCallArgs(call).access_mode === "read_only" ? "parallel" : "exclusive";
+      } catch {
+        return "exclusive";
+      }
+    }
+    return "exclusive";
   }
 
   const tool = tools.find((candidate) => candidate.id === call.name);
@@ -97,8 +105,8 @@ export async function scheduleToolCalls<T>(
         result = await options.execute(execution);
       } catch (error) {
         if (options.signal?.aborted) {
-          // 当前调用已进入 execute（runStore 已记 started、非幂等副作用可能已派发）：
-          // 不能闭合为 not_executed，保留 started 交取消闭合写 unknown + uncertainEffects；
+          // 当前调用已进入 execute（tool_started 已落盘、非幂等副作用可能已派发）：
+          // 不能闭合为 not_executed，取消收尾会按轨迹写 unknown；
           // 只有 index 之后真正未派发的调用才记 aborted_before_dispatch。
           await commitNotStarted(index + 1, "aborted_before_dispatch");
           return { cancelled: true, halted: false };
@@ -193,7 +201,7 @@ async function runParallelGroup<T>(
       active.delete(next.index);
       if (next.error !== undefined) {
         if (options.signal?.aborted) {
-          // abort 拒绝的槽位永不 ready：commitIndex 停在其前（恢复路径按 toolCalls 记录兜底）
+          // abort 拒绝的槽位永不 ready：commitIndex 停在其前（恢复路径按 tool_started 轨迹兜底）
           cancelled = true;
           continue;
         }

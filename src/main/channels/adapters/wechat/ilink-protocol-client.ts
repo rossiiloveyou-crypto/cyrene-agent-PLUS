@@ -149,10 +149,14 @@ export class ILinkClient {
    * Long-poll for new messages.
    * 后端最长挂 35 秒；如果返回就立刻拿新 get_updates_buf 再次请求。
    * 收到会话过期（ret=-14）抛 SessionExpired。
+   * signal：调用方（适配器停止）中止时立刻打断在途请求，不必等本次 long-poll 自然返回。
    */
-  async getUpdates(buf = ""): Promise<{ messages: WeixinMessage[]; buf: string }> {
+  async getUpdates(buf = "", signal?: AbortSignal): Promise<{ messages: WeixinMessage[]; buf: string }> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), LONG_POLL_TIMEOUT_MS + 5_000);
+    const onExternalAbort = () => ctrl.abort();
+    if (signal?.aborted) ctrl.abort();
+    else signal?.addEventListener("abort", onExternalAbort, { once: true });
 
     try {
       const resp = await this.doJson<unknown>("POST", "/ilink/bot/getupdates", {
@@ -178,6 +182,7 @@ export class ILinkClient {
       };
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onExternalAbort);
     }
   }
 

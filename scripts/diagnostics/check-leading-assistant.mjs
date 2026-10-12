@@ -8,7 +8,7 @@
 //
 // 用法：
 //   node scripts/diagnostics/check-leading-assistant.mjs
-// 自动读取 userData/model-settings.json（Windows: %APPDATA%\live2d-cyrene）。
+// 自动读取 userData/model-settings.json（Windows: %APPDATA%\Cyrene）。
 // 也可用环境变量覆盖：
 //   CYRENE_BASE_URL / CYRENE_API_KEY / CYRENE_MODEL
 //
@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const userData = path.join(os.homedir(), "AppData", "Roaming", "live2d-cyrene");
+const userData = path.join(os.homedir(), "AppData", "Roaming", "Cyrene");
 const cfgPath = path.join(userData, "model-settings.json");
 let cfg = {};
 try {

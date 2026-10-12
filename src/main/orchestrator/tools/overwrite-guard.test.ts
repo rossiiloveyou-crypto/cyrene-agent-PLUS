@@ -64,7 +64,7 @@ describe("overwriteDropMessage 报错文案", () => {
     expect(message).toContain("120");
     expect(message).toContain("30");
     expect(message).toContain("25%");
-    expect(message).toContain("str_replace");
+    expect(message).toContain("Edit");
     expect(message).toContain("用户");
   });
 });

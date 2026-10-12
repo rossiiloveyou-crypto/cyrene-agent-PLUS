@@ -55,6 +55,20 @@ export interface MarketPluginEntry {
   homepage?: string;
 }
 
+/** 可选的市场详情文件；列表索引始终是基础信息来源 */
+export interface MarketPluginDetails {
+  schemaVersion: 1;
+  features: string[];
+  requirements: string[];
+  setup: string[];
+  dataHandling: string[];
+  documentationUrl?: string;
+}
+
+export type MarketPluginDetailsResult =
+  | { ok: true; details: MarketPluginDetails }
+  | { ok: false; error: string };
+
 /** 插件市场索引源的健康状态：市场面板据此展示各源（Gitee / GitHub）的实时死活 */
 export interface MarketSourceStatus {
   url: string;
@@ -90,6 +104,7 @@ export interface PluginManagementApi {
   }>;
   uninstall(id: string): Promise<{ ok: boolean; error?: string; overview?: PluginOverview }>;
   marketList(preferred?: string): Promise<MarketListResult>;
+  marketDetails(id: string, preferred?: string): Promise<MarketPluginDetailsResult>;
   marketInstall(id: string): Promise<MarketInstallResult>;
 }
 

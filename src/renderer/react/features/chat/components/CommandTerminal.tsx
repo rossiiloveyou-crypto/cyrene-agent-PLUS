@@ -86,3 +86,42 @@ export function CommandTerminal({ tool }: { tool: ToolExecutionRecord }) {
     </section>
   );
 }
+
+function formatToolResult(result: string): string {
+  try {
+    return JSON.stringify(JSON.parse(result), null, 2);
+  } catch {
+    return result;
+  }
+}
+
+/** 通用工具输出沿用终端外观，但不伪装成实际执行的 shell 命令。 */
+export function ToolOutputTerminal({ tool, result }: { tool: ToolExecutionRecord; result: string }) {
+  const { t } = useTranslation();
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const output = formatToolResult(result);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  }, [output]);
+
+  const status = tool.status === "running"
+    ? t("messageList.commandRunning")
+    : tool.status === "error"
+      ? t("messageList.commandFailed")
+      : t("messageList.commandCompleted");
+
+  return (
+    <section className="cy-command-terminal" aria-label={t("messageList.toolOutputTerminalTitle")}>
+      <div className="cy-command-terminal__header">
+        <span className="cy-command-terminal__title"><TerminalIcon size={14} aria-hidden="true" />{t("messageList.toolOutputTerminalTitle")}</span>
+        <span className={`cy-command-terminal__status is-${tool.status}`}>{status}</span>
+        <CopyButton text={output} size={15} color="#a1a1aa" />
+      </div>
+      <div className="cy-command-terminal__body" ref={scrollerRef}>
+        <pre className="cy-command-terminal__output"><Ansi>{output}</Ansi>{tool.status === "running" && <span className="cy-command-terminal__cursor" aria-hidden="true" />}</pre>
+      </div>
+    </section>
+  );
+}

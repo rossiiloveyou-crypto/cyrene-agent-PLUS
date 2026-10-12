@@ -1,8 +1,8 @@
 ---
 name: cyrene-exam-paper
 
-description: Cyrene 在 Learn 模式下的试卷能力：命题蓝图驱动出卷（知识点→能力→题型）、试卷与答案分离、批改评分、考试复盘。学科出题细则在 references/ 按需加载。
-version: 1.2.1
+description: Cyrene 在 Learn 模式下的试卷能力：命题蓝图驱动出卷（知识点→能力→题型）、右侧交互答题、提交后批改评分与考试复盘。学科出题细则在 references/ 按需加载。
+version: 1.3.0
 autoInject: true
 effectKind: external_side_effect
 modes:
@@ -11,7 +11,7 @@ modes:
 
 # Cyrene Exam Paper（试卷能力）
 
-出正式试卷的完整契约：先做命题蓝图，再按蓝图出卷；试卷与答案分离成两个文件，支持先考后批。文件操作安全原则已由 `cyrene-obsidian-workspace` 定义，无需重复。
+出正式试卷的完整契约：先确认命题蓝图，再按题型分批写入计划草稿并发布。应用会在右侧内置浏览器打开固定答题页；用户答题时自动保存，只有交卷后才会在所属对话启动新一轮批改。文件操作安全原则已由 `cyrene-obsidian-workspace` 定义，无需重复。
 
 ## 何时触发
 
@@ -77,70 +77,30 @@ modes:
 - 确认时长与满分（默认 60 分钟 / 100 分）
 - 用户明确说"随便出"才跳过确认直接出卷
 
-### 2. 试卷文件
+### 2. 分阶段生成并打开答题页
 
-路径：`exams/<subject>/<yyyy-mm-dd>-<topic>-试卷.md`
+完成蓝图确认后，严格按这个工具顺序执行。不要再调用旧的 `learn_exam_create`，也不要一次性生成整卷 JSON、写 Markdown 试卷或把 HTML/CSS/脚本交给页面执行。
 
-结构（严格遵守）：
+1. 调用 `learn_exam_create_plan` 创建隐藏草稿。传入 `schemaVersion: 1`、`title`、`subject`、`durationMinutes`、`totalPoints`、`quotas`。每个配额包含 `type`、`count`、该题型合计 `points` 和 `learningObjectives`。
+2. 保存返回的 `draftId`。按配额分别调用题型工具，每批只写一种题型：
+   - `learn_exam_add_single_choice`：每题字段 `type: "single_choice"`、`prompt`、`points`、`learningObjective`、`explanation`、`options`、`correctIndex`。
+   - `learn_exam_add_multiple_choice`：每题使用 `type: "multiple_choice"`、`options` 和整数数组 `correctIndexes`，不要写 `correctIndex`。
+   - `learn_exam_add_true_false`：使用 `type: "true_false"` 和布尔值 `correct`。
+   - `learn_exam_add_fill_blank`：使用 `type: "fill_blank"` 和 `blanks` 数组；每个空含 `referenceAnswer`、`rubric`。
+   - `learn_exam_add_written`：每批只包含一种类型（`short_answer` 或 `essay`），并包含 `referenceAnswer` 和 `rubric`。
+3. 每次工具返回后读取 `completed`、`remaining`、`pointsCompleted`、`pointsRemaining`。只修复返回指出的题型/批次，不重复发送已成功写入的题目；题型配额与分值全部满足后再继续。
+4. 调用 `learn_exam_publish` 并传入 `draftId`。发布失败时按错误位置修复草稿；发布成功后应用会在右侧浏览器打开考试页。告诉用户可以直接在页面答题，然后结束本轮，不要在聊天里展开整卷。
 
-```markdown
-# <主题> 试卷
+所有题型都必须遵循工具 schema（结构定义）；不要混入不属于该题型的字段。参考答案、评分细则和解析只写到对应 JSON 字段，不得复制到可见题干或选项中。数学公式使用 `$...$` 行内格式或 `$$...$$` 独立格式；题干按纯文本及公式标记传入。不要自行构造 schema 没有定义的题型。
 
-- 范围：<主题列表>
-- 时长：60 分钟 ｜ 满分：100 分 ｜ 日期：yyyy-mm-dd
+### 3. 保存复盘
 
-## 一、<按蓝图定的题型>（共 XX 分）
+用户在右侧答题页交卷后，应用只把所属对话的批改请求排入下一轮；答案已经在主进程冻结，不需要从页面复制或索要 JSON。此时必须调用 `learn_exam_get_submission` 读取冻结的题目、评分细则、参考答案和用户答案，再逐题批改，最后调用 `learn_exam_save_grading` 保存结构化结果。不得在用户交卷前调用读取工具。
 
-**1. 题干（公式用 $…$ 行内、$$…$$ 块级）**
+批改时：客观题按标准答案核对；填空、简答和解答题按 rubric 给分；题目分数不得超过该题分值；`questionResults` 必须覆盖每道题且总分不得超过满分；`abilityAnalysis` 根据 learningObjective 汇总。工具保存后，右侧浏览器答题页自动刷新为只读状态并显示逐题反馈、总分和下一步建议。批改失败时用户可在该页面点重试；新一轮仍按 `learn_exam_get_submission` → `learn_exam_save_grading` 执行。
 
-A. 选项一
-B. 选项二
-C. 选项三
-D. 选项四
-
-**作答：**
-
-> （在此作答；客观题只填字母：选择 B、多选 B D、判断 Y 或 N）
-
-## 客观题答题卡（如有客观题）
-
-| 题号 | 1 | 2 | … |
-| --- | --- | --- | --- |
-| 答案 |  |  |  |
-```
-
-要点：
-
-- 大题分区与题型由蓝图决定，不固定"单选+填空+计算+简答"模板；客观题集中的卷子配答题卡，全主观题的卷子不需要
-- 客观题必须带作答字母标记：选择/多选题选项每行一个、行首 A./B./C./D.，多选题干标注（多选）；判断题题干末尾标注 `（Y / N）`。作答只填字母（B、B D、Y/N），不抄选项原文；答题卡与答案表同格式
-- 主观题每题题干后跟 `**作答：**` 留白区——用户直接在试卷文件里作答，或做完贴到对话里
-- 各题分值相加必须等于满分
-
-### 3. 答案文件
-
-路径：`exams/<subject>/<yyyy-mm-dd>-<topic>-答案解析.md`
-
-内容按顺序包含：
-
-1. 参考答案：客观题一张表（填字母：选择/多选 A–D、判断 Y/N，与答题卡同格式）；主观题逐题参考答案
-2. 逐题解析：正确项为什么对；每个干扰项对应什么误解；主观题列典型错误思路
-3. 评分标准：按题型特性定——计算题按步骤给分、设计题按要点给分、语言题按档给分
-4. 讲评要点：预计用户易错的题、回链 `notes/` 对应章节
-
-### 4. 写入纪律
-
-- 试卷、答案分别两个文件：先写试卷，再写答案
-- 单文件超过约 150 行时分两次写入：先写主体，再用 append 续写
-- 同日同主题重出，文件名末尾加序号（`-2`）区分，不覆盖已有文件
-- 出完只在对话里报路径和卷面概要（范围/题量/分值/能力分布），不贴整卷全文
+随后仍写一份轻量复盘到 `exams/<subject>/<yyyy-mm-dd>-<topic>-考试复盘.md`：得分、错题清单、误解分析、薄弱能力、建议复习的笔记章节。不要再生成独立的试卷 Markdown 或答案解析 Markdown。对话里只给总分、错题摘要和下一步建议。
 
 ## 批改流程
 
-用户说"批改"、"对答案"、"看看能得多少分"时：
-
-1. 读试卷与答案解析两个文件
-2. 确认用户答案在哪：试卷文件的作答区、对话里直接说、还是贴了答题卡
-3. 逐题对照评分：对的简说为什么对；错的指出误解点，回链 `notes/` 对应章节
-4. 算总分，按蓝图里的能力维度统计得分率——哪个能力失分最多，比按题型统计更能指导复习
-5. 复盘写入 `exams/<subject>/<yyyy-mm-dd>-<topic>-考试复盘.md`：得分、错题清单、误解分析、薄弱能力、建议复习的笔记章节
-6. 对话里只给总分、错题摘要、下一步建议；完整复盘在文件里
+正式考试的批改由“用户交卷 → 新一轮工具读取 → 保存结构化评分”驱动。用户在对话里单独要求批改既有 Markdown 作业时，再按普通作业流程读取相关文件并反馈；不要把这条旧流程用于右侧答题页试卷。

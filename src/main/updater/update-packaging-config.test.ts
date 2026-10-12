@@ -11,7 +11,7 @@ describe("application update packaging", () => {
 
     expect(config.publish).toMatchObject({
       provider: "github",
-      owner: "Playa-0v0",
+      owner: "Playa-Cyrene",
       repo: "Cyrene-Agent",
     });
   });

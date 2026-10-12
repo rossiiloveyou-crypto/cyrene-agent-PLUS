@@ -16,6 +16,7 @@ export interface AppUpdateState {
   transferred?: number;
   total?: number;
   releaseNotes?: string | null;
+  /** 错误码（check_failed / download_failed），文案由渲染层翻译；未知码按通用失败处理 */
   error?: string;
 }
 

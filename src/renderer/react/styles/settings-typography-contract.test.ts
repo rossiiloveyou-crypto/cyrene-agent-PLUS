@@ -8,6 +8,7 @@ const settingsCss = readFileSync(
   resolve(__dirname, "../features/settings/AppearanceSettingsPage.css"),
   "utf8",
 );
+const sharedTokensCss = readFileSync(resolve(__dirname, "../../ui/tokens.css"), "utf8");
 const sidebarActionCss = readFileSync(
   resolve(__dirname, "../components/ui/NewTaskButton.css"),
   "utf8",
@@ -57,11 +58,10 @@ describe("设置页文字层级契约", () => {
     expect(pageRule).toContain("padding: 50px 10px 10px;");
     expect(pageRule).toContain("font: var(--rb-text-small);");
     expect(pageRule).toContain("letter-spacing: normal;");
-    expect(pageRule).toContain("--rb-font-sans: var(--rb-font-ui);");
-    expect(pageRule).toContain("--rb-text-title: 400 20px/1.4 var(--rb-font-ui);");
-    expect(pageRule).toContain("--rb-text-small-em: 400 14px/1.5 var(--rb-font-ui);");
-    expect(pageRule).toContain("--rb-text-primary: #0d0d0d;");
-    expect(pageRule).toContain("--rb-text-secondary: color-mix(in oklab, #404040 60%, transparent);");
+    expect(pageRule).toContain("color: var(--rb-text-primary);");
+    expect(sharedTokensCss).toContain("--rb-font-sans: var(--rb-font-ui);");
+    expect(pageRule).toContain("--rb-text-title: 400 20px/1.4 var(--rb-font-sans);");
+    expect(pageRule).toContain("--rb-text-small-em: 400 14px/1.5 var(--rb-font-sans);");
   });
 
   it("设置项和分组说明使用 14px 正文而不是 13px 注释字号", () => {

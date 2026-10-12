@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -24,7 +26,6 @@ vi.mock("../../../components/ui/UserAvatar", () => ({ UserAvatar: () => createEl
 vi.mock("../../../components/ui/NewTaskButton", () => ({
   NewTaskButton: () => createElement("span", null, "new-task-button"),
 }));
-vi.mock("./AppUpdateEntry", () => ({ AppUpdateEntry: () => createElement("span", null, "app-update-entry") }));
 vi.mock("./ConversationSidebar", () => ({
   ConversationSidebar: () => createElement("span", null, "conversation-sidebar"),
 }));

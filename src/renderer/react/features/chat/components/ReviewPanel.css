@@ -6,8 +6,8 @@
   margin: 8px 0 4px;
   border: 1px solid var(--rb-border-default, #e7e2e5);
   border-radius: 12px;
-  background: rgb(255 255 255 / 88%);
-  box-shadow: 0 4px 16px rgb(44 31 38 / 5%);
+  background: var(--rb-surface-elevated);
+  box-shadow: var(--rb-shadow-card);
   overflow: hidden;
   app-region: no-drag;
 }
@@ -32,7 +32,7 @@
 }
 .cy-review-panel.is-expanded .cy-review-panel__header {
   border-bottom: 1px solid var(--rb-border-default, #ece7ea);
-  background: #faf8f9;
+  background: var(--rb-surface-workspace);
 }
 
 /* 左侧提醒图标（透明底 mascot PNG） */
@@ -64,8 +64,8 @@
   font: 600 12px/1.2 var(--rb-font-mono, monospace);
   font-variant-numeric: tabular-nums;
 }
-.cy-review-panel__stats .is-add { color: #1a7f37; }
-.cy-review-panel__stats .is-remove { color: #cf222e; }
+.cy-review-panel__stats .is-add { color: var(--rb-diff-add-text); }
+.cy-review-panel__stats .is-remove { color: var(--rb-diff-remove-text); }
 
 /* 展开/收起 chevron */
 .cy-review-panel__chevron {
@@ -114,12 +114,13 @@
   font-weight: 600;
   line-height: 1.5;
 }
-.cy-review-panel__kind.is-modified { background: #ddf4ff; color: #0550ae; }
-.cy-review-panel__kind.is-created  { background: #e6ffec; color: #116329; }
-.cy-review-panel__kind.is-deleted  { background: #ffebe9; color: #82071e; }
-.cy-review-panel__kind.is-renamed  { background: #ddf4ff; color: #0550ae; }
-.cy-review-panel__kind.is-binary   { background: #f0f0f0; color: #6e7781; }
-.cy-review-panel__kind.is-large    { background: #f0f0f0; color: #6e7781; }
+/* kind 徽标：新增/删除/修改复用 diff 语义色；二进制/大文件是中性状态，用次级文字色调配 */
+.cy-review-panel__kind.is-modified { background: var(--rb-diff-info-bg); color: var(--rb-diff-info-text); }
+.cy-review-panel__kind.is-created  { background: var(--rb-diff-add-bg); color: var(--rb-diff-add-text); }
+.cy-review-panel__kind.is-deleted  { background: var(--rb-diff-remove-bg); color: var(--rb-diff-remove-text); }
+.cy-review-panel__kind.is-renamed  { background: var(--rb-diff-info-bg); color: var(--rb-diff-info-text); }
+.cy-review-panel__kind.is-binary   { background: color-mix(in srgb, var(--rb-text-secondary) 12%, var(--rb-surface-elevated)); color: var(--rb-text-secondary); }
+.cy-review-panel__kind.is-large    { background: color-mix(in srgb, var(--rb-text-secondary) 12%, var(--rb-surface-elevated)); color: var(--rb-text-secondary); }
 
 /* 文件路径 */
 .cy-review-panel__file-path {
@@ -146,8 +147,8 @@
   font: 600 11px/1.2 var(--rb-font-mono, monospace);
   font-variant-numeric: tabular-nums;
 }
-.cy-review-panel__file-stats .is-add { color: #1a7f37; }
-.cy-review-panel__file-stats .is-remove { color: #cf222e; }
+.cy-review-panel__file-stats .is-add { color: var(--rb-diff-add-text); }
+.cy-review-panel__file-stats .is-remove { color: var(--rb-diff-remove-text); }
 
 /* 右箭头（提示点击会打开侧栏） */
 .cy-review-panel__arrow {
@@ -167,23 +168,23 @@
   padding: 5px 12px;
   border: 1px solid var(--rb-border-default, #d9d2d6);
   border-radius: 7px;
-  background: #fff;
+  background: var(--rb-surface-hover);
   color: var(--rb-text-primary, #2f2d31);
   font: 12px/1.4 var(--rb-font-sans, sans-serif);
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
 .cy-review-panel__restore-btn:hover {
-  background: var(--rb-surface-hover, #fff1f6);
+  background: var(--rb-surface-active);
 }
 /* 第二次点击前的确认态：警示色，提示这是破坏性操作 */
 .cy-review-panel__restore-btn.is-confirming {
-  border-color: #cf222e;
-  color: #cf222e;
+  border-color: var(--rb-danger);
+  color: var(--rb-danger);
   font-weight: 600;
 }
 .cy-review-panel__restore-btn.is-confirming:hover {
-  background: #ffebe9;
+  background: var(--rb-diff-remove-bg);
 }
 .cy-review-panel__restore-btn:disabled {
   opacity: 0.55;
@@ -192,8 +193,8 @@
 
 .cy-review-panel__restore-summary {
   font: 12px/1.5 var(--rb-font-sans, sans-serif);
-  color: #116329;
+  color: var(--rb-success);
 }
 .cy-review-panel__restore-summary.is-error {
-  color: #cf222e;
+  color: var(--rb-danger);
 }

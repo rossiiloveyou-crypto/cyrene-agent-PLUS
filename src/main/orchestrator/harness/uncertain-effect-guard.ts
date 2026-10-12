@@ -3,7 +3,7 @@
  *
  * 仅保留副作用 fingerprint 拦截：
  * - isBlockedByUncertainEffect：阻止相同 non-idempotent 副作用的自动重放
- * - resolveUncertainEffect：通过 reconcile / ask_user 解除一次 uncertain effect
+ * - repeatAuthorization：允许一次匹配调用；派发开始后由 dispatcher 消耗
  *
  * 重要边界：本文件只决定"是否允许下一次相同危险调用"，
  * 不参与 final settlement、不否决模型诚实 final。
@@ -32,7 +32,8 @@ export function isBlockedByUncertainEffect(
   const toolName = openParen > 0 ? fingerprint.slice(0, openParen) : "";
   const failSafeFingerprint = toolName ? `${toolName}(*)` : undefined;
   return state.uncertainEffects.some((effect) =>
-    effect.fingerprint === fingerprint || effect.fingerprint === failSafeFingerprint,
+    !effect.repeatAuthorization?.id &&
+    (effect.fingerprint === fingerprint || effect.fingerprint === failSafeFingerprint),
   );
 }
 

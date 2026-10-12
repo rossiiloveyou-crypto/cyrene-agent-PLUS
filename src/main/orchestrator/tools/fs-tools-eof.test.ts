@@ -56,9 +56,9 @@ describe("read_file 假 EOF 修复", () => {
     };
     expect(result.success).toBe(false);
     expect(result.errorCode).toBe("FILE_TOO_LARGE");
-    // 如实契约：明确说不支持 + 引导 search_text 直接获取上下文（不承诺不存在的"定位后按行读"链路）
+    // 如实契约：明确说不支持 + 引导 Grep 直接获取上下文（不承诺不存在的"定位后按行读"链路）
     expect(result.error).toContain("暂不支持");
-    expect(result.error).toContain("search_text");
+    expect(result.error).toContain("Grep");
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });

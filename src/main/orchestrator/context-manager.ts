@@ -1,5 +1,5 @@
 import type { ChatVendorAdapter, ChatMessage, ChatRequest, OpenAIContentBlock } from "./vendors/types";
-import type { AgentLoopSettings, AgentLoopEvent } from "./cyrene-agent";
+import type { AgentLoopSettings } from "./cyrene-agent";
 import { recordRequest, recordUsage } from "../token-usage-store";
 
 const COMPRESSION_PROMPT = `你正在帮"昔涟"整理对话记忆。请把下面这段较早的对话历史总结成一段简洁的摘要，供后续回复参考。
@@ -16,21 +16,6 @@ const COMPRESSION_PROMPT = `你正在帮"昔涟"整理对话记忆。请把下�
 {history}
 
 请直接输出摘要内容，不要加任何前缀说明。`;
-
-/** 每轮对话 = user + assistant 两条消息。 */
-function keepRecentCount(mode: string): number {
-  switch (mode) {
-    case "work":
-    case "code":
-      return 6;
-    case "learn":
-      return 10;
-    case "chat":
-      return 20;
-    default:
-      return 6;
-  }
-}
 
 /** 简单 token 估算：中文字符按 1 token / 1.5 字符，英文按 4 字符 / token。 */
 export function estimateTokens(text: string): number {
@@ -83,64 +68,6 @@ function formatConversation(messages: ChatMessage[]): string {
       return `--- ${prefix} ---\n${text}`;
     })
     .join("\n\n");
-}
-
-function splitMessages(messages: ChatMessage[]): { systems: ChatMessage[]; conversation: ChatMessage[] } {
-  const systems: ChatMessage[] = [];
-  const conversation: ChatMessage[] = [];
-  for (const m of messages) {
-    if (m.role === "system") systems.push(m);
-    else conversation.push(m);
-  }
-  return { systems, conversation };
-}
-
-export interface CompressOptions {
-  messages: ChatMessage[];
-  adapter: ChatVendorAdapter;
-  settings: AgentLoopSettings;
-  /** 当前要附加到请求里的 system prompt（chat 模式为 soulSystemBaseContent）。 */
-  systemContent: string;
-  mode?: string;
-  onEvent?: (event: AgentLoopEvent) => void;
-  signal?: AbortSignal;
-}
-
-export async function compressConversation(options: CompressOptions): Promise<ChatMessage[]> {
-  const { messages, adapter, settings, systemContent, mode = "work", onEvent, signal } = options;
-  const contextWindow = settings.contextWindowTokens ?? 256000;
-  const threshold = Math.floor(contextWindow * 0.8);
-
-  const { systems, conversation } = splitMessages(messages);
-  const keepCount = keepRecentCount(mode) * 2;
-
-  // 消息太少，不需要压缩
-  if (conversation.length <= keepCount) return messages;
-
-  const systemTokens = estimateTokens(systemContent) + estimateMessageTokens(systems);
-  const conversationTokens = estimateMessageTokens(conversation);
-  const totalTokens = systemTokens + conversationTokens;
-
-  // 未超过阈值，不压缩
-  if (totalTokens < threshold) return messages;
-
-  const compressible = conversation.slice(0, -keepCount);
-  const recent = conversation.slice(-keepCount);
-
-  onEvent?.({ type: "compressing_context" });
-
-  try {
-    const summary = await callSummarizeModel(compressible, adapter, settings, signal);
-    const summaryMessage: ChatMessage = {
-      role: "assistant",
-      content: `[此前对话已压缩为记忆摘要]\n${summary}`,
-    };
-    return [...systems, summaryMessage, ...recent];
-  } catch (err) {
-    console.warn("[ContextManager] 模型压缩失败，回退到截断:", err);
-    // 压缩失败时兜底：直接丢弃最旧的消息，不调用模型
-    return [...systems, ...recent];
-  }
 }
 
 /**

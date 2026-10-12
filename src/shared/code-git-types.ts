@@ -23,7 +23,7 @@ export interface CodeGitStatus {
   state: CodeGitState;
   message?: string;
   executable: { source: CodeGitExecutableSource; version: string } | null;
-  branch: { current: string | null; detached: boolean; branches: string[] } | null;
+  branch: { current: string | null; detached: boolean; branches: string[]; tracking?: string | null } | null;
   files: CodeGitFileChange[];
   summary: Record<CodeGitChangeKind, number>;
   lines: { insertions: number; deletions: number };

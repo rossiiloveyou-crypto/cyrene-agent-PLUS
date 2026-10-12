@@ -317,7 +317,7 @@ scan -> disabled（用户插件首次发现默认停用）
 ## 插件目录
 
 ```text
-userData/plugins/<plugin-id>/      # 用户插件（打包版 = %APPDATA%\live2d-cyrene\plugins\）
+userData/plugins/<plugin-id>/      # 用户插件（打包版 = %APPDATA%\Cyrene\plugins\）
 src/plugins/<plugin-id>/           # 内置插件（随应用构建）
 userData/plugin-data/<plugin-id>/  # 插件私有数据，卸载不删
 ```

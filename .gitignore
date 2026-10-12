@@ -134,7 +134,8 @@ scripts/test-cita-minimax.mjs
 
 # Debug previews / scratch files generated during UI work
 cyrene-*-preview.html
-# Cyrene harness 架构图产物（本地生成、可重新生成，不进 git）
+# Cyrene 架构图产物（archify 渲染出的单文件图表，本地可重新生成，不进 git）
+cyrene-architecture.html
 cyrene-harness-architecture.html
 cyrene-harness.architecture.json
 tmp_*.txt
@@ -232,6 +233,8 @@ docs/
 docs/superpowers/
 # 聊天渲染性能基线的本地运行报告（跑指标生成的 JSON，随代码变化易失真，不进 git）
 docs/internal-issue/perf/
+# Git 工作区监视负载的复现素材（独立最小仓库，npm install 生成上万测试文件做 A/B 压测，不进本仓库）
+docs/repro-git-workspace-watcher/
 !docs/local-models.md
 !docs/opener-pack.md
 !docs/electron-33-to-43-upgrade-assessment.md
@@ -250,3 +253,14 @@ sticker-descriptions/
 #   ① 否则后人在别的机器上看不到基线，"合并前基线"这一交付物就只活在本机；
 #   ② 任何 `git clean -fdX` 都会把它们**静默删掉**（经验 C35：`!` 只对"本会被忽略的路径"起作用 —— 此处正是）。
 !.cyrene-merge-analysis/heb-p1/*
+
+dist/renderer/cyrene-welcome.png
+
+# 本地浏览器预览样例
+/preview-demo/
+
+# 本地学习考试预览草稿与构建产物
+/src/renderer/learn-exam-preview.css
+/src/renderer/learn-exam-preview.html
+/src/renderer/learn-exam-preview.tsx
+/dist/renderer/learn-exam.html

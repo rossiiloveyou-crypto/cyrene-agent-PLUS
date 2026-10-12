@@ -2,6 +2,7 @@ import { Popover } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "../../../i18n";
 import { normalizeStyleId, type StyleId } from "../../../../../shared/style-sampling";
+import nativeIconUrl from "../../../assets/status-moods/原生.png?url";
 import gentleIconUrl from "../../../assets/status-moods/温柔.png?url";
 import livelyIconUrl from "../../../assets/status-moods/元气.png?url";
 import healingIconUrl from "../../../assets/status-moods/治愈.png?url";
@@ -12,6 +13,7 @@ import customIconUrl from "../../../assets/status-moods/自定义.png?url";
 // 只存 i18n key 与风格 id（id 是存储值不能改；t() 不能出现在模块顶层常量里），
 // 展示文案在组件内求值。
 const STYLE_OPTIONS: ReadonlyArray<{ id: StyleId; labelKey: string; iconUrl: string }> = [
+  { id: "native", labelKey: "style.optionNative", iconUrl: nativeIconUrl },
   { id: "default", labelKey: "style.optionDefault", iconUrl: gentleIconUrl },
   { id: "lively", labelKey: "style.optionLively", iconUrl: livelyIconUrl },
   { id: "healing", labelKey: "style.optionHealing", iconUrl: healingIconUrl },
@@ -62,7 +64,7 @@ export function StyleControl() {
       placement="topRight"
       open={open}
       onOpenChange={setOpen}
-      overlayClassName="cy-style-popover"
+      rootClassName="cy-composer-menu-popover"
       content={
         <div className="cy-style-panel">
           <strong>{t("style.panelTitle")}</strong>

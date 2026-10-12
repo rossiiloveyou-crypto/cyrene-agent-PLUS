@@ -9,7 +9,8 @@
  * interruption 边界，则补一条 reason="crashed" 的 interruption 条目。
  *
  * 不重放、不修补旧 run 的消息——工具 unknown/not_executed 与 uncertainEffects
- * 已由投影依据 run-store 持久化的工具状态合成，无需在此重复。
+ * 由投影依据 assistant 声明、tool_started、tool_result 等轨迹事实合成；
+ * run-store 只负责发现中断的运行及其会话归属。
  */
 
 import type { HarnessRunSession } from "./harness/run-store";
@@ -31,10 +32,12 @@ export interface CrashReconciliationResult {
 
 /** 纯函数依赖：注入 store 接口便于单元测试，不绑定磁盘实现。 */
 export interface CrashReconciliationDeps {
-  runStore: { listInterruptedRuns(): HarnessRunSession[] };
+  runStore: { listInterruptedRuns(conversationId?: string): HarnessRunSession[] };
   transcriptStore: Pick<ConversationTranscriptStore, "read" | "append">;
   now?: () => number;
 }
+
+const conversationGates = new WeakMap<object, Map<string, Promise<CrashReconciliationResult>>>();
 
 /**
  * 崩溃对账主逻辑：对所有 interrupted run 幂等补写 crashed 边界。
@@ -43,11 +46,12 @@ export interface CrashReconciliationDeps {
  */
 export async function reconcileCrashedInterruptions(
   deps: CrashReconciliationDeps,
+  conversationId?: string,
 ): Promise<CrashReconciliationResult> {
   const { runStore, transcriptStore, now = Date.now } = deps;
   let written = 0;
   let skipped = 0;
-  for (const run of runStore.listInterruptedRuns()) {
+  for (const run of runStore.listInterruptedRuns(conversationId)) {
     const snapshot = await transcriptStore.read(run.conversationId);
     const hasBoundary = snapshot.entries.some(
       (entry) => entry.kind === "interruption" && entry.runId === run.runId,
@@ -56,14 +60,46 @@ export async function reconcileCrashedInterruptions(
       skipped += 1;
       continue;
     }
-    await transcriptStore.append(run.conversationId, {
-      kind: "interruption",
-      id: crashedInterruptionEntryId(run.runId),
-      at: now(),
-      runId: run.runId,
-      payload: { reason: "crashed" },
-    });
-    written += 1;
+    try {
+      await transcriptStore.append(run.conversationId, {
+        kind: "interruption",
+        id: crashedInterruptionEntryId(run.runId),
+        at: now(),
+        runId: run.runId,
+        payload: { reason: "crashed" },
+      });
+      written += 1;
+    } catch (error) {
+      // Startup's global sweep and a first conversation read can race. The
+      // deterministic ID makes one append authoritative; accept the winner.
+      const afterRace = await transcriptStore.read(run.conversationId);
+      const wasCommitted = afterRace.entries.some(
+        (entry) => entry.kind === "interruption" && entry.runId === run.runId,
+      );
+      if (!wasCommitted) throw error;
+      skipped += 1;
+    }
   }
   return { written, skipped };
+}
+
+/** First model-context read waits for this conversation's crash boundary. */
+export function reconcileCrashedInterruptionsForConversation(
+  deps: CrashReconciliationDeps,
+  conversationId: string,
+): Promise<CrashReconciliationResult> {
+  let byConversation = conversationGates.get(deps.transcriptStore as object);
+  if (!byConversation) {
+    byConversation = new Map();
+    conversationGates.set(deps.transcriptStore as object, byConversation);
+  }
+  const existing = byConversation.get(conversationId);
+  if (existing) return existing;
+
+  const pending = reconcileCrashedInterruptions(deps, conversationId);
+  byConversation.set(conversationId, pending);
+  void pending.catch(() => {
+    if (byConversation?.get(conversationId) === pending) byConversation.delete(conversationId);
+  });
+  return pending;
 }

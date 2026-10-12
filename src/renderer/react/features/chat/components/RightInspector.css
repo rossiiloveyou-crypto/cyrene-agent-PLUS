@@ -1,4 +1,4 @@
-/* RightInspector — 统一右侧挤出式面板（diff / 计划清单 tab 切换） */
+/* RightInspector — 统一右侧挤出式面板 */
 
 /* 宽度由外层 react-resizable-panels Panel 控制（默认 45%、320px～70% 窗口），这里只撑满 */
 .cy-right-inspector {
@@ -7,7 +7,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: #FFFBFC;
+  background-color: var(--rb-bg-1, #FFFBFC);
   background-image: url("../../../../../../assets/ui/cyrene-surface-pattern.svg");
   background-position: center;
   background-repeat: no-repeat;
@@ -15,7 +15,8 @@
   border: 1px solid var(--rb-border-default, #f2f2f2);
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: -4px 0 16px rgb(44 31 38 / 5%);
+  color: var(--rb-text-primary, #1d1d1f);
+  box-shadow: var(--rb-shadow-card, -4px 0 16px rgb(44 31 38 / 5%));
   animation: cy-right-inspector-slide-in 0.22s ease;
   app-region: no-drag;
 }
@@ -25,95 +26,160 @@
   to   { opacity: 1; transform: translateX(0); }
 }
 
-/* ── 顶部：antd Tabs 标签栏（editable-card 样式全部抹平，只留底部强调线） ── */
+/* ── 顶部：shadcn Tabs（Radix 提供焦点与键盘切换，本地样式沿用工作区主题） ── */
 
-.cy-right-inspector__tabs.ant-tabs {
+.cy-right-inspector__tabs {
+  display: flex;
   flex: 1;
   min-width: 0;
   min-height: 0;
   height: 100%;
+  flex-direction: column;
 }
 
-/* 导航栏：38px 高、底部细分割线、与面板同色 */
-.cy-right-inspector__tabs > .ant-tabs-nav {
-  margin: 0;
+.cy-right-inspector__tabbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
   min-height: 38px;
   border-bottom: 1px solid var(--rb-border-default, #f0ebee);
-  background: rgb(255 247 250 / 92%);
-  padding: 0 2px;
+  background: color-mix(in srgb, var(--rb-bg-2, #fafafc) 92%, transparent);
+  padding: 0 2px 0 4px;
 }
 
-.cy-right-inspector__tabs .ant-tabs-nav-list {
+.cy-right-inspector__tablist {
+  display: flex;
+  flex: 1;
+  align-self: stretch;
+  align-items: stretch;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
-/* 标签：抹平 antd 卡片边框，hover 变深，活动标签粉线 + 提亮。
-   选择器多带一层 __tabs.ant-tabs 是为了压过 antd 运行时注入的样式（文件名字号默认会被顶回 14px） */
-.cy-right-inspector__tabs.ant-tabs .ant-tabs-tab {
-  border: 0 !important;
+.cy-right-inspector__tab {
+  position: relative;
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  max-width: 260px;
+  min-height: 37px;
+  color: var(--rb-text-secondary, #99939a);
+}
+
+.cy-right-inspector__tab-trigger {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 37px;
+  padding: 0 9px;
+  border: 0;
   border-radius: 0;
   background: transparent;
-  padding: 7px 10px 7px 12px;
-  margin: 0;
+  color: inherit;
+  cursor: pointer;
   font-size: 12px;
   font-weight: 500;
   line-height: 1.2;
   font-family: var(--rb-font-sans, sans-serif);
-  color: var(--rb-text-secondary, #99939a);
-  transition: color 0.12s, background 0.12s;
+  transition: color 0.12s, background-color 0.12s;
 }
 
-.cy-right-inspector__tabs.ant-tabs .ant-tabs-tab .ant-tabs-tab-btn {
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.2;
-}
-
-.cy-right-inspector__tabs .ant-tabs-tab:hover {
-  color: var(--rb-text-primary, #2f2d31);
-  background: rgb(0 0 0 / 2%);
-}
-
-.cy-right-inspector__tabs .ant-tabs-tab.ant-tabs-tab-active {
-  background: rgb(255 251 252 / 96%);
+.cy-right-inspector__tab-trigger[data-state="active"] {
+  background: var(--rb-bg-1, #fffbfc);
   color: var(--rb-text-primary, #2f2d31);
   box-shadow: inset 0 -2px 0 var(--rb-accent, #ff5b8a);
 }
 
-/* antd 直接给活动标签的文字上默认蓝色（选择器命中 .ant-tabs-tab-btn），
-   必须以更高优先级把文字颜色覆盖为应用深色，仅保留下划线的粉色强调 */
-.cy-right-inspector__tabs.ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+.cy-right-inspector__tab-trigger[data-state="inactive"]:hover {
   color: var(--rb-text-primary, #2f2d31);
+  background: var(--rb-surface-hover, #fff1f6);
 }
 
-.cy-right-inspector__tabs .ant-tabs-tab-btn {
-  color: inherit;
-  /* 文件名可能很长：超宽省略 */
-  max-width: 180px;
+.cy-right-inspector__tab-trigger:focus-visible,
+.cy-right-inspector__tab-close:focus-visible,
+.cy-right-inspector__close:focus-visible {
+  outline: 2px solid var(--rb-accent, #ff5b8a);
+  outline-offset: -2px;
+}
+
+.cy-right-inspector__tab-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+}
+
+.cy-right-inspector__tab-icon > img,
+.cy-right-inspector__tab-icon > svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+.cy-right-inspector__tab-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
 }
 
-/* 每个标签自带的关闭小按钮（chip 上的 ×） */
-.cy-right-inspector__tabs .ant-tabs-tab-remove {
-  margin-left: 4px;
-  padding: 0 2px;
-  color: var(--rb-text-secondary, #99939a);
-  font-size: 10px;
-}
-
-.cy-right-inspector__tabs .ant-tabs-tab-remove:hover {
-  color: var(--rb-accent, #ff5b8a);
-}
-
-/* 右上角整体关闭按钮（关闭活动标签） */
-.cy-right-inspector__tabs .ant-tabs-extra-content {
-  display: flex;
+.cy-right-inspector__tab-close {
+  display: inline-flex;
+  flex: none;
   align-items: center;
+  justify-content: center;
+  width: 21px;
+  height: 21px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--rb-text-secondary, #99939a);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background-color 0.12s, color 0.12s;
 }
 
-/* 阶段色点 */
+.cy-right-inspector__tab:hover .cy-right-inspector__tab-close,
+.cy-right-inspector__tab:focus-within .cy-right-inspector__tab-close,
+.cy-right-inspector__tab:has([data-state="active"]) .cy-right-inspector__tab-close {
+  opacity: 1;
+}
+
+.cy-right-inspector__tab-close:hover {
+  background: var(--rb-surface-hover, #fff1f6);
+  color: var(--rb-text-primary, #2f2d31);
+}
+
+.cy-right-inspector__close {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--rb-text-secondary, #99939a);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.cy-right-inspector__close:hover {
+  background: var(--rb-surface-hover, #fff1f6);
+  color: var(--rb-text-primary, #2f2d31);
+}
+
 .cy-right-inspector__dot {
   width: 7px;
   height: 7px;
@@ -148,21 +214,19 @@
   color: var(--rb-text-primary, #2f2d31);
 }
 
-/* ── 主体：antd Tabs 内容区（滚动由各内容组件自理） ──
-   antd v6 的结构是 .ant-tabs-body-holder > .ant-tabs-body > .ant-tabs-content > .ant-tabs-tabpane，
-   旧版类名 .ant-tabs-content-holder 一并保留以防降级 */
-.cy-right-inspector__tabs > .ant-tabs-body-holder,
-.cy-right-inspector__tabs > .ant-tabs-content-holder {
+.cy-right-inspector__content {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-.cy-right-inspector__tabs > .ant-tabs-body-holder > .ant-tabs-body {
-  height: 100%;
+.cy-right-inspector__content[data-state="inactive"] {
+  display: none;
 }
 
-.cy-right-inspector__tabs .ant-tabs-content,
-.cy-right-inspector__tabs .ant-tabs-tabpane {
+.cy-right-inspector__content-body {
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }

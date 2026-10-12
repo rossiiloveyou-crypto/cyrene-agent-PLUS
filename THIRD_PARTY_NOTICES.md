@@ -2,9 +2,13 @@
 
 ## ZCode / Vercel ai-elements terminal design
 
-The chat command output panel is adapted from `E:\ZCode\packages\ui\src\components\ai-elements\terminal.tsx`. That component is derived from Vercel ai-elements, Copyright 2023 Vercel, Inc., licensed under Apache-2.0. ZCode's repository is also licensed under Apache-2.0. The adapted panel retains the source attribution; the full Apache-2.0 license text is available at [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+The chat command output panel is adapted from `E:\ZCode\packages\ui\src\components\ai-elements\terminal.tsx`. That component is derived from Vercel ai-elements, Copyright 2023 Vercel, Inc., licensed under Apache-2.0. ZCode's repository is also licensed under Apache-2.0. The adapted panel retains the source attribution; the full Apache-2.0 license text is included in `LICENSES/Apache-2.0.txt` and available at [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 ANSI output rendering uses `ansi-to-react` 6.2.6 (BSD-3-Clause).
+
+## ZCode file tool interfaces
+
+The `Read`, `Write`, `Edit`, `Glob`, and `Grep` tool interfaces and behavior are adapted from `E:\ZCode\apps\zcode-cli\packages\core\src\tool\handlers` and `E:\ZCode\apps\zcode-cli\packages\contracts\src\tools`. ZCode is licensed under Apache-2.0. The full license text is included in `LICENSES/Apache-2.0.txt` and available at [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 ## Git for Windows MinGit 2.55.0.3
 

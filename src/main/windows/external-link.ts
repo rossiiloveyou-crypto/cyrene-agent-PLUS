@@ -1,5 +1,13 @@
 import { app, shell } from "electron";
+import type { WebContents } from "electron";
 import { isDev } from "../env";
+
+const internalNavigationContents = new WeakSet<WebContents>();
+
+/** Allow an explicitly managed embedded browser to handle HTTP(S) navigation itself. */
+export function allowInternalNavigation(contents: WebContents): void {
+  internalNavigationContents.add(contents);
+}
 
 /**
  * 处理外部 URL：非 http(s) 拒绝，开发环境 localhost:5173 也拒绝（避免调试时误开）。
@@ -31,6 +39,7 @@ export function installGlobalNavigationGuard(): void {
 
     // 页面内导航一律阻止，http(s) 再转交系统浏览器
     contents.on("will-navigate", (event, url) => {
+      if (internalNavigationContents.has(contents)) return;
       event.preventDefault();
       openExternalUrl(url);
     });

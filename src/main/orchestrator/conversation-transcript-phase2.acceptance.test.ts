@@ -7,7 +7,6 @@ import { ConversationJournalService } from "./conversation-journal-service";
 import { ConversationTranscriptCompactor } from "./conversation-transcript-compactor";
 import { ConversationTranscriptStore } from "./conversation-transcript-store";
 import { buildAgentRunOptions, type BuildOptionsDeps } from "./build-options";
-import { prepareHarnessRecoveryState } from "./harness/run-recovery";
 import { HarnessRunStore } from "./harness/run-store";
 import { ChannelDispatcher } from "../channels/dispatcher";
 import { createChannelContext } from "../channels/channel-context";
@@ -137,23 +136,10 @@ async function runDesktopMode(mode: "chat" | "work" | "code" | "learn"): Promise
   });
 
   const runStore = new HarnessRunStore(root);
-  const run = runStore.create({
-    conversationId,
-    runId: "run-regenerate",
-    messages: [{
-      role: "assistant", content: "regenerate", toolCalls: [{ id: "run-regenerate:tool", name: "send_email", arguments: '{"to":"user@example.test"}' }],
-    }],
-    request: { provider: "test", model: "model", contextWindowTokens: 256_000, promptFingerprint: "p", toolSchemaFingerprint: "t" },
-  });
-  runStore.recordTool(run.runId, {
-    toolCallId: "run-regenerate:tool", toolName: "send_email",
-    sideEffect: "non_idempotent_side_effect", status: "started",
-  });
+  runStore.create({ conversationId, runId: "run-regenerate" });
   const restartedRuns = new HarnessRunStore(root);
-  const interrupted = restartedRuns.get(run.runId);
+  const interrupted = restartedRuns.get("run-regenerate");
   expect(interrupted?.status).toBe("interrupted");
-  const recovered = prepareHarnessRecoveryState(interrupted!, { conversationId });
-  expect(recovered.uncertainEffects).toEqual([expect.objectContaining({ toolCallId: "run-regenerate:tool", toolName: "send_email" })]);
 
   await appendAssistant(journal, conversationId, "run-regenerate", "regenerated answer ".repeat(100), true);
 

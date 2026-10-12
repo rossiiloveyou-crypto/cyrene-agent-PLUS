@@ -1,4 +1,4 @@
-export const STYLE_IDS = ["default", "lively", "healing", "focused", "sweet", "custom"] as const;
+export const STYLE_IDS = ["native", "default", "lively", "healing", "focused", "sweet", "custom"] as const;
 
 export type StyleId = typeof STYLE_IDS[number];
 export type RepetitionLevel = "model-default" | "light" | "medium" | "strong";
@@ -20,6 +20,8 @@ export const DEFAULT_CUSTOM_STYLE: CustomStyleConfig = {
 };
 
 export const BUILT_IN_STYLE_PRESETS = {
+  // 原生：采样与提示词都不干预，完全走模型默认。
+  native: { diversity: { driver: "model-default" }, repetition: "model-default" },
   default: { diversity: { driver: "temperature", value: 0.65 }, repetition: "model-default" },
   lively: { diversity: { driver: "temperature", value: 0.90 }, repetition: "light" },
   healing: { diversity: { driver: "temperature", value: 0.55 }, repetition: "model-default" },
@@ -27,13 +29,16 @@ export const BUILT_IN_STYLE_PRESETS = {
   sweet: { diversity: { driver: "temperature", value: 0.82 }, repetition: "light" },
 } as const satisfies Record<Exclude<StyleId, "custom">, StyleSamplingPreference>;
 
+/** 绑定提示词文件的风格：custom 走用户自建文件，native 完全不注入风格提示词。 */
+type PromptBackedStyleId = Exclude<StyleId, "custom" | "native">;
+
 export const STYLE_FILE_BY_ID = {
   default: "01_default.md",
   lively: "02_lively.md",
   healing: "03_healing.md",
   focused: "04_focused.md",
   sweet: "05_sweet.md",
-} as const satisfies Record<Exclude<StyleId, "custom">, string>;
+} as const satisfies Record<PromptBackedStyleId, string>;
 
 const REPETITION_LEVELS: readonly RepetitionLevel[] = ["model-default", "light", "medium", "strong"];
 

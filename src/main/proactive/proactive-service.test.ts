@@ -247,8 +247,7 @@ describe("proactive chat service", () => {
       const state = createDefaultProactiveState();
       let now = NOW;
       let generatedText = "首次文本";
-      const refresh = vi.spyOn(journal as unknown as { refreshProjection: (id: string) => Promise<unknown> }, "refreshProjection");
-      refresh.mockRejectedValueOnce(new Error("refresh failed"));
+      vi.spyOn(store, "checkpoint").mockRejectedValueOnce(new Error("checkpoint failed"));
       const service = createProactiveChatService({
         loadState: () => state,
         saveState: (next) => {
@@ -273,7 +272,7 @@ describe("proactive chat service", () => {
         },
       });
 
-      await expect(service.evaluateCandidate(candidate)).rejects.toThrow("refresh failed");
+      await expect(service.evaluateCandidate(candidate)).rejects.toThrow("checkpoint failed");
       expect(state.pendingCommitIntent?.intentId).toBe("proactive-intent-1");
       generatedText = "第二次模型文本";
       now += 999_999;

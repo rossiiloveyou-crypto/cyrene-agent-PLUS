@@ -7,6 +7,8 @@ import { isValidPluginVersion } from "../shared/version";
 import type {
   MarketInstallResult,
   MarketListResult,
+  MarketPluginDetails,
+  MarketPluginDetailsResult,
   MarketPluginEntry,
   MarketSourceStatus,
 } from "../shared/plugin-management";
@@ -25,6 +27,7 @@ export const MARKET_ZIP_URL_PREFIXES: readonly string[] = [
 ];
 
 export const MARKET_REGISTRY_TIMEOUT_MS = 10_000;
+export const MARKET_DETAILS_MAX_BYTES = 64 * 1024;
 export const MARKET_ZIP_DOWNLOAD_TIMEOUT_MS = 120_000;
 export const MARKET_ZIP_MAX_BYTES = 50 * 1024 * 1024;
 
@@ -82,6 +85,34 @@ function isHttpsUrl(v: unknown): v is string {
   return typeof v === "string" && v.startsWith("https://");
 }
 
+function stringList(value: unknown): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 20) return null;
+  if (value.some((item) => !isNonEmptyString(item) || item.length > 500)) return null;
+  return value.map((item) => (item as string).trim());
+}
+
+function validateDetails(raw: unknown): MarketPluginDetails | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (record.schemaVersion !== 1) return null;
+  const features = stringList(record.features);
+  const requirements = stringList(record.requirements);
+  const setup = stringList(record.setup);
+  const dataHandling = stringList(record.dataHandling);
+  if (!features || !requirements || !setup || !dataHandling) return null;
+  const documentationUrl = record.documentationUrl;
+  if (documentationUrl !== undefined && !isHttpsUrl(documentationUrl)) return null;
+  return {
+    schemaVersion: 1,
+    features,
+    requirements,
+    setup,
+    dataHandling,
+    documentationUrl: typeof documentationUrl === "string" ? documentationUrl : undefined,
+  };
+}
+
 /** 单条目校验：不合法返回 null（调用方丢弃该条并记日志，不阻断整个列表） */
 function validateEntry(raw: unknown, deps: PluginMarketplaceDeps): (MarketPluginEntry & { zip: string; sha256: string }) | null {
   if (typeof raw !== "object" || raw === null) return null;
@@ -92,7 +123,8 @@ function validateEntry(raw: unknown, deps: PluginMarketplaceDeps): (MarketPlugin
   if (typeof version !== "string" || !isValidPluginVersion(version)) return null;
   if (typeof zip !== "string" || !deps.zipUrlPrefixes.some((prefix) => zip.startsWith(prefix))) return null;
   if (typeof sha256 !== "string" || !SHA256_PATTERN.test(sha256)) return null;
-  if (typeof downloads !== "number" || !Number.isInteger(downloads) || downloads < 0) return null;
+  const normalizedDownloads = downloads === undefined ? 0 : downloads;
+  if (typeof normalizedDownloads !== "number" || !Number.isInteger(normalizedDownloads) || normalizedDownloads < 0) return null;
   if (homepage !== undefined && !isHttpsUrl(homepage)) return null;
   return {
     id,
@@ -100,7 +132,7 @@ function validateEntry(raw: unknown, deps: PluginMarketplaceDeps): (MarketPlugin
     version,
     description,
     author,
-    downloads,
+    downloads: normalizedDownloads,
     homepage: typeof homepage === "string" ? homepage : undefined,
     zip,
     sha256,
@@ -235,6 +267,37 @@ export function createPluginMarketplaceService(deps: PluginMarketplaceDeps) {
     return { ok: false, error, plugins: [], sources };
   }
 
+  async function getMarketDetails(id: string, preferred?: string): Promise<MarketPluginDetailsResult> {
+    if (!ID_PATTERN.test(id)) return { ok: false, error: "插件 ID 格式非法" };
+    const ordered = preferred && deps.registryUrls.includes(preferred)
+      ? [preferred, ...deps.registryUrls.filter((url) => url !== preferred)]
+      : [...deps.registryUrls];
+
+    for (const registryUrl of ordered) {
+      try {
+        const detailsUrl = new URL(registryUrl);
+        if (detailsUrl.protocol !== "https:" || !detailsUrl.pathname.endsWith("/registry.json")) continue;
+        detailsUrl.pathname = `${detailsUrl.pathname.slice(0, -"registry.json".length)}marketplace/${id}.json`;
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), registryTimeoutMs);
+        try {
+          const response = await fetchImpl(detailsUrl.href, { signal: controller.signal });
+          if (!response.ok) continue;
+          const text = await response.text();
+          if (text.length > MARKET_DETAILS_MAX_BYTES) continue;
+          const details = validateDetails(JSON.parse(text) as unknown);
+          if (details) return { ok: true, details };
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        // 详情文件可选：某个源缺失或暂时不可用时继续尝试下一个源。
+      }
+    }
+    return { ok: false, error: "插件详细信息暂不可用" };
+  }
+
   async function sha256File(file: string): Promise<string> {
     const hash = createHash("sha256");
     const stream = createReadStream(file);
@@ -334,5 +397,5 @@ export function createPluginMarketplaceService(deps: PluginMarketplaceDeps) {
     }
   }
 
-  return { listMarket, installFromMarket };
+  return { listMarket, getMarketDetails, installFromMarket };
 }

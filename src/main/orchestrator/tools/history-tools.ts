@@ -11,6 +11,7 @@ import { addMemory, searchHistoryEntries } from "../../rag";
 import { toolRegistry } from "./registry/tool-registry";
 import { currentUserTimezone } from "./built-in-tools";
 import { getDateLocale } from "../../locale-context";
+import { isMemoryEnabled } from "../../memory/memory-mode";
 import { resolveScopeId } from "../../zones/scope";
 
 const LOG_PREFIX = "[History]";
@@ -27,6 +28,7 @@ export async function indexConversationTurn(
   userText: string,
   assistantText: string,
 ): Promise<void> {
+  if (!isMemoryEnabled()) return;
   const ts = Date.now();
   const scope = resolveScopeId(sessionId);
   try {
@@ -70,6 +72,7 @@ export function registerRecallHistoryTool(): void {
       required: ["query"],
     },
     execute: async (args, ctx) => {
+      if (!isMemoryEnabled()) return "[recall_history] 记忆模式已关闭，历史召回当前不可用";
       const query = String(args.query || "").trim();
       if (!query) return "[错误] query 不能为空";
 

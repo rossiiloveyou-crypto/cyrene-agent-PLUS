@@ -283,7 +283,7 @@ export const fetchUrlTool: ToolDefinition = {
     "不要用于：\n" +
     "- 用户只给关键词没给网址 → 用 web_search\n" +
     "- 用户问'今天有什么新闻' → 用 web_search\n" +
-    "- 本地文件路径 → 用 read_file\n\n" +
+    "- 本地文件路径 → 用 Read\n\n" +
     "结果超过长度预算会被剪枝（保留开头结尾、省略中段），observation 里会附 tool-result:// 引用；" +
     "需要被剪掉的中段内容时，用 read_tool_result 读取，支持 offset/length 分段或 query 关键词定位。\n\n" +
     "参数：url (必填，完整 http(s) 地址)，format (可选 markdown|raw，默认 markdown)。",

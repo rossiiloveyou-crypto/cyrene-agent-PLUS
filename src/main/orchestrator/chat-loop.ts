@@ -14,11 +14,15 @@ import type {
   ChatResponse,
   VendorConfig,
 } from "./vendors/types";
+import type { ModelRetryStatus } from "../../shared/model-retry";
 import { streamChatWithSdk } from "./vendors/sdk-stream/runtime";
+import { classifyModelFailure } from "./vendors/model-error-classifier";
+import { runModelRequestWithRetry, type ModelRetryAttemptInput } from "./vendors/model-retry-runner";
+import { readRetryAfterMs } from "./vendors/model-retry-policy";
 import type { UnifiedStreamDelta } from "./vendors/sdk-stream/types";
 import type { ApprovedStyleSampling } from "./vendors/style-sampling";
 import { getTimeoutSettings } from "../timeout-manager";
-import { compressConversation } from "./context-manager";
+import { resolveModelRequestTimeoutMs } from "./config/model-timeout";
 import { buildContextUsageSnapshot } from "./context-usage";
 import { isExplicitStreamUnsupported } from "./vendors/stream-support";
 import { composePromptLayers } from "./prompt-layers";
@@ -41,7 +45,7 @@ export interface ChatLoopOptions {
   fallbackRevealIntervalMs?: number;
   /** 默认使用官方 SDK；测试可注入可控流实现。 */
   streamChat?: typeof streamChatWithSdk;
-  /** 当前对话模式，用于上下文压缩保留的最近轮数。 */
+  /** 当前对话模式：composePromptLayers 按模式选择提示词层组合。 */
   mode?: string;
   /** 权威轨迹提交端：canonical assistant 落盘（CTA Phase 1）。 */
   transcriptSink?: TranscriptSink;
@@ -105,19 +109,13 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<AgentLoopRe
   const usageRecorder = options.recordUsage ?? ((input, output, calls, cachedInput, cacheCreation) => recordUsage(input, output, calls, cachedInput, options.settings.model, cacheCreation));
   let usedImageCaptionFallback = false;
 
-  const messages = await compressConversation({
-    messages: options.messages,
-    adapter: options.adapter,
-    settings: options.settings,
-    systemContent: options.soulSystemBaseContent,
-    mode: options.mode,
-    onEvent: options.onEvent,
-    signal: options.signal,
-  });
+  const messages = options.messages;
 
-  // 上下文容量快照（preRequest）：压缩后、请求前。
-  // messages 为压缩后的原始消息，不含 composePromptLayers 追加的 runtime_context
-  // 尾部（不变量），runtimeContext 由独立参数计量，避免双重计数。
+  // 上下文容量快照（preRequest）：请求前。
+  // 消息即实际请求所用的历史（超预算压缩已在 buildAgentRunOptions 阶段
+  // 由 transcript 压缩链路完成，产出直接进入 options.messages），
+  // 不含 composePromptLayers 追加的 runtime_context 尾部（不变量），
+  // runtimeContext 由独立参数计量，避免双重计数。
   const emitContextUsage = (phase: "preRequest" | "terminal", extraAssistantReply?: string): void => {
     options.onEvent?.({
       type: "context_usage",
@@ -166,7 +164,7 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<AgentLoopRe
     ...(options.soulSampling ?? {}),
   });
 
-  const invokeNonStreaming = async (messages: ChatMessage[]): Promise<ChatResponse> => {
+  const invokeNonStreaming = async (messages: ChatMessage[], signal: AbortSignal): Promise<ChatResponse> => {
     const request: ChatRequest = {
       ...buildRequest(messages, false),
     };
@@ -174,28 +172,46 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<AgentLoopRe
     const http = options.adapter.buildRequest(effectiveRequest, options.settings);
     const controller = new AbortController();
     const abort = () => controller.abort();
-    options.signal?.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(abort, remainingBudget());
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; abort(); }, remainingBudget());
     try {
-      const response = await fetch(http.url, {
-        method: "POST",
-        headers: http.headers,
-        body: http.body,
-        signal: controller.signal,
-      });
+      let response: Response;
+      try {
+        response = await fetch(http.url, {
+          method: "POST",
+          headers: http.headers,
+          body: http.body,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (signal.aborted) throw error;
+        const failure = classifyModelFailure({ provider: options.adapter.id, model: effectiveRequest.model, error });
+        throw new AgentRuntimeError("E_MODEL_REQUEST_FAILED", "模型服务请求失败。", {
+          cause: error,
+          modelFailure: { ...failure, category: timedOut ? "TIMEOUT" : failure.category === "UNKNOWN" ? "NETWORK" : failure.category },
+        });
+      }
       if (!response.ok) {
         const body = await response.text().catch(() => "");
         // [image-send] 链路日志④：服务端拒绝时打印完整错误体（Anthropic 400 会带具体 reason）。
         console.error(`[image-send] ChatLoop 请求被拒 HTTP ${response.status}:`, body.slice(0, 500) || "(无响应体)");
+        let errorPayload: unknown;
+        try { errorPayload = JSON.parse(body); } catch { errorPayload = undefined; }
         throw new AgentRuntimeError(
           "E_MODEL_REQUEST_FAILED",
-          `模型请求失败：HTTP ${response.status}${body ? ` - ${body.slice(0, 200)}` : ""}`,
+          `模型请求失败：HTTP ${response.status}`,
+          {
+            modelFailure: classifyModelFailure({ provider: options.adapter.id, model: effectiveRequest.model, status: response.status, error: errorPayload }),
+            retryAfterMs: readRetryAfterMs(response.headers),
+          },
         );
       }
       return options.adapter.parseResponse(await response.json());
     } finally {
       clearTimeout(timer);
-      options.signal?.removeEventListener("abort", abort);
+      signal.removeEventListener("abort", abort);
     }
   };
 
@@ -229,7 +245,7 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<AgentLoopRe
     options.onEvent?.({ type: "text_message_end", messageId });
   };
 
-  const invokeStreaming = async (messages: ChatMessage[]): Promise<{
+  const invokeStreaming = async (messages: ChatMessage[], attempt: ModelRetryAttemptInput): Promise<{
     response: ChatResponse;
     needsReveal: boolean;
   }> => {
@@ -241,12 +257,15 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<AgentLoopRe
       if (!delta) return;
       text += delta;
       emittedStreamContent = true;
+      attempt.onVisibleDelta();
       startText();
       options.onEvent?.({ type: "text_message_content", messageId, delta });
     };
     const onDelta = (delta: UnifiedStreamDelta) => {
+      attempt.onStreamActivity();
       if (delta.type === "reasoning_delta" && delta.delta) {
         emittedStreamContent = true;
+        attempt.onVisibleDelta();
         startReasoning();
         options.onEvent?.({
           type: "reasoning_message_content",
@@ -263,7 +282,7 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<AgentLoopRe
         request: effectiveRequest,
         config: vendorConfig,
         timeoutMs: remainingBudget(),
-        signal: options.signal,
+        signal: attempt.signal,
         onDelta,
       });
       emitTextDelta(timePrefixFilter.finish());
@@ -283,30 +302,63 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<AgentLoopRe
       if (!emittedStreamContent && isExplicitStreamUnsupported(error)) {
         throw new StreamUnavailableError("流式请求不受支持", { cause: error });
       }
-      throw error;
+      if (error instanceof AgentRuntimeError && error.modelFailure) throw error;
+      if (error instanceof Error && (error.message === "E_SOUL_ONLY_CANCELLED" || error.message === "E_SOUL_ONLY_TIMEOUT")) {
+        throw error;
+      }
+      const modelFailure = classifyModelFailure({ provider: options.adapter.id, model: effectiveRequest.model, error });
+      throw new AgentRuntimeError(
+        "E_MODEL_REQUEST_FAILED",
+        modelFailure.status ? `模型请求失败：HTTP ${modelFailure.status}` : "模型服务请求失败。",
+        {
+        cause: error,
+        modelFailure,
+        retryAfterMs: readRetryAfterMs(error),
+        },
+      );
     }
   };
 
-  const invokeWithStreamFallback = async (messages: ChatMessage[]) => {
+  let forceNonStreaming = false;
+  const invokeWithStreamFallback = async (messages: ChatMessage[], attempt: ModelRetryAttemptInput) => {
+    if (forceNonStreaming) {
+      return { response: await invokeNonStreaming(messages, attempt.signal), needsReveal: true };
+    }
     try {
-      return await invokeStreaming(messages);
+      return await invokeStreaming(messages, attempt);
     } catch (error) {
       if (!(error instanceof StreamUnavailableError) || emittedStreamContent) throw error;
-      return { response: await invokeNonStreaming(messages), needsReveal: true };
+      forceNonStreaming = true;
+      return { response: await invokeNonStreaming(messages, attempt.signal), needsReveal: true };
     }
   };
+
+  const invokeWithRetry = (messages: ChatMessage[]) => runModelRequestWithRetry(
+    (attempt) => invokeWithStreamFallback(messages, attempt),
+    {
+      provider: options.adapter.id,
+      model: options.settings.model,
+      maxRetries: options.settings.modelRequestMaxRetries ?? 5,
+      idleTimeoutMs: resolveModelRequestTimeoutMs(getTimeoutSettings()),
+      signal: options.signal,
+      getRemainingBudgetMs: remainingBudget,
+      onStatus: (status: ModelRetryStatus) => options.onEvent?.({ type: "model_retry", status }),
+    },
+  );
 
   options.onEvent?.({ type: "step_started", stepName: "chat" });
   try {
     let result;
     try {
-      result = await invokeWithStreamFallback(options.messages);
+      result = await invokeWithRetry(options.messages);
     } catch (error) {
-      if (emittedStreamContent || options.signal?.aborted || !options.imageCaptionFallback || usedImageCaptionFallback) {
+      const failure = error instanceof AgentRuntimeError ? error.modelFailure : undefined;
+      const canCaptionFallback = failure?.status === 400 && failure.category === "INVALID_REQUEST";
+      if (emittedStreamContent || options.signal?.aborted || !canCaptionFallback || !options.imageCaptionFallback || usedImageCaptionFallback) {
         throw error;
       }
       usedImageCaptionFallback = true;
-      result = await invokeWithStreamFallback(await options.imageCaptionFallback());
+      result = await invokeWithRetry(await options.imageCaptionFallback());
     }
 
     const response = result.response;

@@ -112,9 +112,11 @@ interface ContextUsageRingProps {
   sessionId?: string;
   /** 模型运行中：禁用压缩，避免与 run 的消息写回竞态。 */
   busy?: boolean;
+  /** 压缩状态机回调：让消息流在 running 期间渲染「正在触发压缩」呼吸占位条。 */
+  onCompactPhaseChange?: (phase: ContextCompactPhase) => void;
 }
 
-export function ContextUsageRing({ usage, sessionId, busy }: ContextUsageRingProps) {
+export function ContextUsageRing({ usage, sessionId, busy, onCompactPhaseChange }: ContextUsageRingProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [compactPhase, setCompactPhase] = useState<ContextCompactPhase>("idle");
@@ -132,18 +134,22 @@ export function ContextUsageRing({ usage, sessionId, busy }: ContextUsageRingPro
 
   // 主动压缩：无 sessionId（如 demo 会话）或运行中不可点。
   const canCompact = Boolean(sessionId) && !busy;
+  const enterPhase = (phase: ContextCompactPhase): void => {
+    setCompactPhase(phase);
+    onCompactPhaseChange?.(phase);
+  };
   const handleCompactClick = (): void => {
     if (!canCompact || compactPhase === "running" || !sessionId) return;
     const invoke = compactApi()?.compactConversation;
     // API 接线缺失时进入 error 态给用户反馈，避免静默无反应难排查。
     if (!invoke) {
-      setCompactPhase("error");
+      enterPhase("error");
       return;
     }
-    setCompactPhase("running");
+    enterPhase("running");
     void invoke(sessionId)
-      .then((result) => setCompactPhase(result?.ok ? "done" : "error"))
-      .catch(() => setCompactPhase("error"));
+      .then((result) => enterPhase(result?.ok ? "done" : "error"))
+      .catch(() => enterPhase("error"));
   };
 
   const compacting = compactPhase === "running";
@@ -238,7 +244,7 @@ export function ContextUsageRing({ usage, sessionId, busy }: ContextUsageRingPro
       placement="topRight"
       open={open}
       onOpenChange={setOpen}
-      rootClassName="cy-context-usage-popover"
+      rootClassName="cy-composer-menu-popover"
     >
       <button
         type="button"

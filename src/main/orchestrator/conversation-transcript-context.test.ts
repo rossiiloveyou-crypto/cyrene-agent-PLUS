@@ -13,7 +13,7 @@ import {
 import { prepareTranscriptDispatch } from "./conversation-transcript-coordinator";
 import { createTranscriptSink } from "./transcript-sink";
 import type { TranscriptAppendInput, TranscriptEntry } from "./conversation-transcript-types";
-import type { HarnessRunSession } from "./harness/run-store";
+import type { LegacyHarnessRunSession } from "./harness/run-store";
 import type { ChatMessage, ToolCall } from "./vendors/types";
 
 // ── 条目工厂：每条目一行，seq 单调递增 ──────────────────────
@@ -51,6 +51,19 @@ function createEntries() {
 }
 
 const noRuns: TranscriptRunReader = { get: () => null };
+
+function legacyRunWithToolCalls(toolCalls: LegacyHarnessRunSession["toolCalls"]): LegacyHarnessRunSession {
+  return {
+    schemaVersion: 1, conversationId: "c1", runId: "run-1", status: "interrupted",
+    createdAt: 1, updatedAt: 2, messages: [], state: { todoItems: [], uncertainEffects: [] },
+    toolOutputs: [], toolCalls, rounds: 1,
+    cache: { cacheEpoch: 1, epochReason: "run_start" },
+    request: {
+      provider: "openai", model: "test", contextWindowTokens: 128_000,
+      promptFingerprint: "prompt", toolSchemaFingerprint: "tools",
+    },
+  };
+}
 
 /** 从物化消息里取某个工具调用的合成 outcome。 */
 function outcomeFor(messages: ChatMessage[], toolCallId: string): string {
@@ -107,15 +120,13 @@ describe("materializeTranscript", () => {
   it("classifies started non-idempotent as unknown and absent queued call as not_executed", () => {
     const e = createEntries();
     const runReader: TranscriptRunReader = {
-      get: () => ({
-        toolCalls: [{
+      get: () => legacyRunWithToolCalls([{
           toolCallId: "mail-1",
           toolName: "send_email",
           sideEffect: "non_idempotent_side_effect",
           status: "started",
           updatedAt: 2,
-        }],
-      }) as HarnessRunSession,
+        }]),
     };
     const built = materializeTranscript([
       e.assistantWithCalls("a1", [
@@ -131,15 +142,13 @@ describe("materializeTranscript", () => {
   it("treats a read-only started orphan as unknown without uncertain effects", () => {
     const e = createEntries();
     const runReader: TranscriptRunReader = {
-      get: () => ({
-        toolCalls: [{
+      get: () => legacyRunWithToolCalls([{
           toolCallId: "read-1",
           toolName: "read_file",
           sideEffect: "read_only",
           status: "started",
           updatedAt: 2,
-        }],
-      }) as HarnessRunSession,
+        }]),
     };
     const built = materializeTranscript([
       e.assistantWithCalls("a1", [{ id: "read-1", name: "read_file", arguments: "{}" }], "run-1"),

@@ -12,6 +12,7 @@ import type { GeneralSettings } from "./general-settings";
 import type { UiIcon } from "../../shared/ui-icon";
 import { syncLaunchAtLogin } from "./launch-at-login";
 import { CURRENT_DISCLAIMER_VERSION } from "../../shared/disclaimer";
+import { getEffectiveUiTheme } from "../system-ui-theme";
 
 export interface GeneralSettingsLifecycleDependencies {
   get windowManager(): WindowManager | null;
@@ -152,16 +153,10 @@ export function handleGeneralSettingsChanged(
     });
   }
   if (before.uiTheme !== after.uiTheme) {
-    deps.windowManager?.broadcast(IPC.UI_THEME_CHANGED, after.uiTheme);
+    deps.windowManager?.broadcast(IPC.UI_THEME_CHANGED, getEffectiveUiTheme(after.uiTheme));
   }
   if (before.uiThemeRadius !== after.uiThemeRadius) {
     deps.windowManager?.broadcast(IPC.UI_THEME_RADIUS_CHANGED, after.uiThemeRadius);
-  }
-  if (before.windowCornerRadius !== after.windowCornerRadius) {
-    deps.windowManager?.broadcast(IPC.UI_WINDOW_CORNER_RADIUS_CHANGED, after.windowCornerRadius);
-  }
-  if (JSON.stringify(before.uiFont) !== JSON.stringify(after.uiFont)) {
-    deps.windowManager?.broadcast(IPC.UI_FONT_CHANGED, after.uiFont);
   }
   if (before.uiIcon !== after.uiIcon) {
     applyUiIcon(after.uiIcon, deps);

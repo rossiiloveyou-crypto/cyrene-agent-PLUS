@@ -1,0 +1,221 @@
+.cy-browser-panel {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--rb-bg-1, #fffbfc);
+}
+
+.cy-browser-panel__tabs-root {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.cy-browser-panel__tabs-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--rb-border-default, #eee8eb);
+  background: var(--rb-bg-2, #faf8fa);
+}
+
+.cy-browser-panel__tabs {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 35px;
+  padding: 3px;
+  overflow-x: auto;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--rb-bg-1, #fffbfc) 54%, transparent);
+  scrollbar-width: thin;
+}
+.cy-browser-panel__tab {
+  display: flex;
+  flex: 0 1 160px;
+  align-items: center;
+  min-width: 78px;
+  max-width: 210px;
+  height: 29px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rb-text-secondary, #777);
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+.cy-browser-panel__tab:has([data-state="active"]) {
+  background: var(--rb-bg-1, #fffbfc);
+  color: var(--rb-text-primary, #29252a);
+  border-color: var(--rb-border-default, #eee8eb);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--rb-text-primary, #29252a) 10%, transparent);
+}
+.cy-browser-panel__tab-select,
+.cy-browser-panel__tab-close,
+.cy-browser-panel__new-tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 27px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.cy-browser-panel__tab-select {
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  height: 27px;
+  padding: 0 3px 0 9px;
+  overflow: hidden;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.cy-browser-panel__tab-select[data-state="active"] { color: var(--rb-text-primary, #29252a); }
+.cy-browser-panel__tab-select[data-state="inactive"]:hover { color: var(--rb-text-primary, #29252a); }
+.cy-browser-panel__tab-icon { width: 14px; height: 14px; flex: none; border-radius: 3px; object-fit: contain; }
+.cy-browser-panel__tab-icon--fallback { color: var(--rb-text-disabled, #a49ca1); }
+.cy-browser-panel__tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.cy-browser-panel__tab-close {
+  width: 20px;
+  height: 20px;
+  margin-right: 3px;
+  border-radius: 5px;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+.cy-browser-panel__tab:hover .cy-browser-panel__tab-close,
+.cy-browser-panel__tab:focus-within .cy-browser-panel__tab-close,
+.cy-browser-panel__tab:has([data-state="active"]) .cy-browser-panel__tab-close { opacity: 1; }
+.cy-browser-panel__tab-close:hover,
+.cy-browser-panel__new-tab:hover { background: var(--rb-surface-hover, #fff0f5); color: var(--rb-text-primary, #29252a); }
+.cy-browser-panel__new-tab { width: 28px; flex: none; border-radius: 8px; color: var(--rb-text-secondary, #777); }
+
+.cy-browser-panel__tab-panel {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  outline: none;
+}
+
+.cy-browser-panel__toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  min-height: 42px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--rb-border-default, #eee8eb);
+  background: var(--rb-bg-2, #faf8fa);
+}
+
+.cy-browser-panel__icon,
+.cy-browser-panel__go {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--rb-text-secondary, #777);
+  cursor: pointer;
+}
+
+.cy-browser-panel__icon { width: 30px; }
+.cy-browser-panel__go { padding: 0 10px; color: var(--rb-accent, #e75d87); font: inherit; font-size: 12px; }
+.cy-browser-panel__icon:hover:not(:disabled),
+.cy-browser-panel__go:hover { background: var(--rb-surface-hover, #fff0f5); color: var(--rb-text-primary, #29252a); }
+.cy-browser-panel__icon.is-active { background: var(--rb-accent, #e75d87); color: #fff; }
+.cy-browser-panel__icon:disabled { opacity: .38; cursor: default; }
+
+.cy-browser-panel__address {
+  flex: 1;
+  min-width: 40px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--rb-border-default, #eee8eb);
+  border-radius: 8px;
+  outline: none;
+  background: var(--rb-bg-1, #fff);
+  color: var(--rb-text-primary, #29252a);
+  font: var(--rb-text-micro, 12px/1.5 sans-serif);
+}
+.cy-browser-panel__address:focus { border-color: var(--rb-accent, #e75d87); }
+
+.cy-browser-panel__page-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 27px;
+  padding: 0 12px;
+  color: var(--rb-text-secondary, #8a8287);
+  font-size: 11px;
+}
+.cy-browser-panel__page-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cy-browser-panel__control-state {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--rb-accent, #e75d87) 42%, transparent);
+  border-radius: 999px;
+  color: var(--rb-accent, #e75d87);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.cy-browser-panel__spinner { flex: none; animation: cy-browser-panel-spin .8s linear infinite; }
+@keyframes cy-browser-panel-spin { to { transform: rotate(360deg); } }
+
+.cy-browser-panel__webview {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  margin: 0 4px 4px;
+  overflow: hidden;
+  background: #fff;
+}
+.cy-browser-panel__empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--rb-text-disabled, #a49ca1);
+  text-align: center;
+  font: var(--rb-text-small, 14px/1.5 sans-serif);
+  pointer-events: none;
+}
+.cy-browser-panel__error {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 12px;
+  background: color-mix(in srgb, #dc3545 9%, var(--rb-bg-1, #fff));
+  color: #a32937;
+  font-size: 12px;
+}
+.cy-browser-panel__error button { display: inline-flex; border: 0; background: none; color: inherit; cursor: pointer; }

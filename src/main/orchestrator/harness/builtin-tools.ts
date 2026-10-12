@@ -16,9 +16,9 @@ import type {
 } from "./types";
 import { parseToolCallArgs } from "./types";
 import { isAbortError } from "../../abort-utils";
-import { resolveUncertainEffect } from "./uncertain-effect-guard";
-import type { TaskExecuteRequest, TaskExecuteResult } from "../task-runtime";
+import type { TaskCloseRequest, TaskCloseResult, TaskExecuteRequest, TaskExecuteResult } from "../task-runtime";
 import { buildGoldenDescendantsPrompt, getGoldenDescendantNames } from "../../tasks/task-character-pool";
+import { DEFAULT_TASK_MAX_PARALLEL_TOOL_CALLS, MAX_PARALLEL_TOOL_CALLS } from "../../../shared/task-session";
 import { READ_TOOL_RESULT_TOOL_ID, readToolResultToolSpec } from "./tool-output/read-tool-result";
 import { ENTER_PLAN_MODE_TOOL_ID, WRITE_PLAN_TOOL_ID, SUBMIT_PLAN_TOOL_ID, enterPlanModeToolSpec, writePlanToolSpec, submitPlanToolSpec } from "./plan-tools";
 
@@ -26,6 +26,7 @@ import { ENTER_PLAN_MODE_TOOL_ID, WRITE_PLAN_TOOL_ID, SUBMIT_PLAN_TOOL_ID, enter
 
 export const UPDATE_TODO_TOOL_ID = "update_todo";
 export const TASK_TOOL_ID = "task";
+export const CLOSE_TASK_TOOL_ID = "close_task";
 
 const goldenDescendantNames = getGoldenDescendantNames();
 const hasGoldenDescendants = goldenDescendantNames.length > 0;
@@ -36,19 +37,59 @@ export const taskToolSpec: ToolSpec = {
     "委托一个需要独立上下文、多步执行的前台子任务。",
     "何时用：多个互不依赖的调查方向可以并行；较大目录或多个模块的独立审查；有明确交付物的专项任务。",
     "何时不用：一句话能回答的；只需一次工具调用的。",
+    "访问模式：access_mode=read_only 仅用于完全不修改文件、仓库或外部状态的任务；运行时会移除所有非只读工具。需要任何写入或不确定时必须用 write；只读子任务可并行，write 子任务会排队串行执行。",
+    `子任务工具并发：可选 max_parallel_tool_calls，范围 1–${MAX_PARALLEL_TOOL_CALLS}，默认 ${DEFAULT_TASK_MAX_PARALLEL_TOOL_CALLS}；只影响此子任务内部，不影响主 Agent 或其他子任务。仅在有足够多互不依赖的安全操作时提高。`,
     buildGoldenDescendantsPrompt(),
-    "父任务会等待结果；description 只用于向用户显示委托标签，prompt 是子任务完整指令。可传 task_id 继续同一子任务。子任务不能询问用户或再次委托。",
-  ].filter(Boolean).join(""),
+    "若选择的角色已有开启上下文，task 会自动在该上下文继续，不会新建第二份；继续时必须使用原 subagent_type。只有角色上下文关闭后，才能为该角色创建新上下文或更换类型。description 只用于显示，prompt 是完整指令。子任务不能询问用户或再次委托。",
+  ].filter(Boolean).join("\n"),
   parameters: { type: "object", properties: {
     description: { type: "string", description: "给用户显示的 3-40 字任务标签" },
     prompt: { type: "string", description: "子任务完整执行指令" },
     subagent_type: { type: "string", enum: ["general", "document", "search"] },
+    access_mode: { type: "string", enum: ["read_only", "write"], default: "write", description: "任务权限与并行方式；省略时按 write 串行执行" },
+    max_parallel_tool_calls: { type: "integer", minimum: 1, maximum: MAX_PARALLEL_TOOL_CALLS, default: DEFAULT_TASK_MAX_PARALLEL_TOOL_CALLS, description: `此子任务内部的工具并发上限，默认 ${DEFAULT_TASK_MAX_PARALLEL_TOOL_CALLS}，最高 ${MAX_PARALLEL_TOOL_CALLS}` },
     ...(hasGoldenDescendants ? {
       companion_id: { type: "string", enum: [...goldenDescendantNames], description: "本次委托的黄金裔名字；必须明确选择一位" },
     } : {}),
     task_id: { type: "string", description: "可选：恢复此前同一子任务" },
   }, required: ["description", "prompt", "subagent_type", ...(hasGoldenDescendants ? ["companion_id"] : [])] },
 };
+
+export const closeTaskToolSpec: ToolSpec = {
+  name: CLOSE_TASK_TOOL_ID,
+  description: "关闭一位黄金裔子代理的当前上下文。关闭后该角色可被重新委派，并从全新上下文开始；旧记录保留供查看。不能关闭仍在运行的子代理。",
+  parameters: { type: "object", properties: {
+    companion_id: { type: "string", enum: [...goldenDescendantNames], description: "要关闭上下文的黄金裔名字" },
+  }, required: ["companion_id"] },
+};
+
+export async function executeCloseTask(
+  call: ToolCall,
+  executor: ((request: TaskCloseRequest) => Promise<TaskCloseResult> | TaskCloseResult) | undefined,
+): Promise<ToolObservation> {
+  if (!executor) return { outcome: "failure", category: "runtime_safety", tool: CLOSE_TASK_TOOL_ID, message: "TaskRuntime 未注入，当前运行不能关闭子代理" };
+  const args = parseToolCallArgs(call);
+  const companionId = typeof args.companion_id === "string" ? args.companion_id.trim() : "";
+  if (!companionId || !goldenDescendantNames.includes(companionId)) {
+    return { outcome: "failure", category: "invalid_arguments", tool: CLOSE_TASK_TOOL_ID, message: "close_task 需要选择一位有效的黄金裔角色" };
+  }
+  try {
+    const result = await executor({ companionId });
+    return {
+      outcome: "success",
+      tool: CLOSE_TASK_TOOL_ID,
+      message: `${companionId}的子代理上下文已关闭。`,
+      output: JSON.stringify(result),
+    };
+  } catch (error) {
+    return {
+      outcome: "failure",
+      category: "runtime_safety",
+      tool: CLOSE_TASK_TOOL_ID,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
 
 export async function executeTask(
   call: ToolCall,
@@ -61,12 +102,21 @@ export async function executeTask(
   const subagentType = args.subagent_type;
   const companionId = typeof args.companion_id === "string" ? args.companion_id.trim() : "";
   const taskId = typeof args.task_id === "string" ? args.task_id.trim() || undefined : undefined;
+  const accessMode = args.access_mode === undefined ? "write" : args.access_mode;
+  const maxParallelToolCalls = args.max_parallel_tool_calls === undefined
+    ? DEFAULT_TASK_MAX_PARALLEL_TOOL_CALLS
+    : args.max_parallel_tool_calls;
   if (description.length < 3 || description.length > 40 || !prompt
     || !companionId
+    || (accessMode !== "read_only" && accessMode !== "write")
+    || typeof maxParallelToolCalls !== "number"
+    || !Number.isInteger(maxParallelToolCalls)
+    || maxParallelToolCalls < 1
+    || maxParallelToolCalls > MAX_PARALLEL_TOOL_CALLS
     || (subagentType !== "general" && subagentType !== "document" && subagentType !== "search")) {
-    return { outcome: "failure", category: "invalid_arguments", tool: TASK_TOOL_ID, message: "task 需要 3-40 字 description、非空 prompt、合法 subagent_type 与明确 companion_id" };
+    return { outcome: "failure", category: "invalid_arguments", tool: TASK_TOOL_ID, message: `task 需要 3-40 字 description、非空 prompt、合法 subagent_type、明确 companion_id、有效访问模式及 1–${MAX_PARALLEL_TOOL_CALLS} 的子任务并发数` };
   }
-  const result = await executor({ description, prompt, subagentType, companionId, taskId });
+  const result = await executor({ description, prompt, subagentType, companionId, taskId, accessMode, maxParallelToolCalls });
   return { outcome: result.status === "completed" ? "success" : "failure", tool: TASK_TOOL_ID,
     message: `子任务"${description}"已${result.status === "completed" ? "完成" : result.status}。`,
     output: JSON.stringify({ taskId: result.taskId, status: result.status, text: result.text }) };
@@ -201,6 +251,7 @@ export async function executeUpdateTodo(
   call: ToolCall,
   state: AgentState,
   onEvent?: (event: HarnessEvent) => void,
+  onStateChanged?: (items: TodoItem[]) => Promise<void>,
 ): Promise<ToolObservation> {
   const args = parseToolCallArgs(call);
   const rawTodos = (args.todos as unknown) ?? [];
@@ -226,8 +277,15 @@ export async function executeUpdateTodo(
 
   const { items, corrections } = validateAndCorrectTodos(typedTodos, state.todoItems);
 
-  // 更新 state
+  // 更新 state；失败时恢复旧值，避免后续兼容快照把未提交状态冒充为成功。
+  const previousItems = state.todoItems;
   state.todoItems = items;
+  try {
+    await onStateChanged?.(items);
+  } catch (error) {
+    state.todoItems = previousItems;
+    throw error;
+  }
 
   // 发事件给 UI
   onEvent?.({ type: "todo_update", items });
@@ -440,6 +498,7 @@ export async function executeAskUser(
   // 我们把 question.id 映射到 field, 收答案时再翻译回 questionId, 让模型无歧义看到.
   const card = {
     mode: "semantic_clarification" as const,
+    additionalContextEnabled: true,
     intro: "任务需要补全信息",
     questions: questions.map((q) => ({
       field: q.id,                    // ← 用 field 承载 question.id
@@ -457,7 +516,14 @@ export async function executeAskUser(
   try {
     const rawAnswer = await requestUserClarification(card);
     // AskUserAnswer.answers[] 的 field 就是上面我们塞进去的 question.id
-    const rawAnswers = (rawAnswer as { answers?: Array<{ field?: string; selectedValues?: string[]; customText?: string }> })?.answers ?? [];
+    const answerObject = rawAnswer as {
+      answers?: Array<{ field?: string; selectedValues?: string[]; customText?: string }>;
+      additionalContext?: string;
+    };
+    const rawAnswers = answerObject?.answers ?? [];
+    const additionalContext = typeof answerObject?.additionalContext === "string"
+      ? answerObject.additionalContext.trim()
+      : "";
 
     // 超时签名：requestUserClarification 超时统一 resolve 空 answers；
     // 用户真实回答经校验后至少有一条。给模型明确的系统提示而非"校验失败"，
@@ -498,13 +564,15 @@ export async function executeAskUser(
     const observation: ToolObservation = {
       outcome: "success",
       tool: ASK_USER_TOOL_ID,
-      message: `用户已回答 ${answers.length} 个问题`,
-      output: JSON.stringify({ answers }),
+      message: `用户已回答 ${answers.length} 个问题${additionalContext ? "，并提供了额外补充" : ""}`,
+      output: JSON.stringify({ answers, ...(additionalContext ? { additionalContext } : {}) }),
     };
     const preview = formatAskUserPreview({ questions }, observation);
     return {
       ...observation,
-      message: Array.isArray(preview) ? `${observation.message}\n${preview.join("\n")}` : observation.message,
+      message: Array.isArray(preview)
+        ? `${observation.message}\n${preview.join("\n")}${additionalContext ? `\n给昔涟的额外补充：${additionalContext}` : ""}`
+        : observation.message,
     };
   } catch (err) {
     if (isAbortError(err)) throw err;
@@ -539,6 +607,15 @@ export async function executeConfirmUncertainEffect(
   call: ToolCall,
   state: AgentState,
   requestUserClarification: ((card: unknown) => Promise<unknown>) | undefined,
+  options?: {
+    authorizationId?: string;
+    onAuthorized?: (input: {
+      effectId: string;
+      authorizationId: string;
+      fingerprint: string;
+      grantedAt: number;
+    }) => Promise<void> | undefined;
+  },
 ): Promise<ToolObservation> {
   const effectId = String(parseToolCallArgs(call).effectId ?? "").trim();
   const effect = state.uncertainEffects.find((candidate) => candidate.id === effectId);
@@ -576,24 +653,9 @@ export async function executeConfirmUncertainEffect(
     deferredFields: [],
   };
 
+  let raw: unknown;
   try {
-    const raw = await requestUserClarification(card) as {
-      answers?: Array<{ field?: string; selectedValues?: string[] }>;
-    };
-    const decision = raw.answers?.find((answer) => answer.field === "decision")?.selectedValues?.[0];
-    const matchedEffect = state.uncertainEffects.find((effect) => effect.id === effectId);
-    const authorized = decision === "allow_repeat" && Boolean(matchedEffect);
-    if (authorized && matchedEffect) {
-      resolveUncertainEffect(state, matchedEffect.toolCallId);
-    }
-    return {
-      outcome: "success",
-      tool: CONFIRM_UNCERTAIN_EFFECT_TOOL_ID,
-      message: authorized
-        ? "用户已明确授权下一次匹配操作；授权只消费一次。"
-        : "用户未授权重复操作；uncertain effect 保持 unresolved。",
-      output: JSON.stringify({ effectId, authorized }),
-    };
+    raw = await requestUserClarification(card);
   } catch (error) {
     if (isAbortError(error)) throw error;
     return {
@@ -603,12 +665,37 @@ export async function executeConfirmUncertainEffect(
       message: `用户确认超时或失败：${error instanceof Error ? error.message : String(error)}`,
     };
   }
+
+  const answers = (raw as { answers?: Array<{ field?: string; selectedValues?: string[] }> })?.answers;
+  const decision = answers?.find((answer) => answer.field === "decision")?.selectedValues?.[0];
+  const matchedEffect = state.uncertainEffects.find((effect) => effect.id === effectId);
+  const authorized = decision === "allow_repeat" && Boolean(matchedEffect);
+  if (authorized && matchedEffect) {
+    const grantedAt = Date.now();
+    const authorizationId = options?.authorizationId ?? `${matchedEffect.id}:repeat`;
+    await options?.onAuthorized?.({
+      effectId: matchedEffect.id,
+      authorizationId,
+      fingerprint: matchedEffect.fingerprint,
+      grantedAt,
+    });
+    matchedEffect.repeatAuthorization = { id: authorizationId, source: "user", grantedAt };
+  }
+  return {
+    outcome: "success",
+    tool: CONFIRM_UNCERTAIN_EFFECT_TOOL_ID,
+    message: authorized
+      ? "用户已明确授权下一次匹配操作；授权只消费一次。"
+      : "用户未授权重复操作；uncertain effect 保持 unresolved。",
+    output: JSON.stringify({ effectId, authorized }),
+  };
 }
 
 // ── 内置工具注册 ─────────────────────────────────────────
 
 export const HARNESS_BUILTIN_TOOL_IDS = new Set([
   TASK_TOOL_ID,
+  CLOSE_TASK_TOOL_ID,
   UPDATE_TODO_TOOL_ID,
   ASK_USER_TOOL_ID,
   CONFIRM_UNCERTAIN_EFFECT_TOOL_ID,
@@ -649,12 +736,23 @@ function planToolSpecsFor(planState: import("../plan-mode").PlanStateName | unde
 export function getHarnessBuiltinToolSpecs(options?: {
   includeInteractive?: boolean;
   includeTask?: boolean;
+  includeCloseTask?: boolean;
+  openTaskCompanions?: readonly string[];
   planState?: import("../plan-mode").PlanStateName;
 }): ToolSpec[] {
   const interactive = options?.includeInteractive !== false
     ? [askUserToolSpec, confirmUncertainEffectToolSpec]
     : [];
-  const task = options?.includeTask === false ? [] : [taskToolSpec];
+  const openCompanions = options?.openTaskCompanions ?? [];
+  const taskSpec = openCompanions.length > 0
+    ? {
+      ...taskToolSpec,
+      description: `${taskToolSpec.description}\n当前开启的子代理窗口：${openCompanions.join("、")}。委派给这些角色会继续使用原上下文；如果需要释放角色，先调用 close_task。`,
+    }
+    : taskToolSpec;
+  const task = options?.includeTask === false
+    ? []
+    : [taskSpec, ...(options?.includeCloseTask ? [closeTaskToolSpec] : [])];
   const plan = planToolSpecsFor(options?.planState);
   return [updateTodoToolSpec, ...interactive, ...task, readToolResultToolSpec, ...plan];
 }

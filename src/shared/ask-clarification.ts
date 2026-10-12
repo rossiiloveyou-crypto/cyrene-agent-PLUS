@@ -47,6 +47,8 @@ export interface AskClarificationOutput {
 
 export interface AskClarificationCard {
   mode?: AskCardMode;
+  /** Only explicitly opted-in tools show the optional extra-context field. */
+  additionalContextEnabled?: boolean;
   intro: string;
   questions: AskQuestion[];
   deferredFields: string[];
@@ -64,6 +66,7 @@ export interface AskClarificationCard {
 
 export interface AskUserAnswer {
   requestId: string;
+  additionalContext?: string;
   answers: Array<{
     field: string;
     selectedValues?: string[];
@@ -79,6 +82,7 @@ export interface AskCardPayload {
   runId: string;
   revision: number;
   mode: AskCardMode;
+  additionalContextEnabled?: boolean;
   intro: string;
   questions: AskQuestionView[];
 }
@@ -126,5 +130,6 @@ export interface AskCardSubmission {
   interactionId: string;
   runId: string;
   revision: number;
+  additionalContext?: string;
   answers: AskAnswerSubmission[];
 }

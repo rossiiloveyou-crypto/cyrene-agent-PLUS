@@ -78,6 +78,11 @@ export function registerWindowSystemIpc(deps: WindowSystemIpcDependencies): void
     return deps.windowManager?.openSettings(section ?? "music").then(() => true) ?? false;
   });
 
+  // 渲染端请求打开设置页指定标签（如头像菜单跳"常规"）：复用主进程统一推送路径
+  ipc.handle(IPC.SETTINGS_REQUEST_SWITCH_SECTION, (_event, section?: string) => {
+    return deps.windowManager?.openSettings(section ?? "appearance").then(() => true) ?? false;
+  });
+
   ipc.on(IPC.SETTINGS_OPEN_CHROME_GPU, async () => {
     const win = new BrowserWindow({ width: 1024, height: 768 });
     win.loadURL("chrome://gpu");

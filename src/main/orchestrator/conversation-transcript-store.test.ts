@@ -52,6 +52,44 @@ afterEach(() => {
 });
 
 describe("ConversationTranscriptStore", () => {
+  it("stores presentation deltas and replays them after restart", async () => {
+    const { root, store } = createStore();
+    const patch = { delta: { processMessageUpserts: [{ id: "process-1", content: "继续检查" }] } };
+    const first = await store.appendPresentationNext("c1", "assistant-1", "mutation-1", patch);
+    expect(first.payload.patchRevision).toBe(1);
+    expect(await store.appendPresentationNext("c1", "assistant-1", "mutation-1", patch)).toEqual(first);
+
+    const restarted = new ConversationTranscriptStore(root, { now: () => 1_000 });
+    const entries = (await restarted.read("c1")).entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ kind: "presentation_patch", payload: { patch } });
+    const second = await restarted.appendPresentationNext("c1", "assistant-1", "mutation-2", { content: "完成" });
+    expect(second.payload.patchRevision).toBe(2);
+  });
+
+  it("does not reread the full journal for each new presentation patch", async () => {
+    const { root, store, jsonlPath } = createStore();
+    await store.appendPresentationNext("c1", "assistant-1", "mutation-1", { content: "一" });
+    const readFile = vi.spyOn(fs.promises, "readFile");
+    await store.appendPresentationNext("c1", "assistant-1", "mutation-2", { content: "二" });
+    await store.appendPresentationNext("c1", "assistant-1", "mutation-3", { content: "三" });
+    const journalReads = readFile.mock.calls.filter(([file]) => String(file) === jsonlPath("c1"));
+    readFile.mockRestore();
+    expect(journalReads).toHaveLength(0);
+    const restarted = new ConversationTranscriptStore(root, { now: () => 1_000 });
+    expect((await restarted.read("c1")).entries.map((entry) => entry.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("refreshes presentation indexes after another store writes to the journal", async () => {
+    const { root, store } = createStore();
+    await store.appendPresentationNext("c1", "assistant-1", "mutation-1", { content: "一" });
+    const other = new ConversationTranscriptStore(root, { now: () => 1_000 });
+    await other.appendPresentationNext("c1", "assistant-1", "mutation-2", { content: "二" });
+    const third = await store.appendPresentationNext("c1", "assistant-1", "mutation-3", { content: "三" });
+    expect(third.seq).toBe(3);
+    expect(third.payload.patchRevision).toBe(3);
+  });
+
   it("同一逻辑会话得到稳定且 Windows 安全的目录键", () => {
     expect(transcriptStorageKey("channel:wechat:user/42"))
       .toMatch(/^v2-[a-f0-9]{64}$/);

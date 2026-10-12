@@ -25,6 +25,15 @@ export class ActiveConversationRegistry {
     this.entries.set(windowId, { sessionId, ...(mode ? { mode } : {}), updatedAt: ++this.clock });
   }
 
+  get(windowId: number): ActiveConversationSelection | null {
+    const entry = this.entries.get(windowId);
+    if (!entry) return null;
+    return {
+      sessionId: entry.sessionId,
+      ...(entry.mode ? { mode: entry.mode } : {}),
+    };
+  }
+
   getMostRecent(): ActiveConversationSelection | null {
     let latest: Entry | undefined;
     for (const entry of this.entries.values()) {

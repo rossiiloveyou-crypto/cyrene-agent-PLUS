@@ -1,5 +1,6 @@
 import type { AsrConfig } from "./asr-config";
 import { MosslandAsrStream } from "./mossland-asr-engine";
+import { MiniMaxAsrStream } from "./minimax-asr-engine";
 import { AliyunAsrStream } from "./aliyun-asr-engine";
 
 export interface AsrStreamSession {
@@ -15,6 +16,9 @@ export function createAsrStream(
 ): AsrStreamSession {
   if (config.engine === "mossland") {
     return new MosslandAsrStream(config.apiKey, onFinal);
+  }
+  if (config.engine === "minimax") {
+    return new MiniMaxAsrStream(config.apiKey, onFinal);
   }
 
   const stream = new AliyunAsrStream(onPartial, onFinal);

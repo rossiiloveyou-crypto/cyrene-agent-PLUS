@@ -33,6 +33,15 @@ describe("ChatPage 轨迹回退派发（CTA Phase 1）", () => {
   });
 });
 
+describe("ChatPage 上下文压缩呼吸条接线", () => {
+  it("订阅主进程推送的压缩阶段，并与手动压缩共用同一条尾部呼吸提示", () => {
+    // 自动压缩发生在 run 开始前的主进程侧，渲染端没有 AG-UI 事件可听，只能订阅 IPC 推送
+    expect(chatPageSource).toContain("onCompactionPhase");
+    // 自动压缩只在本会话命中时才显示，避免切到别的会话还挂着呼吸条
+    expect(chatPageSource).toMatch(/compacting=\{[^}]*autoCompactingSessionId === activeSessionId[^}]*\}/);
+  });
+});
+
 describe("ChatPage 对话级模型切换接线", () => {
   it("发送入口先等待模型切换屏障，保证切完立刻发送读到的是新模型", () => {
     // sendMessage 第一件事即 await barrier()：不等任何 UI 反馈也要保证因果序

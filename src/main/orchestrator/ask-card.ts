@@ -91,6 +91,7 @@ export function publishAskCard(
     payload: {
       ...identity,
       mode: card.mode ?? "semantic_clarification",
+      ...(card.additionalContextEnabled ? { additionalContextEnabled: true } : {}),
       intro: card.intro,
       questions,
     },
@@ -106,9 +107,12 @@ export function resolveAskCardSubmission(
   if (submission.interactionId !== payload.interactionId
     || submission.runId !== payload.runId
     || submission.revision !== payload.revision
+    || (submission.additionalContext !== undefined
+      && (!payload.additionalContextEnabled || typeof submission.additionalContext !== "string"))
     || !Array.isArray(submission.answers)
     || submission.answers.length !== payload.questions.length) invalidAnswer();
 
+  const additionalContext = submission.additionalContext?.trim();
   const seen = new Set<string>();
   const answers = submission.answers.map((answer) => {
     if (!answer || seen.has(answer.questionId)) invalidAnswer();
@@ -145,7 +149,11 @@ export function resolveAskCardSubmission(
       ? { field: question.field, customText: canonicalValues[0] }
       : { field: question.field, selectedValues: canonicalValues };
   });
-  return { requestId: payload.interactionId, answers };
+  return {
+    requestId: payload.interactionId,
+    ...(additionalContext ? { additionalContext } : {}),
+    answers,
+  };
 }
 
 export function validateAskUserAnswer(
@@ -154,6 +162,9 @@ export function validateAskUserAnswer(
   answer: AskUserAnswer,
 ): AskUserAnswer {
   if (!answer || !Array.isArray(answer.answers)) invalidAnswer();
+  if (answer.additionalContext !== undefined
+    && (!card.additionalContextEnabled || typeof answer.additionalContext !== "string")) invalidAnswer();
+  const additionalContext = answer.additionalContext?.trim();
   const questions = new Map(card.questions.map((question) => [question.field, question]));
   const seen = new Set<string>();
   const answers = answer.answers.map((item) => {
@@ -181,5 +192,9 @@ export function validateAskUserAnswer(
     };
   });
   if (answers.length !== card.questions.length) invalidAnswer();
-  return { requestId, answers };
+  return {
+    requestId,
+    ...(additionalContext ? { additionalContext } : {}),
+    answers,
+  };
 }

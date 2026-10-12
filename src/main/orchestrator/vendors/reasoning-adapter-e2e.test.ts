@@ -18,7 +18,6 @@ function makeCap(overrides: Partial<ProviderCapability> & { id: ProviderCapabili
     thinkingField: overrides.transport === "anthropic" ? "thinking" : "reasoning_content",
     cacheStrategy: overrides.transport === "anthropic" ? "cache_control" : "auto",
     testStrategy: "text",
-    supportsVision: false,
     ...overrides,
   };
 }

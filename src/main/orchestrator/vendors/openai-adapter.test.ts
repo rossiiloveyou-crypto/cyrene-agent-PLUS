@@ -14,7 +14,6 @@ const capability: ProviderCapability = {
   thinkingField: null,
   cacheStrategy: "none",
   testStrategy: "text",
-  supportsVision: true,
 };
 
 describe("OpenAICompatAdapter", () => {

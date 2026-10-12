@@ -1,5 +1,5 @@
 // 内置表情包的语义描述
-// 每个表情包对应一个 phrases 数组，用于 embedding 语义匹配 + 发送给 LLM
+// 每个表情包对应一个 phrases 数组，用于文本匹配 + 发送给 LLM
 
 export interface StickerDescription {
   /** 相近语句（描述情绪/适用场景） */

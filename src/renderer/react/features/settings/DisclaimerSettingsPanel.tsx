@@ -75,19 +75,11 @@ export function DisclaimerSettingsPanel() {
 
         <Card as="article" className="cy-disclaimer-section">
           <h2>{p("section5.title")}</h2>
-          <p>{p("section5.p1")}</p>
-          <ul>
-            <li><EmailLineIcon /> {p("section5.email")}</li>
-            <li>
-              <BilibiliIcon />{" "}
-              <a href="https://space.bilibili.com/260670644" target="_blank" rel="noopener noreferrer">{p("section5.bilibiliLink")}</a>
-              {p("section5.bilibiliNote")}
-            </li>
-            <li>
-              <GithubIcon /> {p("section5.githubLabel")}
-              <a href="https://github.com/Playa-0v0/Cyrene-Agent" target="_blank" rel="noopener noreferrer">{p("section5.githubLink")}</a>
-            </li>
-          </ul>
+          <p>
+            {p("section5.p1Before")}
+            <strong>{p("section5.p1Emphasis")}</strong>
+            {p("section5.p1After")}
+          </p>
         </Card>
 
         <Card as="article" className="cy-disclaimer-section">
@@ -101,62 +93,70 @@ export function DisclaimerSettingsPanel() {
               {p("section6.bilibiliNote")}
             </li>
             <li>
-              <GithubIcon />{" "}
-              <a href="https://github.com/Playa-0v0/Cyrene-Agent/issues" target="_blank" rel="noopener noreferrer">{p("section6.githubLink")}</a>
-              {p("section6.githubNote")}
+              <GithubIcon /> {p("section6.githubLabel")}
+              <a href="https://github.com/Playa-0v0/Cyrene-Agent" target="_blank" rel="noopener noreferrer">{p("section6.githubLink")}</a>
             </li>
           </ul>
-          <p>{p("section6.outro")}</p>
         </Card>
 
         <Card as="article" className="cy-disclaimer-section">
           <h2>{p("section7.title")}</h2>
           <p>{p("section7.p1")}</p>
-          <p>{p("section7.p2")}</p>
           <ul>
-            <li>{p("section7.li1")}</li>
-            <li>{p("section7.li2")}</li>
-            <li>{p("section7.li3")}</li>
-            <li>{p("section7.li4")}</li>
+            <li><EmailLineIcon /> {p("section7.email")}</li>
+            <li>
+              <BilibiliIcon />{" "}
+              <a href="https://space.bilibili.com/260670644" target="_blank" rel="noopener noreferrer">{p("section7.bilibiliLink")}</a>
+              {p("section7.bilibiliNote")}
+            </li>
+            <li>
+              <GithubIcon />{" "}
+              <a href="https://github.com/Playa-0v0/Cyrene-Agent/issues" target="_blank" rel="noopener noreferrer">{p("section7.githubLink")}</a>
+              {p("section7.githubNote")}
+            </li>
           </ul>
+          <p>{p("section7.outro")}</p>
         </Card>
 
         <Card as="article" className="cy-disclaimer-section">
           <h2>{p("section8.title")}</h2>
-          <p>
-            {p("section8.p1")}
-            <a href="https://space.bilibili.com/457683484" target="_blank" rel="noopener noreferrer">{p("section8.upLink")}</a>
-            {p("section8.p2")}
-          </p>
+          <p>{p("section8.p1")}</p>
+          <p>{p("section8.p2")}</p>
+          <ul>
+            <li>{p("section8.li1")}</li>
+            <li>{p("section8.li2")}</li>
+            <li>{p("section8.li3")}</li>
+            <li>{p("section8.li4")}</li>
+          </ul>
         </Card>
 
         <Card as="article" className="cy-disclaimer-section">
           <h2>{p("section9.title")}</h2>
           <p>
             {p("section9.p1")}
+            <a href="https://space.bilibili.com/457683484" target="_blank" rel="noopener noreferrer">{p("section9.upLink")}</a>
+            {p("section9.p2")}
+          </p>
+        </Card>
+
+        <Card as="article" className="cy-disclaimer-section">
+          <h2>{p("section10.title")}</h2>
+          <p>
+            {p("section10.p1")}
             <a
               href="https://github.com/Playa-0v0/Cyrene-Agent/graphs/contributors?from=2026%2F5%2F30"
               target="_blank"
               rel="noopener noreferrer"
             >
-              {p("section9.contributorsLink")}
+              {p("section10.contributorsLink")}
             </a>
           </p>
-          <p>{p("section9.p2")}</p>
-        </Card>
-
-        <Card as="article" className="cy-disclaimer-section">
-          <h2>{p("section10.title")}</h2>
-          <p>{p("section10.p1")}</p>
+          <p>{p("section10.p2")}</p>
         </Card>
 
         <Card as="article" className="cy-disclaimer-section">
           <h2>{p("section11.title")}</h2>
-          <p>
-            {p("section11.p1Before")}
-            <strong>{p("section11.p1Emphasis")}</strong>
-            {p("section11.p1After")}
-          </p>
+          <p>{p("section11.p1")}</p>
         </Card>
       </div>
     </>

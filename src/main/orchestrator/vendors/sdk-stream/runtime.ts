@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { createThinkFilter } from "../../../chat/think-filter";
 import { AgentRuntimeError } from "../../agent-runtime-error";
+import { classifyModelFailure } from "../model-error-classifier";
 import type { ChatRequest, ChatResponse, ChatVendorAdapter, VendorConfig } from "../types";
 import { CyreneStreamAccumulator } from "./accumulator";
 import { AnthropicEventNormalizer, reconcileAnthropicTerminal } from "./anthropic-normalizer";
@@ -222,10 +223,26 @@ export async function streamChatWithSdk(
         if (terminal) finalResponse = terminal;
         for (const delta of normalizeResponsesEvent(event)) dispatch(delta);
       }
+      if (finalResponse === undefined || !Array.isArray(finalResponse.output)) {
+        const reason = finalResponse === undefined
+          ? "Responses 流结束但未收到终态事件"
+          : "Responses 终态事件缺少 output 项";
+        const protocolFailure = new AgentRuntimeError(
+          "E_MODEL_RESPONSE_PARSE_FAILED",
+          reason,
+          {
+            modelFailure: {
+              ...classifyModelFailure({ provider: input.adapter.id, model: input.request.model }),
+              category: "UNKNOWN",
+            },
+          },
+        );
+        throw protocolFailure;
+      }
       flushTaggedThink();
       const finalized = accumulator.finalize(finalResponse);
       // rawAssistant 补挂：完整 output items 是 Responses 多轮保真的核心（accumulator 不产出该字段）。
-      // 真正传输中断（无终态事件）时 finalResponse 为空 → rawAssistant 缺失 → 下轮退化构造，安全降级。
+      // 无终态事件已在上方按协议失败结算，成功响应始终有完整 rawAssistant。
       const outputItems = finalResponse !== undefined && Array.isArray(finalResponse.output)
         ? finalResponse.output
         : undefined;
@@ -293,11 +310,19 @@ export async function streamChatWithSdk(
       });
     }
     if (timedOut) {
-      throw new AgentRuntimeError("E_MODEL_REQUEST_TIMEOUT", "模型响应超时，请稍后重试。", { cause: error });
+      throw new AgentRuntimeError("E_MODEL_REQUEST_TIMEOUT", "模型响应超时，请稍后重试。", {
+        cause: error,
+        modelFailure: { ...classifyModelFailure({ provider: input.adapter.id, model: input.request.model }), category: "TIMEOUT" },
+      });
     }
     if (input.signal?.aborted) throw cancellationError(input.signal);
-    if (error instanceof ProviderProtocolError || error instanceof AgentRuntimeError) throw error;
-    throw new AgentRuntimeError("E_MODEL_REQUEST_FAILED", "模型服务请求失败。", { cause: error });
+    if (error instanceof AgentRuntimeError && error.modelFailure) throw error;
+    const modelFailure = classifyModelFailure({ provider: input.adapter.id, model: input.request.model, error });
+    throw new AgentRuntimeError(
+      error instanceof AgentRuntimeError ? error.code : "E_MODEL_REQUEST_FAILED",
+      "模型服务请求失败。",
+      { cause: error, modelFailure },
+    );
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     input.signal?.removeEventListener("abort", abortFromCaller);

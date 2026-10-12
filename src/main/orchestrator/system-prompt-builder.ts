@@ -16,6 +16,10 @@ import type { ConversationMode } from "../../shared/chat-types";
 import { buildModePrompt } from "./mode-prompt-profile";
 
 export function readStylePrompt(styleId: StyleId): string {
+  // 原生风格不注入任何风格提示词。
+  if (styleId === "native") {
+    return "";
+  }
   if (styleId === "custom") {
     const filePath = ensureCustomStylePrompt();
     return fs.readFileSync(filePath, "utf8").trim();
@@ -68,7 +72,7 @@ export function buildToolSystemPrompt(
   _mode: ConversationMode,
   enabledTools: ReadonlyArray<ToolDefinition>,
 ): string {
-  const catalog = buildToolCatalog(enabledTools as ToolDefinition[]);
+  const catalog = buildToolCatalog((enabledTools as ToolDefinition[]).filter((tool) => tool.browserControlPhase !== "active"));
   return [
     "## 当前可用工具",
     catalog,

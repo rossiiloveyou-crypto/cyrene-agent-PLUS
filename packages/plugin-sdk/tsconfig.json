@@ -3,6 +3,8 @@
     "target": "ES2022",
     "module": "commonjs",
     "lib": ["ES2022"],
+    // TS 6.0 起 types 默认为空（不再自动注入 @types/*），Node 全局类型需显式声明
+    "types": ["node"],
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,

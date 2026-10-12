@@ -152,7 +152,7 @@ function MpvKernelWarning() {
   return (
     <div className="mp-kernel-warning" role="alert">
       <span>
-        未找到 mpv 播放器内核，暂时无法播放。请运行 <code>npm run prepare:mpv</code> 或安装 mpv 后重启应用
+        未找到 mpv 播放器内核，暂时无法播放。请运行 <code>pnpm run prepare:mpv</code> 或安装 mpv 后重启应用
       </span>
     </div>
   );

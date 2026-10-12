@@ -22,6 +22,7 @@ export interface CreateTaskSessionInput {
   description: string;
   prompt: string;
   subagentType: TaskSubagentType;
+  companionId?: string;
   mode: "work" | "code";
   resolvedWorkspaceRoot?: string;
 }
@@ -31,6 +32,7 @@ export interface ResumeTaskSessionInput {
   parentRunId: string;
   subagentType: TaskSubagentType;
   prompt: string;
+  companionId?: string;
 }
 
 export interface TaskSessionCheckpoint {
@@ -56,6 +58,8 @@ interface TaskSessionIndexRow {
   parentConversationId: string;
   status: TaskSessionStatus;
   updatedAt: number;
+  companionId?: string;
+  contextOpen?: boolean;
 }
 
 function isTaskStatus(value: unknown): value is TaskSessionStatus {
@@ -98,6 +102,8 @@ function isTaskSession(value: unknown): value is TaskSession {
     && typeof session.childRunId === "string"
     && typeof session.description === "string"
     && isTaskType(session.subagentType)
+    && (session.companionId === undefined || typeof session.companionId === "string")
+    && (session.contextOpen === undefined || typeof session.contextOpen === "boolean")
     && (session.mode === "work" || session.mode === "code")
     && isTaskStatus(session.status)
     && Array.isArray(session.messages)
@@ -142,6 +148,8 @@ export class TaskSessionStore {
       childRunId: this.createChildRunId(),
       description: input.description,
       subagentType: input.subagentType,
+      companionId: input.companionId,
+      contextOpen: true,
       mode: input.mode,
       ...(input.resolvedWorkspaceRoot ? { resolvedWorkspaceRoot: input.resolvedWorkspaceRoot } : {}),
       status: "running",
@@ -158,6 +166,40 @@ export class TaskSessionStore {
   get(taskId: string): TaskSession | null {
     const session = this.read(taskId);
     return session ? cloneSession(session) : null;
+  }
+
+  findOpenByCompanion(parentConversationId: string, companionId: string): TaskSession | null {
+    const row = [...this.index.values()]
+      .filter((candidate) => candidate.parentConversationId === parentConversationId
+        && candidate.companionId === companionId && candidate.contextOpen !== false)
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+    const session = row[0] ? this.read(row[0].id) : null;
+    return session ? cloneSession(session) : null;
+  }
+
+  listOpenCompanions(parentConversationId: string): string[] {
+    const seen = new Set<string>();
+    return [...this.index.values()]
+      .filter((row) => row.parentConversationId === parentConversationId
+        && Boolean(row.companionId) && row.contextOpen !== false)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .flatMap((row) => {
+        const companionId = row.companionId!;
+        if (seen.has(companionId)) return [];
+        seen.add(companionId);
+        return [companionId];
+      });
+  }
+
+  closeByCompanion(parentConversationId: string, companionId: string): TaskSession {
+    const session = this.findOpenByCompanion(parentConversationId, companionId);
+    if (!session) throw new Error("TASK_COMPANION_CONTEXT_NOT_OPEN");
+    if (session.status === "running") throw new Error("TASK_ALREADY_RUNNING");
+    const mutable = this.require(session.id);
+    mutable.contextOpen = false;
+    mutable.updatedAt = this.now();
+    this.write(mutable);
+    return cloneSession(mutable);
   }
 
   listForParent(parentConversationId: string): TaskSession[] {
@@ -178,10 +220,16 @@ export class TaskSessionStore {
     if (session.subagentType !== input.subagentType) {
       throw new Error("TASK_PROFILE_MISMATCH");
     }
+    if (session.contextOpen === false) throw new Error("TASK_CONTEXT_CLOSED");
+    if (input.companionId && session.companionId && session.companionId !== input.companionId) {
+      throw new Error("TASK_COMPANION_MISMATCH");
+    }
     if (session.status === "running") {
       throw new Error("TASK_ALREADY_RUNNING");
     }
 
+    if (input.companionId) session.companionId = input.companionId;
+    session.contextOpen = true;
     session.parentRunId = input.parentRunId;
     session.childRunId = this.createChildRunId();
     session.status = "running";
@@ -273,7 +321,9 @@ export class TaskSessionStore {
         if (typeof candidate.id !== "string"
           || typeof candidate.parentConversationId !== "string"
           || !isTaskStatus(candidate.status)
-          || typeof candidate.updatedAt !== "number") continue;
+          || typeof candidate.updatedAt !== "number"
+          || (candidate.companionId !== undefined && typeof candidate.companionId !== "string")
+          || (candidate.contextOpen !== undefined && typeof candidate.contextOpen !== "boolean")) continue;
         this.index.set(candidate.id, candidate as TaskSessionIndexRow);
       }
     } catch {
@@ -287,6 +337,8 @@ export class TaskSessionStore {
       parentConversationId: session.parentConversationId,
       status: session.status,
       updatedAt: session.updatedAt,
+      ...(session.companionId ? { companionId: session.companionId } : {}),
+      ...(session.contextOpen !== undefined ? { contextOpen: session.contextOpen } : {}),
     };
   }
 
@@ -295,4 +347,17 @@ export class TaskSessionStore {
     fs.writeFileSync(tempPath, JSON.stringify(value, null, 2), "utf8");
     fs.renameSync(tempPath, filePath);
   }
+}
+
+const storesByRoot = new Map<string, TaskSessionStore>();
+
+/** Reuse the live store across task execution and read-only IPC queries. */
+export function getTaskSessionStore(root: string): TaskSessionStore {
+  const resolvedRoot = path.resolve(root);
+  let store = storesByRoot.get(resolvedRoot);
+  if (!store) {
+    store = new TaskSessionStore(resolvedRoot);
+    storesByRoot.set(resolvedRoot, store);
+  }
+  return store;
 }

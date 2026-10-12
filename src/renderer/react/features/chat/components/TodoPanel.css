@@ -4,11 +4,12 @@
   app-region: no-drag;
   -webkit-app-region: no-drag;
   width: 240px;
-  background: #ffffff;
-  border-radius: 16px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.10);
+  background: var(--rb-task-card-surface);
+  border: 1px solid var(--rb-task-card-border);
+  border-radius: var(--rb-radius-lg);
+  box-shadow: var(--rb-task-card-shadow);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
-  color: #1a1a1a;
+  color: var(--rb-task-card-text);
   overflow: hidden;
   transition: opacity 0.25s ease, transform 0.25s ease, width 0.25s ease, height 0.25s ease;
 }
@@ -27,6 +28,10 @@
   padding-bottom: 0;
   pointer-events: none;
   overflow: hidden;
+}
+
+.cy-todo--workspace {
+  position: absolute;
 }
 
 .cy-todo__dragbar {
@@ -49,10 +54,10 @@
 }
 
 .cy-todo__dragline {
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: #e5e5e5;
+  width: 30px;
+  height: 3px;
+  border-radius: var(--rb-radius-full);
+  background: var(--rb-task-card-divider);
 }
 
 .cy-todo__toggle {
@@ -65,15 +70,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: var(--rb-task-card-muted);
   cursor: pointer;
   border-radius: 50%;
   transition: color 0.2s, background 0.2s, transform 0.25s ease;
 }
 
 .cy-todo__toggle:hover {
-  color: #FF5B8A;
-  background: rgba(255, 91, 138, 0.08);
+  color: var(--rb-task-card-accent);
+  background: var(--rb-task-card-accent-soft);
 }
 
 .cy-todo--collapsed .cy-todo__toggle {
@@ -81,7 +86,7 @@
 }
 
 .cy-todo__body {
-  padding: 8px 14px 14px;
+  padding: 5px 12px 12px;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -95,33 +100,33 @@
 .cy-todo__capsule-row {
   display: flex;
   justify-content: center;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   flex-shrink: 0;
 }
 
 .cy-todo__mode-capsule {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: rgba(255, 91, 138, 0.10);
-  border: 1px solid rgba(255, 91, 138, 0.25);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: var(--rb-radius-full);
+  background: var(--rb-task-card-accent-soft);
+  border: 1px solid var(--rb-task-card-accent-border);
 }
 
 .cy-todo__mode-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #FF5B8A;
+  background: var(--rb-task-card-accent);
+  box-shadow: 0 0 0 3px var(--rb-task-card-accent-ring);
   flex-shrink: 0;
 }
 
 .cy-todo__mode-label {
   font-size: 12px;
   font-weight: 600;
-  color: #FF5B8A;
+  color: var(--rb-task-card-accent);
   line-height: 1;
 }
 
@@ -129,16 +134,19 @@
 .cy-todo__hero {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 2px;
+  gap: 10px;
+  padding: 0 3px;
   flex-shrink: 0;
 }
 
 .cy-todo__mascot {
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   object-fit: contain;
   flex-shrink: 0;
+  border-radius: var(--rb-radius-md);
+  background: var(--rb-task-card-mascot-surface);
+  border: 1px solid var(--rb-task-card-accent-border);
   animation: cy-todo-float 2.8s ease-in-out infinite;
 }
 
@@ -150,27 +158,28 @@
 .cy-todo__hero-text {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .cy-todo__hero-title {
   font-size: 15px;
   font-weight: 700;
-  color: #1a1a1a;
+  color: var(--rb-task-card-text);
   line-height: 1.2;
 }
 
 .cy-todo__hero-sub {
   font-size: 12px;
-  color: #666;
+  color: var(--rb-task-card-muted);
   line-height: 1.2;
 }
 
 /* ── 分隔线 ── */
 .cy-todo__divider {
   height: 1px;
-  background: rgba(255, 91, 138, 0.18);
-  margin: 12px 0;
+  background: var(--rb-task-card-divider);
+  margin: 11px 0;
   border: none;
   flex-shrink: 0;
 }
@@ -182,7 +191,7 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -194,105 +203,113 @@
 }
 
 .cy-todo__list::-webkit-scrollbar-thumb {
-  background: rgba(255, 91, 138, 0.25);
-  border-radius: 2px;
+  background: color-mix(in srgb, var(--rb-task-card-accent) 30%, transparent);
+  border-radius: var(--rb-radius-full);
 }
 
 .cy-todo__item {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  font-size: 13px;
-  line-height: 1.45;
-  color: #1a1a1a;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--rb-radius-md);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--rb-task-card-text);
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.cy-todo__item:not(.cy-todo__item--empty):not(.cy-todo__item--completed):hover {
+  background: var(--rb-task-card-hover);
+  border-color: var(--rb-task-card-accent-border);
 }
 
 .cy-todo__item--completed .cy-todo__content {
   text-decoration: line-through;
-  color: #999999;
+  color: var(--rb-task-card-complete);
 }
 
 .cy-todo__item--empty .cy-todo__content {
-  color: #aaaaaa;
+  color: var(--rb-task-card-faint);
+  font-style: italic;
 }
 
 .cy-todo__status {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   flex-shrink: 0;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .cy-todo__bullet {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   flex-shrink: 0;
 }
 
 .cy-todo__content {
   flex: 1;
+  min-width: 0;
   word-break: break-word;
 }
 
 /* ── 进度条 ── */
 .cy-todo__progress {
-  position: relative;
-  height: 18px;
-  border-radius: 999px;
-  background: #f5f5f5;
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 15px;
 }
 
 .cy-todo__footer {
   flex-shrink: 0;
+  padding-top: 2px;
 }
 
 .cy-todo__progress-bar {
-  position: absolute;
-  left: 0;
-  top: 0;
-  height: 100%;
-  background: #FF5B8A;
-  border-radius: 999px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 6px;
+  border-radius: var(--rb-radius-full);
+  background: var(--rb-task-card-accent);
   transition: width 0.35s ease;
 }
 
-.cy-todo__progress-text {
-  position: relative;
-  z-index: 1;
-  display: block;
+.cy-todo__progress::before {
+  content: "";
+  grid-column: 1;
+  grid-row: 1;
   width: 100%;
-  text-align: center;
-  font-size: 11px;
+  height: 6px;
+  border-radius: var(--rb-radius-full);
+  background: var(--rb-task-card-progress-track);
+}
+
+.cy-todo__progress-text {
+  grid-column: 2;
+  grid-row: 1;
+  display: block;
+  font-size: 10px;
   font-weight: 600;
-  color: #1a1a1a;
-  line-height: 18px;
-  text-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
+  color: var(--rb-task-card-muted);
+  line-height: 1;
 }
 
-/* ── 预留的项目状态区 ── */
-.cy-todo__extension-slot {
-  margin-top: 12px;
-  min-height: 30px;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: baseline;
-  gap: 7px;
-  padding: 0 2px 1px;
-}
+@media (prefers-reduced-motion: reduce) {
+  .cy-todo,
+  .cy-todo__body,
+  .cy-todo__toggle,
+  .cy-todo__item,
+  .cy-todo__progress-bar {
+    transition: none;
+  }
 
-.cy-todo__extension-label {
-  font-size: 11px;
-  color: #999;
-}
-
-.cy-todo__extension-hint {
-  font-size: 12px;
-  color: #777;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  .cy-todo__mascot {
+    animation: none;
+  }
 }

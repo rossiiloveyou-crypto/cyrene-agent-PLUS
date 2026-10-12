@@ -17,6 +17,7 @@ import { resolveVendorRuntimeSettings } from "../orchestrator/vendors/runtime-se
 import { resolveTransport } from "../orchestrator/vendors/transport-detector";
 import { getSession, getSessionRecord } from "./chats-store";
 import { describePendingAttachment } from "../rag/file-ingest";
+// ── 附件文档索引链（M2 / J-04：官方 v1.3.0 删除了这两个 handler，我方恢复）──
 import { processDocumentIndexRequest } from "../rag/document-index-ipc";
 import {
   enqueueDocumentIndexJob,
@@ -32,6 +33,7 @@ import {
   parseActiveTargetPayload,
 } from "../plugin-host/active-chat-target";
 import { activeConversationRegistry } from "./active-conversation-registry";
+import { flushSummaryMemory } from "../memory/summary-memory-scheduler";
 
 export interface ChatUiIpcDependencies {
   live2dWindowLifecycle: { getDiagnostics(): unknown };
@@ -63,7 +65,11 @@ export function getActiveChatSessionId(): string | null {
 }
 
 activeChatTargetRegistry.onInvalidated((_reason, affected) => {
-  if (affected) activeConversationRegistry.clearWindow(affected.webContentsId);
+  if (!affected) return;
+  activeConversationRegistry.clearWindow(affected.webContentsId);
+  void flushSummaryMemory(affected.sessionId).catch((error) => {
+    console.warn("[SummaryMemory] flush on chat window invalidation failed:", affected.sessionId, error);
+  });
 });
 
 export function registerChatUiIpc(deps: ChatUiIpcDependencies): void {
@@ -295,6 +301,7 @@ export function registerChatUiIpc(deps: ChatUiIpcDependencies): void {
       return false;
     }
     let activeSessionId: string | null = null;
+    const previousSessionId = activeConversationRegistry.get(event.sender.id)?.sessionId ?? null;
     if (payload == null) {
       activeChatTargetRegistry.clearActive(event.sender);
       activeConversationRegistry.clearWindow(event.sender.id);
@@ -305,6 +312,11 @@ export function registerChatUiIpc(deps: ChatUiIpcDependencies): void {
         activeConversationRegistry.set(event.sender.id, parsed.sessionId, parsed.mode);
         activeSessionId = parsed.sessionId;
       }
+    }
+    if (previousSessionId && previousSessionId !== activeSessionId) {
+      void flushSummaryMemory(previousSessionId).catch((error) => {
+        console.warn("[SummaryMemory] flush on session switch failed:", previousSessionId, error);
+      });
     }
     for (const win of BrowserWindow.getAllWindows()) {
       if (win.isDestroyed()) continue;

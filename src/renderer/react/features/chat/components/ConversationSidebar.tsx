@@ -22,6 +22,7 @@ interface ConversationSidebarProps {
   organization: SidebarOrganizationSnapshot | null;
   onSaveOrganization: (draft: SidebarOrganizationDraft) => Promise<boolean>;
   activeSessionId?: string;
+  unreadSessionIds?: ReadonlySet<string>;
   onSelect: (sessionId: string, mode?: ConversationMode) => void;
   onOpenProject: (workspaceRoot: string) => void;
   onRename: (sessionId: string, newTitle: string) => void | Promise<void>;
@@ -248,9 +249,48 @@ function SidebarUncategorizedDropTarget({ categoryId, children }: { categoryId: 
   return <div ref={setNodeRef} className={`cy-sidebar-uncategorized-drop ${isOver ? "is-drop-target" : ""}`}>{children}</div>;
 }
 
+// 会话最近聊天时间的分级阈值：1 分钟内算"刚刚"，超过 7 天算"很久之前"
+const RELATIVE_TIME_LONG_AGO_DAYS = 7;
+
+// 侧栏会话行的相对时间标签：右侧小字显示"刚刚 / N分钟前 / N小时前 / N天前 / 很久之前"，
+// 悬停 tooltip 展示精确时间；超过一周时附一句趣味提示。
+function SessionTimeTag({ updatedAt }: { updatedAt: number }) {
+  const { t } = useTranslation();
+  const minutes = Math.floor(Math.max(0, Date.now() - updatedAt) / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  const isLongAgo = days >= RELATIVE_TIME_LONG_AGO_DAYS;
+  const label = minutes < 1
+    ? t("sidebar.timeJustNow")
+    : minutes < 60
+      ? t("sidebar.timeMinutesAgo", { n: minutes })
+      : hours < 24
+        ? t("sidebar.timeHoursAgo", { n: hours })
+        : !isLongAgo
+          ? t("sidebar.timeDaysAgo", { n: days })
+          : t("sidebar.timeLongAgo");
+  return (
+    <Tooltip
+      rootClassName="cy-session-time-tip"
+      arrow={false}
+      mouseEnterDelay={0.25}
+      mouseLeaveDelay={0.12}
+      title={(
+        <div className="cy-session-time-tooltip">
+          <div>{t("sidebar.timeLastChat", { time: formatModifiedTime(updatedAt) })}</div>
+          {isLongAgo && <div className="cy-session-time-tooltip__hint">{t("sidebar.timeLongAgoHint")}</div>}
+        </div>
+      )}
+    >
+      <span className="cy-session-time">{label}</span>
+    </Tooltip>
+  );
+}
+
 function SidebarSessionRow({
   session,
   active,
+  unread,
   title,
   editingValue,
   onEditingChange,
@@ -261,6 +301,7 @@ function SidebarSessionRow({
 }: {
   session: ChatSessionMeta;
   active: boolean;
+  unread?: boolean;
   title: string;
   editingValue?: string;
   onEditingChange?: (value: string) => void;
@@ -278,6 +319,7 @@ function SidebarSessionRow({
       onContextMenu={onContextMenu}
       title={title}
     >
+      {editingValue === undefined && unread && <span className="cy-session-unread-dot" />}
       {editingValue !== undefined ? (
         <input
           autoFocus
@@ -293,6 +335,7 @@ function SidebarSessionRow({
         />
       ) : <span className="cy-sidebar-session__title">{title}</span>}
       {session.pinned && <PushpinOutlined className="cy-session-label__pin" />}
+      {editingValue === undefined && <SessionTimeTag updatedAt={session.updatedAt} />}
     </button>
   );
 }
@@ -363,6 +406,7 @@ export const ConversationSidebar = memo(function ConversationSidebar({
   organization,
   onSaveOrganization,
   activeSessionId,
+  unreadSessionIds,
   onSelect,
   onOpenProject,
   onRename,
@@ -823,14 +867,16 @@ export const ConversationSidebar = memo(function ConversationSidebar({
             />
           ) : (
             <span className="cy-session-label">
+              {unreadSessionIds?.has(session.id) && <span className="cy-session-unread-dot" />}
               <span className="cy-session-label__title">{session.title || t("sidebar.defaultSessionTitle")}</span>
               {session.pinned && <PushpinOutlined className="cy-session-label__pin" />}
+              <SessionTimeTag updatedAt={session.updatedAt} />
             </span>
           ),
         icon: <ConversationIcon />,
         ...(supportsProjects ? { group: session.workspaceRoot ?? `unbound:${session.id}` } : {}),
       })),
-    [sortedSessions, editing, t, supportsProjects, onRename],
+    [sortedSessions, editing, t, supportsProjects, onRename, unreadSessionIds],
   );
 
   function openContextMenu(event: React.MouseEvent, sessionId: string) {
@@ -900,6 +946,7 @@ export const ConversationSidebar = memo(function ConversationSidebar({
         key={session.id}
         session={session}
         active={session.id === activeSessionId}
+        unread={unreadSessionIds?.has(session.id) ?? false}
         title={session.title || t("sidebar.defaultSessionTitle")}
         editingValue={editing?.sessionId === session.id ? editing.value : undefined}
         onEditingChange={(value) => setEditing({ sessionId: session.id, value })}
@@ -1122,7 +1169,7 @@ export const ConversationSidebar = memo(function ConversationSidebar({
                       placement="rightTop"
                       mouseEnterDelay={0.25}
                       mouseLeaveDelay={0.12}
-                      overlayClassName="cy-project-popover"
+                      rootClassName="cy-composer-menu-popover cy-project-popover"
                       content={(
                         <ProjectInfoCard
                           mode={mode}

@@ -42,7 +42,7 @@ afterEach(() => {
 describe("TaskRuntime", () => {
   it("keeps the child role stable and workspace metadata session-scoped", () => {
     const layers = buildChildPromptLayers(parent, "SUBAGENT_PROFILE");
-    expect(layers.stablePrefix).toBe("SUBAGENT_PROFILE");
+    expect(layers.stablePrefix.startsWith("SUBAGENT_PROFILE\n")).toBe(true);
     expect(layers.sessionPrefix).toContain("E:\\project");
     expect(layers.sessionPrefix).toContain("会话模式：code");
   });

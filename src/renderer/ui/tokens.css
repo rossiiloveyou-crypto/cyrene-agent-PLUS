@@ -46,12 +46,21 @@
   --rb-surface-hover: var(--rb-bg-2);
   --rb-surface-active: var(--rb-bg-3);
   --rb-surface-soft: var(--rb-surface-hover);
+  --rb-code-bg: #fafafa;
+  --rb-diff-bg: #fbfafb;
+  --rb-diff-add-bg: #e6ffec;
+  --rb-diff-add-text: #116329;
+  --rb-diff-remove-bg: #ffebe9;
+  --rb-diff-remove-text: #82071e;
+  --rb-diff-info-bg: #ddf4ff;
+  --rb-diff-info-text: #0550ae;
   --rb-text-primary: var(--rb-text-strong);
   --rb-text-secondary: var(--rb-text-muted);
   --rb-text-disabled: var(--rb-text-faint);
   --rb-text-on-accent: var(--rb-text-on-pink);
   --rb-border-default: var(--rb-border-soft);
   --rb-border-subtle: var(--rb-border-faint);
+  --rb-border-elevated: var(--rb-border-strong);
   --rb-border-focus: var(--rb-pink-400);
   --rb-accent: var(--rb-pink-500);
   --rb-accent-hover: var(--rb-pink-600);
@@ -131,6 +140,23 @@
   --rb-shadow-bubble-accent: var(--rb-shadow-pink);
   --rb-shadow-control-hover: var(--rb-shadow-elevated);
   --rb-shadow-control-focus: 0 0 0 3px color-mix(in srgb, var(--rb-accent) 20%, transparent), var(--rb-shadow-elevated);
+
+  /* Task-card semantic tokens; theme files resolve these against their own palette. */
+  --rb-task-card-surface: var(--rb-surface-elevated);
+  --rb-task-card-border: var(--rb-border-subtle);
+  --rb-task-card-shadow: var(--rb-shadow-bubble-neutral);
+  --rb-task-card-text: var(--rb-text-primary);
+  --rb-task-card-muted: var(--rb-text-secondary);
+  --rb-task-card-faint: var(--rb-text-disabled);
+  --rb-task-card-complete: var(--rb-text-secondary);
+  --rb-task-card-divider: var(--rb-border-default);
+  --rb-task-card-hover: var(--rb-surface-hover);
+  --rb-task-card-accent: var(--rb-accent);
+  --rb-task-card-accent-soft: var(--rb-pink-50);
+  --rb-task-card-accent-border: var(--rb-border-focus);
+  --rb-task-card-accent-ring: color-mix(in srgb, var(--rb-accent) 10%, transparent);
+  --rb-task-card-mascot-surface: color-mix(in srgb, var(--rb-accent) 8%, var(--rb-surface-elevated));
+  --rb-task-card-progress-track: var(--rb-border-default);
 
   /* ===== Light-mode primitives (neutral defaults; pearl-white overrides these) ===== */
   --rb-card-bg:        transparent;

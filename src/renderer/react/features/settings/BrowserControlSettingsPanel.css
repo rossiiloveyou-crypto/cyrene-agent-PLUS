@@ -1,0 +1,7 @@
+.cy-browser-control-page .cy-settings-row__copy strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.cy-browser-control-page .cy-settings-row__copy strong svg { color: var(--rb-accent); }
+.cy-browser-control-page__status { margin-top: 14px; }

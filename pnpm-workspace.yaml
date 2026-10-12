@@ -1,0 +1,9 @@
+packages:
+  - packages/*
+
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+  - protobufjs
+  - sharp
+  - tree-sitter

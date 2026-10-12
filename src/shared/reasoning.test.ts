@@ -127,6 +127,16 @@ describe("MODEL_REASONING_RULES — 9 家全部存在性", () => {
     expect(cap.defaultEffort).toBe("medium");
   });
 
+  test("chatgpt gpt-6.1-sol → 复用 Sol 规则（可关闭 + pro mode），不被 ^gpt-6 Astra 兜底吞", () => {
+    const cap = resolveReasoningCapability("chatgpt", "gpt-6.1-sol");
+    expect(cap.control).toBe("effort");
+    expect(cap.requestStyle).toBe("openai-effort");
+    expect(cap.supportedEfforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // 若被 ^gpt-6（Astra）规则先吞，supportsDisable 会是 false
+    expect(cap.supportsDisable).toBe(true);
+    expect(cap.supportsProMode).toBe(true);
+  });
+
   test("chatgpt gpt-5.6 → effort + openai-effort + supportedEfforts 含 max + supportsProMode", () => {
     const cap = resolveReasoningCapability("chatgpt", "gpt-5.6");
     expect(cap.control).toBe("effort");
@@ -271,6 +281,16 @@ describe("MODEL_REASONING_RULES — 9 家全部存在性", () => {
   test("minimax MiniMax-M3 → toggle + anthropic-adaptive", () => {
     const cap = resolveReasoningCapability("minimax", "MiniMax-M3");
     expect(cap.requestStyle).toBe("anthropic-adaptive");
+  });
+
+  test("minimax MiniMax-M3.1-Flash-Preview → toggle-effort + anthropic-adaptive + 强制思考（不可关闭）", () => {
+    const cap = resolveReasoningCapability("minimax", "MiniMax-M3.1-Flash-Preview");
+    expect(cap.control).toBe("toggle-effort");
+    expect(cap.requestStyle).toBe("anthropic-adaptive");
+    expect(cap.supportedEfforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // 官方：思考始终开启；同时必须排在同前缀的 M3 规则之前
+    expect(cap.supportsDisable).toBe(false);
+    expect(cap.autoEffort).toBe("high");
   });
 
   test("minimax MiniMax-M2.7 → fixed-on", () => {

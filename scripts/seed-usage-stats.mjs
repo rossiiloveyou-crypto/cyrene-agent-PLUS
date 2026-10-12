@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const APP_NAME = "live2d-cyrene"; // app.getName() 缺省返回 package.json#name
+const APP_NAME = "Cyrene"; // userData 目录名由 package.json 的 productName 决定
 const FILE_NAME = "token-usage.json";
 
 const args = parseArgs(process.argv.slice(2));

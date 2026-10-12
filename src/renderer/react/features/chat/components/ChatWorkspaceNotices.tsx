@@ -1,6 +1,5 @@
 import React from "react";
 import { useTranslation } from "../../../i18n";
-import compressingPng from "../../../assets/compressing.png";
 
 export interface SessionTakeoverNotice {
   sessionId: string;
@@ -41,16 +40,5 @@ export function RunRecoveryNotices({
         </div>
       )}
     </>
-  );
-}
-
-export function ContextCompressionNotice({ visible }: { visible: boolean }) {
-  const { t } = useTranslation();
-  if (!visible) return null;
-  return (
-    <div className="cy-compressing-context" aria-live="polite" aria-busy="true">
-      <img src={compressingPng} className="cy-compressing-context-icon" alt="" aria-hidden="true" />
-      <span>{t("workspaceNotices.compressingContext")}</span>
-    </div>
   );
 }

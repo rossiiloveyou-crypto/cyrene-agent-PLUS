@@ -4,7 +4,8 @@
 // 结构：汇总头（N 个文件 + 总增删）→ 文件行（kind 徽标 + 路径 + 增删统计）
 // → 点击展开色块 diff 行（绿=新增 红=删除 灰=上下文 蓝=hunk 头）。
 
-import { useCallback, useContext, useState, type MouseEvent } from "react";
+import { useCallback, useContext, useEffect, useState, type MouseEvent } from "react";
+import type { ThemedToken } from "shiki";
 import { useTranslation } from "../../../i18n";
 import type { ToolDiffLine, ToolFileChange } from "../../../../../shared/chat-types";
 import { chatStore } from "../pages/chat-page-bridge";
@@ -13,6 +14,7 @@ import { FileContextMenu, clampMenuPosition, type FileContextMenuItem } from "./
 import { FileIcon } from "./file-icon";
 import { FileLinkContext } from "./FileLinkContext";
 import "./RunExperience.css";
+import { getSyntaxHighlighter, syntaxLanguageForFile, syntaxThemeForUi } from "./syntaxHighlight";
 
 // 只存 i18n key（t() 不能出现在模块顶层常量里），展示文案在组件内求值。
 const KIND_LABEL_KEYS: Record<ToolFileChange["kind"], string> = {
@@ -143,10 +145,42 @@ function FileChangeRow({
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const [uiTheme, setUiTheme] = useState(() => typeof document === "undefined" ? "pearl-white" : document.documentElement.dataset.uiTheme ?? "pearl-white");
+  const [highlightedLines, setHighlightedLines] = useState<ThemedToken[][] | null>(null);
   const hasDiff = Boolean(change.diff && change.diff.length > 0);
+  const diffLines = change.diff ?? [];
+  const language = syntaxLanguageForFile(change.file);
   const dirEnd = change.file.lastIndexOf("/");
   const dir = dirEnd > 0 ? change.file.slice(0, dirEnd + 1) : "";
   const base = dirEnd > 0 ? change.file.slice(dirEnd + 1) : change.file;
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => setUiTheme(root.dataset.uiTheme ?? "pearl-white"));
+    observer.observe(root, { attributes: true, attributeFilter: ["data-ui-theme"] });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!expanded || !hasDiff || !language) {
+      setHighlightedLines(null);
+      return;
+    }
+    let cancelled = false;
+    setHighlightedLines(null);
+    const code = diffLines.map((line) => line.type === "hunk" ? "" : line.text).join("\n");
+    getSyntaxHighlighter()
+      .then((highlighter) => highlighter.codeToTokens(code, { lang: language, theme: syntaxThemeForUi(uiTheme) }))
+      .then((highlight) => {
+        if (!cancelled) setHighlightedLines(highlight.tokens);
+      })
+      .catch(() => {
+        // 高亮失败时继续显示原始 diff 文本。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [diffLines, expanded, hasDiff, language, uiTheme]);
 
   const rowBody = (
     <>
@@ -185,7 +219,7 @@ function FileChangeRow({
       {hasDiff && expanded && (
         <div className="cy-file-change-card__diff">
           {change.diff!.map((line, index) => (
-            <DiffLineView key={index} line={line} />
+            <DiffLineView key={index} line={line} tokens={highlightedLines?.[index]} />
           ))}
           {change.truncated && (
             <div className="cy-file-change-card__truncated">{t("fileChange.truncated")}</div>
@@ -196,12 +230,16 @@ function FileChangeRow({
   );
 }
 
-function DiffLineView({ line }: { line: ToolDiffLine }) {
+function DiffLineView({ line, tokens }: { line: ToolDiffLine; tokens?: ThemedToken[] }) {
   const marker = line.type === "add" ? "+" : line.type === "remove" ? "−" : line.type === "hunk" ? "@" : " ";
   return (
     <div className={`cy-file-change-card__line is-${line.type}`}>
       <span className="cy-file-change-card__marker" aria-hidden="true">{marker}</span>
-      <span className="cy-file-change-card__text">{line.text || " "}</span>
+      <span className="cy-file-change-card__text">
+        {tokens
+          ? tokens.map((token, index) => <span key={index} style={token.color ? { color: token.color } : undefined}>{token.content}</span>)
+          : line.text || " "}
+      </span>
     </div>
   );
 }

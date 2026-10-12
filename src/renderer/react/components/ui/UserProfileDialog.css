@@ -172,8 +172,12 @@
 }
 
 .cy-user-profile__segmented button {
+  display: inline-flex;
   min-width: 84px;
   height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -183,6 +187,8 @@
   cursor: pointer;
   transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
 }
+
+.cy-user-profile__segmented button svg { flex: 0 0 auto; }
 
 .cy-user-profile__segmented button:hover { color: var(--rb-text-primary, #25252a); }
 .cy-user-profile__segmented button.is-selected {
@@ -251,7 +257,7 @@
   app-region: no-drag;
 }
 
-.cy-user-profile__timezone-options { z-index: 1502; }
+.cy-user-profile__select-options { z-index: 1502; }
 
 .cy-user-profile__calendar-popover .rdp-root {
   --rdp-accent-color: var(--rb-accent, #ff5b8a);

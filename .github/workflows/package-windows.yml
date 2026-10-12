@@ -24,10 +24,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
       - name: Set up Node.js 24 LTS
         uses: actions/setup-node@v7
         with:
           node-version: "24"
+          cache: pnpm
 
       # 截图辅助程序用 cargo --locked 构建；win25 运行器镜像自带 Rust 工具链
       - name: Verify Rust toolchain
@@ -47,30 +52,30 @@ jobs:
           Write-Host "标签与 package.json 版本一致：$pkg"
 
       - name: Install dependencies
-        run: npm ci --foreground-scripts
+        run: pnpm install --frozen-lockfile
 
       - name: Verify Electron installation
-        run: npx electron --version
+        run: pnpm exec electron --version
 
       - name: Build application
-        run: npm run build
+        run: pnpm run build
 
       - name: Build screenshot helper (Rust, --locked)
-        run: npm run build:screenshot-helper
+        run: pnpm run build:screenshot-helper
 
       # 两个脚本自带 sha256 清单校验（vendor/*-manifest.json），缓存命中则跳过下载
       - name: Prepare MinGit
-        run: npm run prepare:mingit
+        run: pnpm run prepare:mingit
 
       - name: Prepare mpv
-        run: npm run prepare:mpv
+        run: pnpm run prepare:mpv
 
       - name: Build NSIS installer
-        run: npx electron-builder --win nsis --publish never
+        run: pnpm exec electron-builder --win nsis --publish never
 
       # 验证安装器、latest.yml 更新元数据与 win-unpacked 内随包二进制齐全
       - name: Verify installer artifacts
-        run: npm run verify:installer
+        run: pnpm run verify:installer
 
       # 留存为内部测试产物，不自动公开发布
       - name: Upload installer artifacts
@@ -79,6 +84,7 @@ jobs:
           name: cyrene-windows-installer
           path: |
             release/Cyrene-Setup-*.exe
+            release/Cyrene-Setup-*.exe.blockmap
             release/latest.yml
           if-no-files-found: error
           # 安装器数百 MB，缩短留存时间避免占满产物配额

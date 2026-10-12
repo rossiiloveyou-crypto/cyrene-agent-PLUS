@@ -46,19 +46,15 @@
 
 /* ── 占比菜单 ── */
 
-/* Popover 外壳对齐表情包选择器：16px 圆角 + 边框 + 收紧内边距。 */
-.cy-context-usage-popover .ant-popover-inner {
-  padding: 14px 16px;
-  border: 1px solid var(--rb-border-default);
-  border-radius: 16px;
-}
-
+/* 内容面板走统一浮层外壳（cy-composer-menu-popover）：外壳给 6px 内边距，
+   这里补 8px/10px 回到原有的 14px/16px 留白 */
 .cy-context-usage-menu {
   display: grid;
   gap: 14px;
   width: max-content;
   min-width: 260px;
   max-width: 320px;
+  padding: 8px 10px;
 }
 
 /* 小人状态行：按档位换图换文案，warm/alert 时文字染色呼应圆环。

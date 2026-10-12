@@ -23,7 +23,7 @@ function createWatcherHarness() {
 }
 
 describe("GitWorkspaceWatcher", () => {
-  it("shares one watcher and broadcasts one debounced change to every session in a workspace", async () => {
+  it("shares one watcher and refreshes after one minute without workspace changes", async () => {
     vi.useFakeTimers();
     const harness = createWatcherHarness();
     const createWatcher = vi.fn(() => harness.watcher);
@@ -36,10 +36,42 @@ describe("GitWorkspaceWatcher", () => {
     harness.emit("change", "C:\\repo\\.git\\index");
 
     expect(createWatcher).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(299);
+    await vi.advanceTimersByTimeAsync(150);
+    await vi.advanceTimersByTimeAsync(30_000);
+    harness.emit("change", "C:\\repo\\src\\b.ts");
+    await vi.advanceTimersByTimeAsync(150);
+    await vi.advanceTimersByTimeAsync(59_999);
     expect(changed).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(changed).toHaveBeenCalledWith(["s1", "s2"]);
+    vi.useRealTimers();
+  });
+
+  it("batches raw events for 150ms before scheduling the Git refresh delay", async () => {
+    vi.useFakeTimers();
+    const harness = createWatcherHarness();
+    const changed = vi.fn();
+    const watcher = createGitWorkspaceWatcher({
+      createWatcher: () => harness.watcher,
+      onWorkspaceChanged: changed,
+      onError: vi.fn(),
+      eventDebounceMs: 150,
+      debounceMs: 1_000,
+    });
+
+    await watcher.subscribe({ sessionId: "s1", workspaceRoot: "C:\\repo", gitDir: "C:\\repo\\.git" });
+    harness.emit("change", "C:\\repo\\src\\a.ts");
+    await vi.advanceTimersByTimeAsync(100);
+    harness.emit("change", "C:\\repo\\src\\b.ts");
+    await vi.advanceTimersByTimeAsync(149);
+    expect(changed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(changed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(changed).toHaveBeenCalledWith(["s1"]);
+
+    await watcher.dispose();
     vi.useRealTimers();
   });
 
@@ -75,6 +107,22 @@ describe("GitWorkspaceWatcher", () => {
     expect(ignored("C:\\repo\\.git\\HEAD")).toBe(false);
     expect(ignored("C:\\repo\\.git\\index")).toBe(false);
     expect(ignored("C:\\repo\\.git\\refs\\heads\\main")).toBe(false);
+  });
+
+  it("normalizes only the candidate during each hot ignore check", () => {
+    const normalized: string[] = [];
+    const normalize = (value: string) => {
+      normalized.push(value);
+      return path.resolve(value).replace(/\\/g, "/").toLowerCase();
+    };
+    const ignored = createCodeGitIgnoredPredicate(
+      { workspaceRoot: "C:\\repo", gitDir: "C:\\repo\\.git" },
+      normalize,
+    );
+    normalized.length = 0;
+
+    expect(ignored("C:\\repo\\node_modules\\pkg\\index.js")).toBe(true);
+    expect(normalized).toEqual(["C:\\repo\\node_modules\\pkg\\index.js"]);
   });
 
   it("ignores release output and worktree directories that git does not track", () => {

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Dialog } from "radix-ui";
 import { ArrowLeft, AudioLines, MessageCircle, Mic, PhoneOff, Sparkles, X } from "lucide-react";
-import { getCharacterAvatar } from "../../character-avatars";
+import { useCyreneAvatar } from "../../hooks/useCyreneAvatar";
 import { useTranslation } from "../../i18n";
 import "./VoiceCallPreviewDialog.css";
 
@@ -10,9 +10,6 @@ interface VoiceCallPreviewDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const CHARACTER_NAME = "昔涟";
-const AVATAR_PATH = getCharacterAvatar(CHARACTER_NAME) ?? "";
 
 const PREVIEW_MESSAGES = [
   { speaker: "you", text: "今天想一起做点什么？", time: "刚刚" },
@@ -24,6 +21,7 @@ const PREVIEW_MESSAGES = [
 const WAVEFORM = [12, 19, 27, 17, 34, 22, 14, 28, 38, 23, 16, 31, 20, 13, 25, 35, 18, 11, 23, 30, 16, 27, 14, 20, 33, 18, 12];
 
 export function VoiceCallPreviewDialog({ open, onOpenChange }: VoiceCallPreviewDialogProps) {
+  const avatarPath = useCyreneAvatar();
   const { t } = useTranslation();
   const reduceMotion = useReducedMotion();
   const [showConversation, setShowConversation] = useState(false);
@@ -108,7 +106,7 @@ export function VoiceCallPreviewDialog({ open, onOpenChange }: VoiceCallPreviewD
                       aria-label={t("character.previewOpenConversation")}
                       onClick={() => setShowConversation(true)}
                     >
-                      <img src={AVATAR_PATH} alt={t("character.name")} draggable={false} />
+                      <img src={avatarPath} alt={t("character.name")} draggable={false} />
                     </button>
                     <span className="cy-call-preview__sparkle cy-call-preview__sparkle--one" aria-hidden="true">✦</span>
                     <span className="cy-call-preview__sparkle cy-call-preview__sparkle--two" aria-hidden="true">✧</span>

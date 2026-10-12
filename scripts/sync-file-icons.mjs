@@ -1,5 +1,5 @@
 // 同步 devicon 品牌图标到渲染层资源目录，供文件卡片/正文文件链接按后缀显示图标。
-// 用法：npm run sync:file-icons（升级 devicon 或调整下方映射表后跑一次）
+// 用法：pnpm run sync:file-icons（升级 devicon 或调整下方映射表后跑一次）
 //
 // 产物（均为生成物，勿手改）：
 //   src/renderer/assets/file-icons/*.svg                          拷贝的品牌图标 + 通用兜底轮廓

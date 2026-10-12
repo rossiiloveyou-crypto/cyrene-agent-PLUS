@@ -86,7 +86,24 @@ describe("createAppUpdateService", () => {
 
     expect(service.getState()).toMatchObject({
       phase: "error",
-      error: "暂时无法检查更新，请稍后再试。",
+      error: "check_failed",
     });
+  });
+
+  it("reports download errors with the download error code", async () => {
+    const updater = new FakeUpdater();
+    updater.downloadUpdate = vi.fn(async () => {
+      throw new Error("network unavailable");
+    });
+    const service = createAppUpdateService({ updater, currentVersion: "1.1.7", isPackaged: true });
+
+    // 先走到 available，再触发下载失败
+    const checking = service.check();
+    updater.emit("checking-for-update");
+    updater.emit("update-available", { version: "1.2.0" });
+    await checking;
+    await service.download();
+
+    expect(service.getState()).toMatchObject({ phase: "error", error: "download_failed" });
   });
 });

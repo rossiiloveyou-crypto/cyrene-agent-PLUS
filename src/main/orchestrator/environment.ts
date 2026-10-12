@@ -14,17 +14,17 @@ import { app } from "electron";
 import * as os from "os";
 import { listMcpServers } from "./mcp-manager";
 import { ACCESS_LEVEL_LABEL, getCurrentLevel } from "../permission";
-import { getCapability } from "./vendors/capabilities";
 import { resolveChatContextTimezone } from "../chat-time-context";
-import { getDateLocale } from "../locale-context";
+import { getDateLocale, getLocaleContext } from "../locale-context";
 
 const LOG_PREFIX = "[Env]";
 
-/** 当前模型信息（用于查 capability 判断视觉等能力），可选。 */
-export interface ModelInfo {
-  provider: string;
-  model: string;
-}
+/** 回复语言展示名：档案下拉只提供这几项，其它值原样透传。 */
+const REPLY_LANGUAGE_LABELS: Record<string, string> = {
+  "zh-CN": "简体中文",
+  en: "English",
+  "ja-JP": "日本語",
+};
 
 /** 用户信息片段（由 index.ts 注入，避免循环依赖）。 */
 export interface UserInfoContext {
@@ -34,6 +34,8 @@ export interface UserInfoContext {
   defaultCity?: string;
   timezone?: string;
   gender?: string;
+  /** 回复语言："auto" 或留空表示跟随界面语言，其余为 BCP 47 */
+  replyLanguage?: string;
 }
 
 function safeGetPath(name: "desktop" | "documents" | "downloads" | "home"): string {
@@ -108,7 +110,7 @@ function platformLabel(): string {
  * 注意：这里只读取既有运行时状态，不做任何副作用；调用方负责 try/catch
  * 拼接失败的情况，避免环境注入炸掉聊天主流程。
  */
-export function buildEnvironmentContext(modelInfo?: ModelInfo, userInfo?: UserInfoContext): string {
+export function buildEnvironmentContext(userInfo?: UserInfoContext): string {
   const level = getCurrentLevel();
   const levelLabel = ACCESS_LEVEL_LABEL[level];
 
@@ -152,18 +154,11 @@ export function buildEnvironmentContext(modelInfo?: ModelInfo, userInfo?: UserIn
   lines.push(`- MCP 服务：${mcpLine}`);
   lines.push("");
 
-  // 模型能力边界：把"你当前这个模型能不能看图"作为事实告诉模型，
-  // 让它遇到图片问题时敢于说"我看不了"，而不是硬编。
-  // 没传 modelInfo（比如降级路径）时保守地告诉它"看不了"。
-  let supportsVision = false;
-  if (modelInfo) {
-    const cap = getCapability(modelInfo.provider);
-    supportsVision = cap?.supportsVision ?? false;
-  }
-  lines.push(`- 当前模型是否支持查看图片：${supportsVision ? "支持（可调 read_image 看图）" : "不支持（看不了图片，遇到图片问题必须如实说明，不许编造图片内容）"}`);
-  lines.push("");
+  // 不再向模型声明"能不能看图"：图片能否进主模型由用户在设置页的
+  // 「支持图片输入」开关 + 视觉模型配置决定（见 image-router），
+  // 与注册表里的静态能力无关，写死反而会和用户设置打架。
 
-  // 用户信息：昵称、称呼偏好、生日、默认城市等。让模型知道"在和谁说话、用户在哪"，
+  // 用户信息：昵称、称呼偏好、生日、默认城市、回复语言等。让模型知道"在和谁说话、用户在哪"，
   // 避免每次问天气/位置都要反问用户。默认城市尤其重要——天气工具会用到。
   if (userInfo) {
     lines.push("## 用户信息");
@@ -188,6 +183,13 @@ export function buildEnvironmentContext(modelInfo?: ModelInfo, userInfo?: UserIn
     } else {
       lines.push("- 性别约束：性别未知或保密时只使用中性称呼，不得根据昵称、头像或语气推断。");
     }
+    // 回复语言：档案显式指定则用指定语言；auto / 留空表示跟随界面语言。
+    const configured = userInfo.replyLanguage?.trim();
+    const replyLanguage = !configured || configured === "auto" ? getLocaleContext().uiLocale : configured;
+    if (replyLanguage) {
+      const label = REPLY_LANGUAGE_LABELS[replyLanguage] ?? replyLanguage;
+      lines.push(`- 回复语言：${label}（除非用户当轮明确要求其他语言，否则一律用这种语言回复）`);
+    }
     lines.push("");
     // 时区≠地点：明确告知模型 timezone 与 defaultCity 是两个独立维度，不得交叉推断。
     lines.push("> 用户时区仅用于时间计算，不代表用户所在地，不得根据时区推断用户所在城市。默认城市仅用于天气等需要定位的工具。");
@@ -205,7 +207,6 @@ export function buildEnvironmentContext(modelInfo?: ModelInfo, userInfo?: UserIn
     `level=${level}`,
     `desktop=${desktop || "?"}`,
     `mcp=${mcpLine.startsWith("未连接") ? "none" : "active"}`,
-    `vision=${supportsVision}`,
   );
 
   return text;

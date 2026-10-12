@@ -3,14 +3,17 @@ import { Component, createContext, createElement, useCallback, useContext, useEf
 import { t, useTranslation } from "../../../i18n";
 import { normalizeModelMarkdown } from "./markdown-normalize";
 import { resolveAsset } from "../../../../../shared/renderer-base";
+import { useCyreneAvatar } from "../../../hooks/useCyreneAvatar";
 import type { AgentRoundRecord, ChatMessage, ChatMessageChannelSource, ConversationMode, ProcessMessageRecord, ReasoningBlock, RunActivityRecord, TaskDelegationDisplayRecord, ToolExecutionRecord, ToolFileChange } from "../../../../../shared/chat-types";
 import type { ContextUsageSnapshot } from "../../../../../shared/context-usage";
+import type { ModelRetryStatus } from "../../../../../shared/model-retry";
 import thinkingMoodUrl from "../../../assets/status-moods/思考中.png?url";
 import completedThinkingMoodUrl from "../../../assets/status-moods/提醒.png?url";
 import workingMoodUrl from "../../../assets/status-moods/工作中.png?url";
 import interruptedMoodUrl from "../../../assets/status-moods/已中断.png?url";
 import processedMoodUrl from "../../../assets/status-moods/已处理.png?url";
 import connectingMoodUrl from "../../../assets/status-moods/连接中.png?url";
+import type { CharacterStatusMood } from "../../../character-status-moods";
 import { useUserAvatar } from "../../../hooks/useUserAvatar";
 import {
   assistantRenderStages,
@@ -22,7 +25,7 @@ import { RunStageIndicator } from "./RunStageIndicator";
 import { TaskPlanCard } from "./TaskPlanCard";
 import type { AgentRunStage, TaskPlanPresentation } from "./run-presentation";
 import { CopyButton } from "./CopyButton";
-import { CommandTerminal } from "./CommandTerminal";
+import { CommandTerminal, ToolOutputTerminal } from "./CommandTerminal";
 import { TtsButton } from "./TtsButton";
 import { stopTtsPlayback } from "./tts-playback";
 import { LastTurnActionButton } from "./LastTurnActionButton";
@@ -37,6 +40,10 @@ import { FileLinkContext, type FileLinkEnv } from "./FileLinkContext";
 import { ReviewPanel } from "./ReviewPanel";
 import { reportChatPerfRender } from "./chat-perf-probe";
 import { StreamdownMessageContent } from "./StreamdownMessageContent";
+import { Archive, ScanLine } from "lucide-react";
+import type { BrowserElementSelection } from "../../../../../shared/browser-panel-types";
+import { Marker, MarkerContent, MarkerIcon } from "../../../components/ui/marker";
+import { VirtualChatMessageList } from "./VirtualChatMessageList";
 
 export interface ChatMessageItem {
   id: string;
@@ -55,6 +62,8 @@ export interface ChatMessageItem {
   loading?: boolean;
   /** 请求已发出但尚未收到 Think、工具或正文等首个可视事件。 */
   waitingForFirstEvent?: boolean;
+  /** 当前请求重试状态，只作为界面临时状态，不持久化。 */
+  modelRetry?: ModelRetryStatus | null;
   ttsCacheKey?: string;
   ttsCacheVersion?: string;
   sticker?: string | null;
@@ -72,6 +81,10 @@ export interface ChatMessageItem {
   /** 渠道群聊的发送者/引用等隐藏模型上下文；不直接渲染。 */
   modelContext?: string;
   channelSource?: ChatMessageChannelSource;
+  /** 存在即表示本条是上下文压缩分隔标记，正文恒为空（见 ChatMessageCompactionMark）。 */
+  compaction?: ChatMessage["compaction"];
+  /** 回复时间戳：历史消息来自持久化消息的 at，进行中消息由 run 终态回写。 */
+  at?: number;
 }
 
 export interface ChatMessageAttachment {
@@ -84,6 +97,7 @@ export interface ChatMessageAttachment {
   status?: string;
   reason?: string;
   imageSendMode?: "direct" | "caption";
+  element?: BrowserElementSelection;
 }
 
 interface ChatMessageListProps {
@@ -91,6 +105,13 @@ interface ChatMessageListProps {
   conversationId?: string;
   mode: ConversationMode;
   preferredAddress: string;
+  /** 手动压缩进行中：列表尾部渲染「正在触发压缩」呼吸占位条，完成即由投影 marker 接管。 */
+  compacting?: boolean;
+  /** 子代理详情可注入角色状态图；主聊天区不传时继续用默认昔涟素材。 */
+  characterMoodAssets?: Partial<Record<CharacterStatusMood, string>>;
+  assistantAvatar?: { src: string; alt: string; sprite?: boolean };
+  /** 子代理详情可将任务指令显示为昔涟发出的消息。 */
+  userAvatar?: { src: string; alt: string; sprite?: boolean };
   stickerSize?: "small" | "standard" | "large";
   onTtsCacheKey?: (messageId: string, cacheKey: string, converterVersion: string) => void;
   revisionBusy?: boolean;
@@ -100,13 +121,35 @@ interface ChatMessageListProps {
   onRegisterScrollToBottom?: (scroll: () => void) => void;
   /** 点击 Review 文件项时打开右侧检查面板（filePath 用于标签标识与去重） */
   onOpenReviewInspector?: (runId: string, fileIndex: number, filePath: string) => void;
+  /** 点击子任务委派条目时在右侧打开子任务会话。 */
+  onOpenTaskInspector?: (delegation: TaskDelegationDisplayRecord) => void;
   /** 工作区根路径：正文里的 file:/// 链接据此判断界内/越界 */
   workspaceRoot?: string;
   /** 点击界内文件链接 → 打开右侧预览标签并定位行号 */
   onOpenFileLink?: (relPath: string, line?: number) => void;
+  /** 点击助手消息网页链接 → 在 Cyrene 右侧浏览器打开，或从右键菜单选择外部浏览器。 */
+  onOpenWebLink?: (url: string, destination: "cyrene" | "external") => void | Promise<void>;
 }
 
-const cyreneAvatarUrl = resolveAsset("avatars/cyrene-avatar.png");
+type CharacterMoodRenderContext = {
+  moods: Partial<Record<CharacterStatusMood, string>>;
+  avatar: { src: string; alt: string; sprite?: boolean } | null;
+};
+const CharacterMoodContext = createContext<CharacterMoodRenderContext>({ moods: {}, avatar: null });
+
+function useCharacterMoodUrl(mood: CharacterStatusMood): string {
+  const context = useContext(CharacterMoodContext);
+  const characterUrl = context.moods[mood];
+  if (characterUrl) return characterUrl;
+  switch (mood) {
+    case "连接中": return connectingMoodUrl;
+    case "思考中": return thinkingMoodUrl;
+    case "工作中": return workingMoodUrl;
+    case "提醒": return completedThinkingMoodUrl;
+    case "已处理": return processedMoodUrl;
+    case "已中断": return interruptedMoodUrl;
+  }
+}
 
 // 消息是否正在流式输出。code 渲染器收不到 MarkdownContent 的 props，用 context 传下去，
 // mermaid 块靠它在流式期间显示占位而不是渲染半截语法。
@@ -139,11 +182,12 @@ export function LastTurnEditAction({ messageId, content, disabled, onBeginEdit }
   return <LastTurnActionButton kind="edit" disabled={disabled} onClick={() => onBeginEdit(messageId, content)} />;
 }
 
-/** 助手消息 footer：重生成目标经 context 匹配（点击时读最新值），TTS/复制与本轮无关 */
-export function AssistantMessageFooter({ content, messageId, streaming, conversationId, mode, preferredAddress, revisionBusy, onTtsCacheKey, onRegenerateLastResponse }: {
+/** 助手消息 footer：重生成目标经 context 匹配（点击时读最新值），TTS/复制/回复时间与本轮无关 */
+export function AssistantMessageFooter({ content, messageId, streaming, at, conversationId, mode, preferredAddress, revisionBusy, onTtsCacheKey, onRegenerateLastResponse }: {
   content: string;
   messageId?: string;
   streaming: boolean;
+  at?: number;
   conversationId?: string;
   mode: ConversationMode;
   preferredAddress: string;
@@ -168,6 +212,11 @@ export function AssistantMessageFooter({ content, messageId, streaming, conversa
         />
       )}
       {cleanText && <CopyButton text={cleanText} />}
+      {cleanText && at !== undefined && (
+        <span className="cy-message-time" title={new Date(at).toLocaleString()}>
+          {formatReplyTime(at)}
+        </span>
+      )}
       {canRegenerate && (
         <LastTurnActionButton
           kind="regenerate"
@@ -303,6 +352,14 @@ export function resolveChannelConversationLabel(
   });
 }
 
+/** 回复时间显示：当天只显示时分，跨天补全日期，数字格式不依赖语言资源。 */
+export function formatReplyTime(at: number, now = Date.now()): string {
+  const reply = new Date(at);
+  const hhmm = `${String(reply.getHours()).padStart(2, "0")}:${String(reply.getMinutes()).padStart(2, "0")}`;
+  if (reply.toDateString() === new Date(now).toDateString()) return hhmm;
+  return `${reply.getFullYear()}/${reply.getMonth() + 1}/${reply.getDate()} ${hhmm}`;
+}
+
 function DotSpinner() {
   const { t } = useTranslation();
   return (
@@ -312,17 +369,51 @@ function DotSpinner() {
   );
 }
 
-function ModelWaitContent() {
+function retryStatusLabel(status: ModelRetryStatus | null | undefined, t: (key: string, values?: Record<string, unknown>) => string) {
+  if (!status || status.phase === "cleared") return null;
+  if (status.phase === "waiting") {
+    return t("messageList.retryWaiting", {
+      retryNumber: status.retryNumber,
+      maxRetries: status.maxRetries,
+      seconds: Math.ceil((status.delayMs ?? 0) / 1000),
+    });
+  }
+  return t("messageList.retryAttempting", { retryNumber: status.retryNumber, maxRetries: status.maxRetries });
+}
+
+function ModelWaitContent({ modelRetry }: { modelRetry?: ModelRetryStatus | null }) {
   const { t } = useTranslation();
+  const connectingArt = useCharacterMoodUrl("连接中");
+  const retryLabel = retryStatusLabel(modelRetry, t);
   return (
     <section className="cy-model-wait" aria-label={t("messageList.modelWaitAria")}>
       <span className="cy-model-wait__art" aria-hidden="true">
-        <img src={connectingMoodUrl} alt="" draggable={false} />
+        <img src={connectingArt} alt="" draggable={false} />
         <DotSpinner />
       </span>
       <span>{t("messageList.modelWaitText")}</span>
+      {retryLabel && <span className="cy-model-wait__retry" role="status">{retryLabel}</span>}
     </section>
   );
+}
+
+function latestReasoningLine(content: string): string {
+  const trimmed = content.trimEnd();
+  const start = Math.max(trimmed.lastIndexOf("\n"), trimmed.lastIndexOf("\r")) + 1;
+  return trimmed.slice(start).trim();
+}
+
+const REASONING_PREVIEW_MAX_CHARS = 80;
+
+function truncateReasoningPreview(line: string): string {
+  let end = 0;
+  let count = 0;
+  for (const character of line) {
+    if (count === REASONING_PREVIEW_MAX_CHARS) return `${line.slice(0, end)}…`;
+    end += character.length;
+    count += 1;
+  }
+  return line;
 }
 
 function ReasoningContent({
@@ -337,22 +428,33 @@ function ReasoningContent({
   onExpand: (expanded: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const thinkingArt = useCharacterMoodUrl(loading ? "思考中" : "提醒");
+  const title = loading ? t("messageList.thinkingTitle") : t("messageList.thinkingDoneTitle");
+  const previewLine = loading && !expanded
+    ? truncateReasoningPreview(latestReasoningLine(content))
+    : "";
   return (
     <Think
-      rootClassName="cy-message-reasoning"
-      title={loading ? t("messageList.thinkingTitle") : t("messageList.thinkingDoneTitle")}
+      rootClassName={`cy-message-reasoning${previewLine ? " cy-message-reasoning--with-preview" : ""}`}
+      title={previewLine ? (
+        <span className="cy-message-reasoning__title">
+          <span className="cy-message-reasoning__title-label">{title}</span>
+          <span className="cy-message-reasoning__preview-separator" aria-hidden="true">·</span>
+          <span className="cy-message-reasoning__preview">{previewLine}</span>
+        </span>
+      ) : title}
       icon={
         <span className={`cy-reasoning-status-art${loading ? " is-thinking" : " is-complete"}`} aria-hidden="true">
-          <img src={thinkingMoodUrl} alt="" draggable={false} />
+          <img src={thinkingArt} alt="" draggable={false} />
           {loading && <DotSpinner />}
         </span>
       }
-      blink={loading}
+      blink={loading && !previewLine}
       expanded={expanded}
       onExpand={onExpand}
       destroyOnHidden
     >
-      {content && <MarkdownContent content={content} streaming={loading} />}
+      {content && <div className="cy-message-reasoning__plain-text">{content}</div>}
     </Think>
   );
 }
@@ -389,6 +491,7 @@ function AgentRoundGroup({
   taskDelegations,
   tools,
   interrupted,
+  onOpenTaskInspector,
 }: {
   round: AgentRoundRecord;
   reasoningBlocks: ReasoningBlock[];
@@ -396,8 +499,12 @@ function AgentRoundGroup({
   taskDelegations: TaskDelegationDisplayRecord[];
   tools: ToolExecutionRecord[];
   interrupted: boolean;
+  onOpenTaskInspector?: (delegation: TaskDelegationDisplayRecord) => void;
 }) {
   const { t } = useTranslation();
+  const interruptedArt = useCharacterMoodUrl("已中断");
+  const workingArt = useCharacterMoodUrl("工作中");
+  const reminderArt = useCharacterMoodUrl("提醒");
   const running = round.status === "running" && !interrupted;
   const [expanded, setExpanded] = useState(running);
   const wasRunningRef = useRef(running);
@@ -408,10 +515,10 @@ function AgentRoundGroup({
   }, [running]);
 
   const roundArt = interrupted
-    ? interruptedMoodUrl
+    ? interruptedArt
     : running
-      ? workingMoodUrl
-      : completedThinkingMoodUrl;
+      ? workingArt
+      : reminderArt;
 
   return (
     <section className={`cy-agent-round${running ? " is-running" : " is-complete"}`}>
@@ -424,7 +531,7 @@ function AgentRoundGroup({
         </div>
       ))}
       {taskDelegations.map((delegation) => (
-        <TaskDelegationRow delegation={delegation} key={delegation.invocationId} />
+        <TaskDelegationRow delegation={delegation} key={delegation.invocationId} onOpen={onOpenTaskInspector} />
       ))}
       <button
         type="button"
@@ -483,6 +590,7 @@ export function RunActivityDetail({
   taskDelegations = [],
   tools,
   interrupted = false,
+  onOpenTaskInspector,
 }: {
   /** 运行中：所有事件按实际发生顺序平铺，不做轮次折叠归类。 */
   live?: boolean;
@@ -492,6 +600,7 @@ export function RunActivityDetail({
   taskDelegations?: TaskDelegationDisplayRecord[];
   tools: ToolExecutionRecord[];
   interrupted?: boolean;
+  onOpenTaskInspector?: (delegation: TaskDelegationDisplayRecord) => void;
 }) {
   const { t } = useTranslation();
   if (live) {
@@ -509,7 +618,7 @@ export function RunActivityDetail({
         return [<ToolExecutionContent key={entry.key} tools={[entry.tool]} />];
       }
       if (entry.kind === "task" && entry.task) {
-        return [<TaskDelegationRow delegation={entry.task} key={entry.key} />];
+        return [<TaskDelegationRow delegation={entry.task} key={entry.key} onOpen={onOpenTaskInspector} />];
       }
       return [];
     });
@@ -537,6 +646,7 @@ export function RunActivityDetail({
             taskDelegations={taskDelegations.filter((delegation) => delegation.roundId === round.id)}
             reasoningBlocks={reasoningBlocks.filter((block) => block.roundId === round.id)}
             tools={tools.filter((tool) => tool.roundId === round.id)}
+            onOpenTaskInspector={onOpenTaskInspector}
           />
         ))}
       </div>
@@ -544,7 +654,7 @@ export function RunActivityDetail({
   }
   const timeline: ReactNode[] = [];
   taskDelegations.forEach((delegation) => {
-    timeline.push(<TaskDelegationRow delegation={delegation} key={`task-${delegation.invocationId}`} />);
+    timeline.push(<TaskDelegationRow delegation={delegation} key={`task-${delegation.invocationId}`} onOpen={onOpenTaskInspector} />);
   });
   for (let index = 0; index <= tools.length; index += 1) {
     processMessages
@@ -590,8 +700,10 @@ function RunActivityContent({
   tools,
   stage,
   taskPlan,
+  modelRetry,
   expanded,
   onExpand,
+  onOpenTaskInspector,
 }: {
   activityId: string;
   activity: RunActivityRecord;
@@ -602,10 +714,14 @@ function RunActivityContent({
   tools: ToolExecutionRecord[];
   stage?: AgentRunStage;
   taskPlan?: TaskPlanPresentation;
+  modelRetry?: ModelRetryStatus | null;
   expanded: boolean;
   onExpand: (expanded: boolean) => void;
+  onOpenTaskInspector?: (delegation: TaskDelegationDisplayRecord) => void;
 }) {
   const { t } = useTranslation();
+  const workingArt = useCharacterMoodUrl("工作中");
+  const processedArt = useCharacterMoodUrl("已处理");
   const now = useRunActivityNow(activity.completedAt === undefined);
   const snapshot = resolveRunActivitySnapshot(activity, now);
   const wasProcessingRef = useRef(snapshot.processing);
@@ -617,7 +733,8 @@ function RunActivityContent({
   const title = snapshot.processing
     ? t("messageList.activityProcessingTitle", { elapsed: formatElapsed(snapshot.processingMs) })
     : t("messageList.activityProcessedTitle", { elapsed: formatElapsed(snapshot.processingMs) });
-  const image = snapshot.processing ? workingMoodUrl : processedMoodUrl;
+  const image = snapshot.processing ? workingArt : processedArt;
+  const retryLabel = retryStatusLabel(modelRetry, t);
 
   return (
     <section className={`cy-run-activity${snapshot.processing ? " is-processing" : " is-complete"}`}>
@@ -636,6 +753,7 @@ function RunActivityContent({
             <span>{title}</span>
             {stage && <RunStageIndicator stage={stage} />}
         </span>
+        {retryLabel && <span className="cy-run-activity__retry" role="status">{retryLabel}</span>}
         <svg className={`cy-run-activity__chevron${expanded ? " is-expanded" : ""}`} viewBox="0 0 16 16" aria-hidden="true">
           <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.75" />
         </svg>
@@ -652,6 +770,7 @@ function RunActivityContent({
             taskDelegations={taskDelegations}
             tools={tools}
             interrupted={Boolean(activity.keepExpanded && activity.completedAt !== undefined)}
+            onOpenTaskInspector={onOpenTaskInspector}
           />
           <div className="cy-run-activity__divider" />
         </div>
@@ -664,6 +783,7 @@ function ToolExecutionContent({ tools }: { tools: ToolExecutionRecord[] }) {
   const { t } = useTranslation();
   return (
     <section className="cy-tool-executions" aria-label={t("messageList.toolExecutionsAria")}>
+      {/* 工具卡一律默认折叠：只露标题和状态，输出细节由用户点开查看 */}
       <ThoughtChain
         rootClassName="cy-tool-executions__chain"
         line="dashed"
@@ -675,7 +795,7 @@ function ToolExecutionContent({ tools }: { tools: ToolExecutionRecord[] }) {
             description: (
               <span className="cy-tool-executions__description">
                 <span className="cy-tool-executions__status">{presentation.statusText}</span>
-                {presentation.detail && <code className="cy-tool-executions__detail">{presentation.detail}</code>}
+                {presentation.detail && <code className="cy-tool-executions__detail" title={presentation.detail}>{presentation.detail}</code>}
               </span>
             ),
             status: tool.status === "running" ? "loading" : tool.status === "error" ? "error" : "success",
@@ -713,8 +833,8 @@ function AskUserQaContent({ rows }: { rows: string[] }) {
 }
 
 /** 工具结果展示：ask_user 渲染问答配对；优先用事件携带的结构化 changes 渲染 Diff Review 卡片；否则尝试解析完整 result JSON；最后原样展示 */
-function ToolResultContent({ tool, result, changes }: { tool?: ToolExecutionRecord; result?: string; changes?: ToolFileChange[] }) {
-  if (tool?.name === "ask_user") {
+function ToolResultContent({ tool, result, changes }: { tool: ToolExecutionRecord; result?: string; changes?: ToolFileChange[] }) {
+  if (tool.name === "ask_user") {
     const rows = buildAskUserQa(tool);
     if (rows.length > 0) return <AskUserQaContent rows={rows} />;
   }
@@ -722,7 +842,7 @@ function ToolResultContent({ tool, result, changes }: { tool?: ToolExecutionReco
   if (result) {
     const parsed = extractFileChanges(result);
     if (parsed) return <FileChangeCard changes={parsed} />;
-    return <pre className="cy-tool-executions__result">{result}</pre>;
+    return <ToolOutputTerminal tool={tool} result={result} />;
   }
   return null;
 }
@@ -742,6 +862,17 @@ function UserAttachments({ attachments }: { attachments: ChatMessageAttachment[]
     <div className="cy-message__attachments">
       {attachments.map((attachment, index) => {
         const status = attachmentStatus(attachment);
+        if (attachment.kind === "web-element" && attachment.element) {
+          return (
+            <div className="cy-message__web-element" key={`web-element-${attachment.element.tabId}-${attachment.element.ref ?? index}-${index}`} title={attachment.element.snapshotLine}>
+              <ScanLine size={16} />
+              <span className="cy-message__web-element-copy">
+                <strong>{attachment.element.name}</strong>
+                <small>{attachment.element.pageTitle || attachment.element.pageUrl}</small>
+              </span>
+            </div>
+          );
+        }
         if (attachment.kind === "image" && (attachment.previewUrl || attachment.filePath)) {
           return (
             <figure className="cy-message__image-attachment" key={`${attachment.filePath ?? attachment.name}-${index}`}>
@@ -857,19 +988,42 @@ function LastUserMessageEditor({
   );
 }
 
-function CyreneMessageAvatar() {
+function AssistantMessageAvatar() {
   const { t } = useTranslation();
-  return <img className="cy-message-avatar__image" src={cyreneAvatarUrl} alt={t("messageList.cyreneAvatarAlt")} draggable={false} />;
+  const cyreneAvatarUrl = useCyreneAvatar();
+  const context = useContext(CharacterMoodContext);
+  const avatar = context.avatar;
+  return (
+    <img
+      className={`cy-message-avatar__image${avatar?.sprite ? " cy-message-avatar__image--sprite" : ""}`}
+      src={avatar?.src ?? cyreneAvatarUrl}
+      alt={avatar?.alt ?? t("messageList.cyreneAvatarAlt")}
+      draggable={false}
+    />
+  );
 }
 
-function UserMessageAvatar({ src }: { src: string | null }) {
+function UserMessageAvatar({ src, alt, sprite }: { src: string | null; alt?: string; sprite?: boolean }) {
   const { t } = useTranslation();
-  if (src) return <img className="cy-message-avatar__image" src={src} alt={t("messageList.userAvatarAlt")} draggable={false} />;
+  if (src) return <img className={`cy-message-avatar__image${sprite ? " cy-message-avatar__image--sprite" : ""}`} src={src} alt={alt ?? t("messageList.userAvatarAlt")} draggable={false} />;
   return <span className="cy-message-avatar__user" aria-label={t("messageList.userAvatarAlt")} />;
+}
+
+/** 压缩分隔条：进行中显示呼吸动画的占位条，完成后收敛为静态分隔条。 */
+function CompactionMarkerContent({ running }: { running?: boolean }) {
+  const { t } = useTranslation();
+  const label = running ? t("messageList.compactionRunning") : t("messageList.compactionDone");
+  return (
+    <Marker variant="separator" className={running ? "cy-message__compaction cy-message__compaction--running" : "cy-message__compaction"}>
+      <MarkerIcon><Archive /></MarkerIcon>
+      <MarkerContent>{label}</MarkerContent>
+    </Marker>
+  );
 }
 
 function createRoles(
   userAvatarUrl: string | null,
+  userAvatar: { src: string; alt: string; sprite?: boolean } | undefined,
   conversationId: string | undefined,
   mode: ConversationMode,
   preferredAddress: string,
@@ -885,13 +1039,14 @@ function createRoles(
   onReasoningExpand: (id: string, expanded: boolean) => void,
   onTtsCacheKey?: (messageId: string, cacheKey: string, converterVersion: string) => void,
   onOpenReviewInspector?: (runId: string, fileIndex: number, filePath: string) => void,
+  onOpenTaskInspector?: (delegation: TaskDelegationDisplayRecord) => void,
 ) {
   return {
   user: {
     placement: "end" as const,
     variant: "filled" as const,
     rootClassName: "cy-message cy-message--user",
-    avatar: <UserMessageAvatar src={userAvatarUrl} />,
+    avatar: <UserMessageAvatar src={userAvatar?.src ?? userAvatarUrl} alt={userAvatar?.alt} sprite={userAvatar?.sprite} />,
     contentRender: (content: string, info: { extraInfo?: { messageId?: string; stickerUrl?: string; attachments?: ChatMessageAttachment[]; channelSource?: ChatMessageChannelSource } }) => (
       info.extraInfo?.messageId === editingMessageId
         ? <LastUserMessageEditor
@@ -924,7 +1079,7 @@ function createRoles(
     placement: "start" as const,
     variant: "filled" as const,
     rootClassName: "cy-message cy-message--assistant",
-    avatar: <CyreneMessageAvatar />,
+    avatar: <AssistantMessageAvatar />,
     contentRender: (content: string, info: { extraInfo?: { streaming?: boolean; stickerUrl?: string; channelSource?: ChatMessageChannelSource } }) => (
       <AssistantContent
         content={content}
@@ -933,11 +1088,12 @@ function createRoles(
         channelSource={info.extraInfo?.channelSource}
       />
     ),
-    footer: (content: string, info: { extraInfo?: { messageId?: string; streaming?: boolean } }) => (
+    footer: (content: string, info: { extraInfo?: { messageId?: string; streaming?: boolean; at?: number } }) => (
       <AssistantMessageFooter
         content={content}
         messageId={info.extraInfo?.messageId}
         streaming={Boolean(info.extraInfo?.streaming)}
+        at={info.extraInfo?.at}
         conversationId={conversationId}
         mode={mode}
         preferredAddress={preferredAddress}
@@ -980,6 +1136,7 @@ function createRoles(
         tools?: ToolExecutionRecord[];
         runStage?: AgentRunStage;
         taskPlan?: TaskPlanPresentation;
+        modelRetry?: ModelRetryStatus | null;
       };
     }) => {
       const activityId = info.extraInfo?.activityId;
@@ -996,8 +1153,10 @@ function createRoles(
           tools={info.extraInfo?.tools ?? []}
           stage={info.extraInfo?.runStage}
           taskPlan={info.extraInfo?.taskPlan}
+          modelRetry={info.extraInfo?.modelRetry}
           expanded={resolveRunActivityExpanded(reasoningExpanded, activityId, activity)}
           onExpand={(expanded) => onReasoningExpand(activityId, expanded)}
+          onOpenTaskInspector={onOpenTaskInspector}
         />
       );
     },
@@ -1016,7 +1175,7 @@ function createRoles(
     variant: "borderless" as const,
     avatar: null,
     rootClassName: "cy-message cy-message--waiting",
-    contentRender: () => <ModelWaitContent />,
+    contentRender: (_content: string, info: { extraInfo?: { modelRetry?: ModelRetryStatus | null } }) => <ModelWaitContent modelRetry={info.extraInfo?.modelRetry} />,
   },
   weather: {
     placement: "start" as const,
@@ -1043,6 +1202,15 @@ function createRoles(
     variant: "borderless" as const,
     rootClassName: "cy-message cy-message--system",
   },
+  compaction: {
+    placement: "start" as const,
+    variant: "borderless" as const,
+    avatar: null,
+    rootClassName: "cy-message cy-message--compaction",
+    contentRender: (_content: string, info: { extraInfo?: { compactionRunning?: boolean } }) => (
+      <CompactionMarkerContent running={info.extraInfo?.compactionRunning} />
+    ),
+  },
   };
 }
 
@@ -1052,6 +1220,15 @@ function createRoles(
  * 修改本函数时不得引入消息对象与贴纸表之外的输入。
  */
 function convertMessage(message: ChatMessageItem, enabledStickers: readonly EnabledSticker[]): readonly BubbleItemType[] {
+  // 压缩标记：独立一条分隔条目，不走贴纸/正文的常规装配。
+  if (message.compaction) {
+    return [{
+      key: message.id,
+      role: "compaction",
+      content: "",
+      extraInfo: {},
+    }];
+  }
   if (message.role !== "assistant") {
     const stickerId = extractMessageStickerId(message.content, message.sticker);
     return [{
@@ -1074,6 +1251,7 @@ function convertMessage(message: ChatMessageItem, enabledStickers: readonly Enab
       key: `${message.id}-waiting`,
       role: "waiting",
       content: "",
+      extraInfo: { modelRetry: message.modelRetry },
     });
   }
   const reasoningBlocks = message.reasoningBlocks?.length
@@ -1108,7 +1286,7 @@ function convertMessage(message: ChatMessageItem, enabledStickers: readonly Enab
         content: "",
         // 头像钉在运行块头部（状态行左侧）：一次运行只出现一次，不随每条消息重复。
         // 用 createElement 而非 JSX：convertMessage 在测试里直接执行，不经过 JSX 运行时
-        avatar: createElement(CyreneMessageAvatar),
+        avatar: createElement(AssistantMessageAvatar),
         extraInfo: {
           activityId: `${message.id}-activity`,
           activity: message.runActivity,
@@ -1119,6 +1297,7 @@ function convertMessage(message: ChatMessageItem, enabledStickers: readonly Enab
           tools,
           runStage: message.runStage,
           taskPlan: message.taskPlan,
+          modelRetry: message.modelRetry,
         },
       });
     }
@@ -1156,6 +1335,7 @@ function convertMessage(message: ChatMessageItem, enabledStickers: readonly Enab
       extraInfo: {
         messageId: message.id,
         streaming: message.streaming,
+        at: message.at,
         ttsCacheKey: message.ttsCacheKey,
         stickerUrl: message.sticker ? resolveStickerUrl(message.sticker, enabledStickers) : undefined,
         channelSource: message.channelSource,
@@ -1169,7 +1349,7 @@ function convertMessage(message: ChatMessageItem, enabledStickers: readonly Enab
       role: "review",
       content: "",
       // Review 面板属于运行块：头像占位隐藏（头像钉在活动卡头部），面板与正文/时间线内容左对齐
-      avatar: createElement(CyreneMessageAvatar),
+      avatar: createElement(AssistantMessageAvatar),
       rootClassName: "cy-message cy-message--review cy-message--review-run",
       extraInfo: { runId: message.runId },
     });
@@ -1212,11 +1392,17 @@ export function assembleMessageItems(
   return { items, cache: state };
 }
 
+const MESSAGE_VIRTUALIZATION_THRESHOLD = 40;
+
 export function ChatMessageList({
   messages,
   conversationId,
   mode,
   preferredAddress,
+  compacting = false,
+  characterMoodAssets,
+  assistantAvatar,
+  userAvatar,
   stickerSize = "standard",
   onTtsCacheKey,
   revisionBusy = false,
@@ -1225,8 +1411,10 @@ export function ChatMessageList({
   onScrollToBottomVisibilityChange,
   onRegisterScrollToBottom,
   onOpenReviewInspector,
+  onOpenTaskInspector,
   workspaceRoot,
   onOpenFileLink,
+  onOpenWebLink,
 }: ChatMessageListProps) {
   // 性能探针：列表外壳执行次数（A0 实验补 markdownRenders 覆盖不到的 Bubble 外壳/footer 路径）
   reportChatPerfRender("listRenders");
@@ -1302,6 +1490,7 @@ export function ChatMessageList({
   const roles = useMemo(
     () => createRoles(
       userAvatarUrl,
+      userAvatar,
       conversationId,
       mode,
       preferredAddress,
@@ -1317,8 +1506,9 @@ export function ChatMessageList({
       onReasoningExpand,
       onTtsCacheKey,
       onOpenReviewInspector,
+      onOpenTaskInspector,
     ),
-    [beginEdit, cancelEdit, conversationId, editDraft, editingMessageId, mode, onOpenReviewInspector, onReasoningExpand, onRegenerateLastResponse, onTtsCacheKey, preferredAddress, reasoningExpanded, revisionBusy, submitEdit, userAvatarUrl],
+    [beginEdit, cancelEdit, conversationId, editDraft, editingMessageId, mode, onOpenReviewInspector, onOpenTaskInspector, onReasoningExpand, onRegenerateLastResponse, onTtsCacheKey, preferredAddress, reasoningExpanded, revisionBusy, submitEdit, userAvatar, userAvatarUrl],
   );
 
   useEffect(() => {
@@ -1349,32 +1539,53 @@ export function ChatMessageList({
   const items = useMemo(() => {
     const assembled = assembleMessageItems(messages, enabledStickers, messageItemsCacheRef.current);
     messageItemsCacheRef.current = assembled.cache;
-    return assembled.items;
-  }, [messages, enabledStickers]);
+    // 压缩进行中：尾部追加呼吸占位条；完成后投影重载带出静态 marker，占位条随之移除。
+    return compacting
+      ? [...assembled.items, { key: "compaction-running", role: "compaction" as const, content: "", extraInfo: { compactionRunning: true } }]
+      : assembled.items;
+  }, [messages, enabledStickers, compacting]);
   const channelConversationLabel = resolveChannelConversationLabel(messages);
+  const shouldVirtualizeMessages = items.length > MESSAGE_VIRTUALIZATION_THRESHOLD;
   const fileLinkEnv = useMemo<FileLinkEnv>(
-    () => ({ sessionId: conversationId, workspaceRoot, openFile: onOpenFileLink }),
-    [conversationId, workspaceRoot, onOpenFileLink],
+    () => ({ sessionId: conversationId, workspaceRoot, openFile: onOpenFileLink, openWebLink: onOpenWebLink }),
+    [conversationId, workspaceRoot, onOpenFileLink, onOpenWebLink],
+  );
+  const characterMoodContext = useMemo(
+    () => ({ moods: characterMoodAssets ?? {}, avatar: assistantAvatar ?? null }),
+    [assistantAvatar, characterMoodAssets],
   );
 
   return (
-    <FileLinkContext.Provider value={fileLinkEnv}>
-      <LastTurnIdsContext.Provider value={lastTurnIds}>
-        <div
-          ref={containerRef}
-          className={`cy-message-list cy-message-list--stickers-${stickerSize}`}
-          aria-live="polite"
-          onScroll={updateScrollState}
-        >
-          {channelConversationLabel && (
-            <div className="cy-message-list__channel-context" role="note" aria-label={channelConversationLabel}>
-              <span className="cy-message-list__channel-dot" aria-hidden="true" />
-              <span>{channelConversationLabel}</span>
-            </div>
-          )}
-          <Bubble.List items={items} role={roles} autoScroll />
-        </div>
-      </LastTurnIdsContext.Provider>
-    </FileLinkContext.Provider>
+    <CharacterMoodContext.Provider value={characterMoodContext}>
+      <FileLinkContext.Provider value={fileLinkEnv}>
+        <LastTurnIdsContext.Provider value={lastTurnIds}>
+          <div
+            ref={containerRef}
+            className={`cy-message-list cy-message-list--stickers-${stickerSize}`}
+            aria-live="polite"
+            onScroll={updateScrollState}
+          >
+            {channelConversationLabel && (
+              <div className="cy-message-list__channel-context" role="note" aria-label={channelConversationLabel}>
+                <span className="cy-message-list__channel-dot" aria-hidden="true" />
+                <span>{channelConversationLabel}</span>
+              </div>
+            )}
+            {shouldVirtualizeMessages ? (
+              <VirtualChatMessageList
+                key={conversationId ?? "default"}
+                items={items}
+                roles={roles}
+                scrollRef={containerRef}
+                nearBottomRef={isNearBottomRef}
+                layoutKey={channelConversationLabel}
+              />
+            ) : (
+              <Bubble.List items={items} role={roles} autoScroll />
+            )}
+          </div>
+        </LastTurnIdsContext.Provider>
+      </FileLinkContext.Provider>
+    </CharacterMoodContext.Provider>
   );
 }

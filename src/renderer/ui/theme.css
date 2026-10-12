@@ -2,6 +2,7 @@
    设置页 DOM 弹窗与 React 适配器共享同一组语义变量；
    pearl-white 在下方按同名变量覆盖，保证两端视觉一致。 */
 @import url("./themes/pearl-white.css");
+@import url("./themes/charcoal-pink.css");
 
 :root {
   --rb-feedback-radius: 18px;
@@ -16,6 +17,12 @@
   --rb-feedback-warning: #d09a43;
   --rb-feedback-info: var(--rb-pink-400);
   --rb-feedback-motion: 180ms;
+}
+
+html[data-ui-theme-pending] #cyrene-react-root,
+html[data-ui-theme-pending] #cy-call-root,
+html[data-ui-theme-pending] .sticker-shell {
+  visibility: hidden;
 }
 
 [data-ui-theme="pearl-white"] {

@@ -1,6 +1,7 @@
 // Orchestrator Context Builder — post-chat 副作用（记忆写入 + Reflection）
 import { memoryScheduler } from "../memory/memory-scheduler";
 import type { TurnAttribution } from "../memory/memory-types";
+import { isMemoryEnabled } from "../memory/memory-mode";
 
 /**
  * 调度一轮对话的记忆写入。
@@ -14,5 +15,6 @@ export function scheduleMemoryWrite(
   conversationId?: string,
   attribution?: TurnAttribution,
 ): void {
+  if (!isMemoryEnabled()) return;
   memoryScheduler.scheduleMemoryWrite(userInput, assistantReply, conversationId, attribution);
 }

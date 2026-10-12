@@ -6,8 +6,8 @@ import { checkPermission, type ToolRiskLevel } from "../../../permission";
 import { isPlanReadOnly } from "../../plan-mode";
 import { contextRefRegistry, extractLastUserQuery, type ToolContext } from "../../tools/registry/tool-context";
 import type { HarnessInput } from "../index";
-import { TaskSessionStore } from "../../../tasks/task-session-store";
-import { createTaskExecutor } from "../../task-runtime";
+import { getTaskSessionStore } from "../../../tasks/task-session-store";
+import { createTaskCloser, createTaskExecutor } from "../../task-runtime";
 import { FileToolOutputStore } from "../tool-output/file-tool-output-store";
 import { sendTaskLifecycleAsAgui } from "./event-mapper";
 import type { PreparedHarnessRun } from "./run-preparation";
@@ -22,6 +22,8 @@ export interface PreparedToolRuntime {
   checkPermission: NonNullable<HarnessInput["checkPermission"]>;
   toolOutputStore: FileToolOutputStore;
   taskExecutor: HarnessInput["taskExecutor"];
+  closeTaskExecutor: HarnessInput["closeTaskExecutor"];
+  openTaskCompanions: string[];
 }
 
 export function prepareToolRuntime(input: {
@@ -81,12 +83,17 @@ export function prepareToolRuntime(input: {
   };
   const toolOutputStore = new FileToolOutputStore(app.getPath("userData"));
   // 只有 work/code 模式允许派生任务；chat 模式不创建 TaskSession，避免出现不可见的后台执行。
-  const taskExecutor = options.conversationMode === "work" || options.conversationMode === "code"
+  // taskMode 在收窄的同时保留 "work" | "code" 字面量类型，供下方 executor 的 parent.mode 使用。
+  const taskMode = options.conversationMode === "work" || options.conversationMode === "code"
+    ? options.conversationMode
+    : undefined;
+  const taskStore = taskMode ? getTaskSessionStore(app.getPath("userData")) : undefined;
+  const taskExecutor = taskStore && taskMode
     ? createTaskExecutor({
       parent: {
         parentConversationId: threadId,
         parentRunId: runId,
-        mode: options.conversationMode,
+        mode: taskMode,
         capabilities: options.capabilities,
         systemPrompt,
         vendorConfig,
@@ -98,10 +105,14 @@ export function prepareToolRuntime(input: {
         permissionMode: options.permissionMode,
         toolOutputStore,
       },
-      store: new TaskSessionStore(app.getPath("userData")),
+      store: taskStore,
       onLifecycle: (event) => sendTaskLifecycleAsAgui(event, threadId, runId, input.sendBaseEvent),
     })
     : undefined;
+  const closeTaskExecutor = taskStore
+    ? createTaskCloser({ store: taskStore, parentConversationId: threadId })
+    : undefined;
+  const openTaskCompanions = taskStore?.listOpenCompanions(threadId) ?? [];
 
-  return { toolContext, checkPermission: permissionCheck, toolOutputStore, taskExecutor };
+  return { toolContext, checkPermission: permissionCheck, toolOutputStore, taskExecutor, closeTaskExecutor, openTaskCompanions };
 }

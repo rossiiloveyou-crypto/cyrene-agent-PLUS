@@ -194,6 +194,8 @@ describe("ipc-contract-scanner", () => {
       "win.webContents.send(IPC.F, p);",
       "sendToPetWindow(IPC.G, p);",
       "runtime.registerIpc(IPC.H, h);",
+      "function publish(channel: string, payload: unknown) { window.webContents.send(channel, payload); }",
+      "publish(IPC.I, payload);",
       "// ipc.handle(IPC.COMMENTED, h);",
       'const label = "ipc.handle(IPC.STRING, h)";',
       "sendToPetWindow(channel, p);",
@@ -211,6 +213,7 @@ describe("ipc-contract-scanner", () => {
         "outbound:F",
         "outbound:G",
         "handle:H",
+        "outbound:I",
       ]);
   });
 });

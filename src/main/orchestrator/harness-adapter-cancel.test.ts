@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { runHarness, permissionCheck, getById } = vi.hoisted(() => ({
   runHarness: vi.fn(),
@@ -27,14 +30,19 @@ vi.mock("../prompts/prompt-loader", () => ({
 }));
 
 vi.mock("electron", () => ({
-  app: { getPath: vi.fn(() => "C:\\cyrene-test-user-data") },
+  app: { getPath: vi.fn() },
 }));
 
 import { runHarnessWithAdapter } from "./harness-adapter";
 import type { HarnessInput } from "./harness";
+import { app } from "electron";
+
+let userDataRoot: string;
 
 describe("runHarnessWithAdapter cancellation context", () => {
   beforeEach(() => {
+    userDataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cyrene-adapter-cancel-"));
+    vi.mocked(app.getPath).mockReturnValue(userDataRoot);
     runHarness.mockReset();
     permissionCheck.mockReset();
     getById.mockReset();
@@ -44,6 +52,10 @@ describe("runHarnessWithAdapter cancellation context", () => {
       terminated: true,
       rounds: 1,
     });
+  });
+
+  afterEach(() => {
+    fs.rmSync(userDataRoot, { recursive: true, force: true });
   });
 
   it("threads the same run signal into tools, permission, and clarification", async () => {

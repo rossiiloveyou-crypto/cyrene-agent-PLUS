@@ -53,7 +53,7 @@ export function overwriteDropMessage(decision: OverwriteDropDecision): string {
   return (
     `覆盖写被拒绝：原文件 ${decision.oldLineCount} 行，新内容仅 ${decision.newLineCount} 行（${percent}%），` +
     "疑似模型输出被截断。\n" +
-    "如需局部修改请改用 str_replace（内容锚点替换）；" +
-    "确需整文件重写请用 str_replace（old_string = 原文件全文）或请求用户协助，不要直接覆盖。"
+    "如需局部修改请改用 Edit（内容锚点替换）；" +
+    "确需整文件重写请用 Write（先读取原文件并确保内容完整）或请求用户协助，不要直接覆盖。"
   );
 }

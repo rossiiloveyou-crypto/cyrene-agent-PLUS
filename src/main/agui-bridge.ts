@@ -38,9 +38,12 @@ import { createRunAdjustmentPoller } from "./chats/pending-adjustment";
 import { broadcastChatsChanged } from "./chats/chats-ipc";
 import { loadModelSettings, resolveSessionModelSettings } from "./settings/model-settings";
 import type { ChatMessage, ConversationMode, PendingChatAttachment } from "../shared/chat-types";
+import { normalizeBrowserElementSelection } from "../shared/browser-panel-types";
+import { isModelFailureInfo } from "../shared/model-error";
 import { prepareTranscriptDispatch, type TranscriptRewindRequest } from "./orchestrator/conversation-transcript-coordinator";
 import { getConversationTranscriptStore } from "./orchestrator/conversation-transcript-store";
 import { createConversationSessionMigration } from "./orchestrator/conversation-session-migration";
+import { refreshWikiMemorySources } from "./memory/wiki-memory-scheduler";
 import { ConversationJournalService } from "./orchestrator/conversation-journal-service";
 import type { MaterializedTranscript } from "./orchestrator/conversation-transcript-projection";
 import type { TranscriptPresentationPatch } from "./orchestrator/conversation-transcript-types";
@@ -101,20 +104,27 @@ export interface AguiCurrentUserInput {
 
 function normalizeCurrentUserAttachments(value: unknown): PendingChatAttachment[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const attachments = value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
+  const attachments: PendingChatAttachment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
     const raw = item as Record<string, unknown>;
-    const kind = raw.kind === "image" || raw.kind === "document" ? raw.kind : null;
-    if (!kind || typeof raw.name !== "string" || typeof raw.filePath !== "string") return [];
-    return [{
+    const kind = raw.kind === "image" || raw.kind === "document" || raw.kind === "web-element" ? raw.kind : null;
+    if (!kind || typeof raw.name !== "string") continue;
+    if (kind === "web-element") {
+      const element = normalizeBrowserElementSelection(raw.element);
+      if (element) attachments.push({ kind, name: raw.name, element });
+      continue;
+    }
+    if (typeof raw.filePath !== "string") continue;
+    attachments.push({
       kind: kind as "image" | "document",
       name: raw.name,
       filePath: raw.filePath,
       ...(typeof raw.mime === "string" ? { mime: raw.mime } : {}),
       ...(typeof raw.caption === "string" ? { caption: raw.caption } : {}),
       ...(raw.hasAnnotations === true ? { hasAnnotations: true } : {}),
-    }];
-  });
+    });
+  }
   return attachments.length > 0 ? attachments : undefined;
 }
 
@@ -191,6 +201,8 @@ export type OnRunFinishedFn = (
     conversationId: string;
     channel?: string;
     runId?: string;
+    assistantEntryId?: string;
+    userTurnId?: string;
   },
 ) => Promise<void | RunFinishedEffects> | void | RunFinishedEffects;
 
@@ -458,20 +470,26 @@ export function registerAgUiIpc(
           content: currentUser.text,
           at: currentUser.at ?? Date.now(),
           ...(currentUserAttachments ? {
-            attachments: currentUserAttachments.map((attachment) => attachment.kind === "image"
+            attachments: currentUserAttachments.map((attachment) => attachment.kind === "web-element"
               ? {
+                  kind: "web-element" as const,
+                  name: attachment.name,
+                  element: attachment.element!,
+                }
+              : attachment.kind === "image"
+                ? {
                   kind: "image" as const,
                   name: attachment.name,
-                  filePath: attachment.filePath,
+                  filePath: attachment.filePath!,
                   mime: attachment.mime ?? "application/octet-stream",
                   ...(attachment.caption ? { caption: attachment.caption } : {}),
                   status: "pending" as const,
                   ...(attachment.hasAnnotations ? { hasAnnotations: true } : {}),
                 }
-              : {
+                : {
                   kind: "document" as const,
                   name: attachment.name,
-                  filePath: attachment.filePath,
+                  filePath: attachment.filePath!,
                   status: "pending" as const,
                 }),
           } : {}),
@@ -523,6 +541,7 @@ export function registerAgUiIpc(
             rewind: input.transcriptRewind,
           });
         }
+        if (input.transcriptRewind) await refreshWikiMemorySources(sessionId);
         const presentationMessageId = input.transcriptRewind
           ? `${runId}:rewind:${input.transcriptRewind.anchorUserTurnId}`
           : `user:v1:${currentUser.turnId}:r1`;
@@ -806,7 +825,14 @@ export function registerAgUiIpc(
           // complete 回调据此跳过成功收尾副作用；渲染端只收到 RUN_ERROR 作为终态。
           if (terminal.status === "runtime_error") {
             const reason = terminal.reason ?? "E_RUN_FAILURE";
-            send({ type: "RUN_ERROR", message: reason, code: reason, threadId, runId });
+            const eventMetadata = (baseEvent as { metadata?: unknown }).metadata;
+            const modelFailure = eventMetadata && typeof eventMetadata === "object"
+              ? (eventMetadata as { cyreneModelFailure?: unknown }).cyreneModelFailure
+              : undefined;
+            send({
+              type: "RUN_ERROR", message: reason, code: reason, threadId, runId,
+              ...(isModelFailureInfo(modelFailure) ? { metadata: { cyreneModelFailure: modelFailure } } : {}),
+            });
             pendingRunFinishedEvent = null;
             return;
           }
@@ -881,6 +907,7 @@ export function registerAgUiIpc(
         console.error("[AgUiBridge] run 失败:", message);
         perf.dump();
         const code = err instanceof AgentRuntimeError ? err.code : undefined;
+        const modelFailure = err instanceof AgentRuntimeError ? err.modelFailure : undefined;
         // runtime error 必须经过同一个 settlement gate。
         // 如果 upstream 已经发过 RUN_FINISHED（gate 已结算为 success / cancelled / timeout），
         // 这里直接丢弃 RUN_ERROR，避免渲染端收到第二终态。
@@ -916,13 +943,22 @@ export function registerAgUiIpc(
           durationMs: Date.now() - turnStartedAt,
         });
         // 补发 RUN_ERROR 事件，渲染端据此收尾（invoke 早已 resolve，靠事件驱动）
-        send({ type: "RUN_ERROR", message, code, threadId, runId });
+        send({ type: "RUN_ERROR", message, code, threadId, runId,
+          ...(modelFailure ? { metadata: { cyreneModelFailure: modelFailure } } : {}),
+        });
         cleanupRunState();
         endLifecycle();
       },
       complete: async () => {
         perf.mark("agent_run_complete");
         cleanupRunState();
+        // run 终态同步会话统计：assistant 回复只进轨迹投影、不经 chats-store 落盘，
+        // 在 RUN_FINISHED 送达渲染端之前对齐 messageCount/updatedAt，
+        // 侧栏的最近聊天时间、排序与未读检测才能看到本轮新消息
+        try {
+          const projection = await journal.readProjection(sessionId);
+          chatsStore.syncSessionStats(sessionId, projection.messages.length);
+        } catch { /* 统计同步尽力而为：失败不改变 run 终态语义 */ }
         // complete 路径下 settlement 应已由 next(RUN_FINISHED) 写入。
         // 若 upstream 走裸 complete（没有 RUN_FINISHED），必须补发一个合成的 RUN_FINISHED，
         // 否则 renderer 收到零个终态事件，exactly-once 退化为 at-most-once。
@@ -960,6 +996,8 @@ export function registerAgUiIpc(
               mode,
               conversationId: sessionId,
               runId,
+              assistantEntryId: options.transcriptSink?.getLastAssistantEntryId?.() ?? input.assistantTurnId ?? runId,
+              userTurnId: currentUser?.turnId,
             }));
             if (mode !== "code" && effects?.sticker !== undefined) {
               send({

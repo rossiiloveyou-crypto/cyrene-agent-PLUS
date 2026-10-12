@@ -76,6 +76,21 @@ describe("harness event mapper", () => {
     ]);
   });
 
+  it("maps model retry status to a stamped Cyrene custom event", () => {
+    expect(capture({
+      type: "model_retry",
+      status: { phase: "waiting", retryNumber: 1, maxRetries: 5, delayMs: 2_000, category: "NETWORK" },
+    } as HarnessEvent)).toEqual([
+      expect.objectContaining({
+        type: "CUSTOM",
+        name: "cyrene.model.retry",
+        value: { phase: "waiting", retryNumber: 1, maxRetries: 5, delayMs: 2_000, category: "NETWORK" },
+        threadId: "thread-1",
+        runId: "run-1",
+      }),
+    ]);
+  });
+
   it("maps plan_submitted to cyrene.plan.review with the full plan content", () => {
     // 交卷事件走独立 CUSTOM 事件下发计划全文，渲染端持久监听据此打开计划面板
     expect(capture({

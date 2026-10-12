@@ -126,18 +126,19 @@ describe("work run presentation", () => {
       revision: 2,
       cardMode: "semantic_clarification",
       intro: "还需要确认两个细节。",
+      allowAdditionalContext: false,
       responseKind: "submission",
       question: "希望生成哪种格式？",
       options: [
-        { id: "option-word", label: "Word" },
-        { id: "option-pdf", label: "PDF" },
+        { id: "option-word", label: "Word", description: undefined },
+        { id: "option-pdf", label: "PDF", description: undefined },
       ],
       questions: [{
         id: "question-1",
         question: "希望生成哪种格式？",
         options: [
-          { id: "option-word", label: "Word" },
-          { id: "option-pdf", label: "PDF" },
+          { id: "option-word", label: "Word", description: undefined },
+          { id: "option-pdf", label: "PDF", description: undefined },
         ],
         allowCustomInput: true,
         freeTextPlaceholder: "填写其他格式",

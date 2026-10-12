@@ -1,8 +1,8 @@
-/* 组件专属胶囊配色；通用界面角色变量来自 ui/themes/pearl-white.css。 */
+/* 组件专属胶囊配色；各主题通过同名语义变量覆盖。 */
 :root {
-  --cy-pill-bg: #fff9fb;
-  --cy-pill-border: #ff9fbd;
-  --cy-pill-status: #7d3557;
+  --cy-pill-bg: var(--rb-surface-elevated);
+  --cy-pill-border: var(--rb-border-focus);
+  --cy-pill-status: var(--rb-text-primary);
 }
 
 html, body {
@@ -10,6 +10,12 @@ html, body {
   margin: 0;
   padding: 0;
   overflow: hidden;
+}
+
+/* @mantine/core/styles.css 会给 body 铺一层不透明底色（--mantine-color-body）。
+   页面实色由 .cy-page 承担，body 保持不铺色，避免双层底色不同步。 */
+html body {
+  background-color: transparent;
 }
 
 #cyrene-react-root {
@@ -29,8 +35,8 @@ html, body {
   display: flex;
   gap: 10px;
   /* 不给 padding 加过渡：layout 属性动画每帧强制整窗 reflow，连点侧栏开关时主线程饱和、鼠标事件排队 */
+  /* 窗口圆角交给系统处理（Win11 原生小圆角），页面不再自绘圆角 */
   border: 1px solid var(--rb-border-default);
-  border-radius: var(--cy-window-radius, 24px);
   overflow: hidden;
   app-region: drag;
   -webkit-app-region: drag;
@@ -75,7 +81,7 @@ html, body {
   display: grid;
   place-items: center;
   border: 2px dashed var(--rb-accent);
-  border-radius: max(8px, calc(var(--cy-window-radius, 12px) - 2px));
+  border-radius: 10px;
   background: rgb(255 255 255 / 88%);
   color: var(--rb-accent);
   font: 600 15px/1.4 var(--rb-font-sans, sans-serif);
@@ -208,6 +214,25 @@ html, body {
   height: 16px;
   flex-shrink: 0;
   background: var(--rb-border-default, #f0ebee);
+}
+
+.cy-inspector-browser-toggle {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--rb-border-default, #f0ebee);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--rb-bg-1, #fff) 88%, transparent);
+  color: var(--rb-text-secondary, #80777e);
+  cursor: pointer;
+  transition: color .12s ease, background .12s ease, border-color .12s ease;
+}
+.cy-inspector-browser-toggle:hover {
+  border-color: color-mix(in srgb, var(--rb-accent, #e75d87) 45%, transparent);
+  background: var(--rb-surface-hover, #fff1f6);
+  color: var(--rb-accent, #e75d87);
 }
 
 /* 全局文字选中：用应用粉色强调色替代浏览器默认蓝 */
@@ -418,39 +443,4 @@ html, body {
 
 .cy-workspace.has-messages .cy-workspace-composer {
   padding: 22px 24px;
-}
-
-.cy-compressing-context {
-  position: absolute;
-  right: 24px;
-  bottom: 120px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
-  color: var(--rb-text-primary);
-  font-size: 13px;
-  pointer-events: none;
-  animation: cy-compressing-fade-in 0.25s ease;
-  z-index: 10;
-}
-
-.cy-compressing-context-icon {
-  width: 40px;
-  height: 40px;
-  object-fit: contain;
-  animation: cy-compressing-float 2.4s ease-in-out infinite;
-}
-
-@keyframes cy-compressing-fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes cy-compressing-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
 }

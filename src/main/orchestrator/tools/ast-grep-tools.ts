@@ -1,6 +1,6 @@
 // ast-grep 工具 — 基于 AST 的结构化代码搜索与重写
 //
-// 与文本级工具（search_text/apply_patch）和语义级工具（lsp）互补：
+// 与文本级工具（Grep/Edit）和语义级工具（lsp）互补：
 // - 语法级匹配：pattern 就是普通代码，$$$ 通配任意节点、$$ 单节点、$VAR 捕获
 //   例：pattern "console.log($$$ARGS)" 匹配所有 console.log 调用（不会误伤注释/字符串里的同名文本）
 // - 不区分语义：同名标识符一律匹配，精确到符号的改名请用 lsp 工具
@@ -518,7 +518,7 @@ export function registerAstGrepTools(): void {
       "- 文本搜索会误伤注释/字符串里的同名内容时\n" +
       "- 重构前先摸清影响面\n\n" +
       "不要用于：\n" +
-      "- 纯文本搜索（用 search_text）\n" +
+      "- 纯文本搜索（用 Grep）\n" +
       "- 找符号定义/引用（用 lsp 的 workspaceSymbol/findReferences，语义级更精确）\n\n" +
       PATTERN_SYNTAX_DOC + "\n\n" +
       LANGUAGES_DOC + "\n\n" +
@@ -551,9 +551,9 @@ export function registerAstGrepTools(): void {
       "- 同一代码模式的大量机械改写（API 迁移、错误调用规范化、测试断言格式统一）\n" +
       "- 文本替换会误伤注释/字符串时\n\n" +
       "不要用于：\n" +
-      "- 单文件单处修改（用 str_replace 更直接）\n" +
+      "- 单文件单处修改（用 Edit 更直接）\n" +
       "- 精确改名某个符号（用 lsp rename 语义级改名，ast-grep 不区分同名符号）\n" +
-      "- 复杂多行结构调整（用 apply_patch）\n\n" +
+      "- 复杂多行结构调整（用 Edit）\n\n" +
       "流程：先 dryRun=true（默认）预览影响面，确认后 dryRun=false 写入。\n\n" +
       PATTERN_SYNTAX_DOC + "\n\n" +
       LANGUAGES_DOC + "\n\n" +

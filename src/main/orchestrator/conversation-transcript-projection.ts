@@ -9,6 +9,7 @@
 import {
   parseToolCallArgs,
   toolCallFingerprint,
+  type TodoItem,
   type UncertainEffect,
 } from "./harness/types";
 import type { HarnessRunSession } from "./harness/run-store";
@@ -21,11 +22,14 @@ import type { ChatMessage, ChatMessageContent, ToolCall } from "./vendors/types"
 
 export interface TranscriptRunReader {
   get(runId: string): HarnessRunSession | null;
+  listInterruptedRuns?(conversationId?: string): HarnessRunSession[];
 }
 
 export interface MaterializedTranscript {
   messages: ChatMessage[];
   uncertainEffects: UncertainEffect[];
+  todoItems?: TodoItem[];
+  todoItemsSource?: "transcript" | "legacy_run_store" | "legacy_presentation";
   throughSeq: number;
 }
 
@@ -35,7 +39,7 @@ export interface MaterializedTranscriptWithSources extends MaterializedTranscrip
 }
 
 export interface ConversationProjectionNodeState {
-  kind: "user" | "assistant";
+  kind: "user" | "assistant" | "compaction";
   entryId: string;
   messageId: string;
   turnId?: string;
@@ -63,6 +67,7 @@ export interface ConversationProjection {
 type UserEntry = Extract<TranscriptEntry, { kind: "user" }>;
 type AssistantEntry = Extract<TranscriptEntry, { kind: "assistant" }>;
 type RewindEntry = Extract<TranscriptEntry, { kind: "turn_rewind" }>;
+type CompactionEntry = Extract<TranscriptEntry, { kind: "compaction_checkpoint" }>;
 
 type ActiveNode =
   | { kind: "user"; entry: UserEntry | RewindEntry; text: string }
@@ -70,8 +75,11 @@ type ActiveNode =
       kind: "assistant";
       entry: AssistantEntry;
       toolResults: Map<string, ChatMessage>;
+      toolResultOutcomes: Map<string, "success" | "failure" | "unknown" | "not_executed">;
       toolResultSeqs: Map<string, number>;
-    };
+      toolStarts: Map<string, Extract<TranscriptEntry, { kind: "tool_started" }>>;
+    }
+  | { kind: "compaction"; entry: CompactionEntry };
 
 interface ActiveTranscript {
   nodes: ActiveNode[];
@@ -111,7 +119,14 @@ function reduceActiveTranscript(entries: TranscriptEntry[]): ActiveTranscript {
         nodes.push({ kind: "user", entry, text: entry.payload.text });
         break;
       case "assistant":
-        nodes.push({ kind: "assistant", entry, toolResults: new Map(), toolResultSeqs: new Map() });
+        nodes.push({
+          kind: "assistant",
+          entry,
+          toolResults: new Map(),
+          toolResultOutcomes: new Map(),
+          toolResultSeqs: new Map(),
+          toolStarts: new Map(),
+        });
         break;
       case "tool_result": {
         const node = nodes.find(
@@ -119,7 +134,17 @@ function reduceActiveTranscript(entries: TranscriptEntry[]): ActiveTranscript {
         );
         if (node?.kind === "assistant" && !node.toolResults.has(entry.payload.toolCallId)) {
           node.toolResults.set(entry.payload.toolCallId, entry.payload.message);
+          node.toolResultOutcomes.set(entry.payload.toolCallId, entry.payload.outcome);
           node.toolResultSeqs.set(entry.payload.toolCallId, entry.seq);
+        }
+        break;
+      }
+      case "tool_started": {
+        const node = nodes.find(
+          (item) => item.kind === "assistant" && item.entry.id === entry.payload.assistantEntryId,
+        );
+        if (node?.kind === "assistant" && !node.toolStarts.has(entry.payload.toolCallId)) {
+          node.toolStarts.set(entry.payload.toolCallId, entry);
         }
         break;
       }
@@ -142,9 +167,16 @@ function reduceActiveTranscript(entries: TranscriptEntry[]): ActiveTranscript {
         if (targetIndex >= 0) nodes.length = targetIndex;
         break;
       }
+      case "compaction_checkpoint": {
+        // UI 投影专用节点：在「已被压缩覆盖的前缀」之后落一个分隔标记。
+        // 模型上下文路径（materializeNodes）会跳过它；rewind / 墓碑截断
+        // 分支时该节点随覆盖前缀一起消失，天然等价于检查点失效判定。
+        nodes.push({ kind: "compaction", entry });
+        break;
+      }
       default:
-        // Presentation, receipts, interruption, backfill and checkpoints do
-        // not themselves alter the active canonical node sequence.
+        // Presentation, receipts, interruption and backfill do not
+        // themselves alter the active canonical node sequence.
         break;
     }
   }
@@ -171,12 +203,14 @@ function addUncertainEffect(
   effects: UncertainEffect[],
   runId: string | undefined,
   call: ToolCall,
+  fingerprint = toolCallFingerprint(call.name, parseToolCallArgs(call)),
 ): void {
-  if (effects.some((effect) => effect.toolCallId === call.id)) return;
+  const effectId = `${runId ?? "unknown-run"}:${call.id}`;
+  if (effects.some((effect) => effect.id === effectId)) return;
   effects.push({
-    id: `${runId ?? "unknown-run"}:${call.id}`,
+    id: effectId,
     toolCallId: call.id,
-    fingerprint: toolCallFingerprint(call.name, parseToolCallArgs(call)),
+    fingerprint,
     toolName: call.name,
     message: "该外部副作用在应用中断时尚未确认结果",
   });
@@ -195,25 +229,37 @@ function materializeNodes(
       sourceSeqs.push(node.entry.seq);
       continue;
     }
+    if (node.kind === "compaction") continue;
     const payload = node.entry.payload;
     messages.push(payload);
     sourceSeqs.push(node.entry.seq);
     if (!payload.toolCalls?.length) continue;
 
     const runSession = node.entry.runId ? runReader.get(node.entry.runId) : null;
-    const statusById = new Map(runSession?.toolCalls.map((call) => [call.toolCallId, call]));
+    const statusById = new Map(
+      runSession?.schemaVersion === 1
+        ? runSession.toolCalls.map((call) => [call.toolCallId, call] as const)
+        : [],
+    );
     for (const call of payload.toolCalls) {
+      const start = node.toolStarts.get(call.id)?.payload;
+      const record = statusById.get(call.id);
+      const wasStarted = Boolean(start) || record?.status === "started" || record?.status === "unknown";
+      const sideEffect = start?.sideEffect ?? record?.sideEffect;
+      const fingerprint = start?.fingerprint
+        ?? toolCallFingerprint(call.name, parseToolCallArgs(call));
       const persisted = node.toolResults.get(call.id);
       if (persisted) {
+        if (node.toolResultOutcomes.get(call.id) === "unknown" && sideEffect === "non_idempotent_side_effect") {
+          addUncertainEffect(uncertainEffects, node.entry.runId, call, fingerprint);
+        }
         messages.push(persisted);
         sourceSeqs.push(node.toolResultSeqs.get(call.id) ?? node.entry.seq);
         continue;
       }
-      const record = statusById.get(call.id);
-      const isUnknown = record?.status === "started" || record?.status === "unknown";
-      if (isUnknown) {
-        if (record?.sideEffect === "non_idempotent_side_effect") {
-          addUncertainEffect(uncertainEffects, node.entry.runId, call);
+      if (wasStarted) {
+        if (sideEffect === "non_idempotent_side_effect") {
+          addUncertainEffect(uncertainEffects, node.entry.runId, call, fingerprint);
         }
         messages.push(syntheticToolMessage(call, "unknown"));
       } else {
@@ -223,6 +269,135 @@ function materializeNodes(
     }
   }
   return { messages, uncertainEffects, sourceSeqs };
+}
+
+/** Avoid rereading the same synchronous run JSON for every assistant round. */
+function memoizeRunReader(runReader: TranscriptRunReader): TranscriptRunReader {
+  const sessions = new Map<string, HarnessRunSession | null>();
+  return {
+    get(runId) {
+      if (!sessions.has(runId)) sessions.set(runId, runReader.get(runId));
+      return sessions.get(runId) ?? null;
+    },
+  };
+}
+
+interface MaterializedRecoveryState {
+  todoItems?: TodoItem[];
+  todoItemsSource?: "transcript" | "legacy_run_store" | "legacy_presentation";
+  uncertainEffects: UncertainEffect[];
+}
+
+/** Rebuild execution state from active-branch facts, with old run files as fallback. */
+function materializeRecoveryState(
+  entries: TranscriptEntry[],
+  activeNodes: ActiveNode[],
+  runReader: TranscriptRunReader,
+  transcriptEffects: UncertainEffect[],
+): MaterializedRecoveryState {
+  const activeAssistantIds = new Set(activeNodes
+    .filter((node): node is Extract<ActiveNode, { kind: "assistant" }> => node.kind === "assistant")
+    .map((node) => node.entry.id));
+  const activeAssistantMessageIds = new Set(activeNodes
+    .filter((node): node is Extract<ActiveNode, { kind: "assistant" }> => node.kind === "assistant")
+    .flatMap((node) => [node.entry.id, ...(node.entry.turnId ? [node.entry.turnId] : [])]));
+  const taskState = entries
+    .filter((entry): entry is Extract<TranscriptEntry, { kind: "task_state" }> =>
+      entry.kind === "task_state" && activeAssistantIds.has(entry.payload.assistantEntryId),
+    )
+    .sort((left, right) => left.seq - right.seq)
+    .at(-1);
+
+  let todoItems = taskState ? taskState.payload.items : undefined;
+  let todoItemsSource: MaterializedRecoveryState["todoItemsSource"] = taskState ? "transcript" : undefined;
+  if (!taskState) {
+    const assistantNodes = activeNodes.filter(
+      (node): node is Extract<ActiveNode, { kind: "assistant" }> => node.kind === "assistant",
+    );
+    for (const node of [...assistantNodes].reverse()) {
+      if (!node.entry.runId) continue;
+      const legacyRun = runReader.get(node.entry.runId);
+      const legacyState = legacyRun?.schemaVersion === 1 ? legacyRun.state : undefined;
+      if (legacyState && Array.isArray(legacyState.todoItems)) {
+        todoItems = legacyState.todoItems;
+        todoItemsSource = "legacy_run_store";
+        break;
+      }
+    }
+    if (!todoItems) {
+      const presentationSnapshots = entries
+        .filter((entry): entry is Extract<TranscriptEntry, { kind: "presentation_patch" }> =>
+          entry.kind === "presentation_patch" && activeAssistantMessageIds.has(entry.payload.messageId),
+        )
+        .sort((left, right) => right.seq - left.seq);
+      for (const entry of presentationSnapshots) {
+        const snapshot = entry.payload.patch.runSnapshot;
+        if (!snapshot?.todos?.some((todo) => todo.status === "pending" || todo.status === "in_progress")) continue;
+        if (snapshot.status === "terminal" && snapshot.terminalStatus === "success") continue;
+        todoItems = snapshot.todos.map(({ id, content, status, priority }) => ({ id, content, status, ...(priority ? { priority } : {}) }));
+        todoItemsSource = "legacy_presentation";
+        break;
+      }
+    }
+  }
+
+  const uncertainEffects = [...transcriptEffects];
+  const seenEffectIds = new Set(uncertainEffects.map((effect) => effect.id));
+  const assistantNodes = activeNodes.filter(
+    (node): node is Extract<ActiveNode, { kind: "assistant" }> => node.kind === "assistant",
+  );
+  for (const node of assistantNodes) {
+    if (!node.entry.runId) continue;
+    const legacyRun = runReader.get(node.entry.runId);
+    const legacyEffects = legacyRun?.schemaVersion === 1 ? legacyRun.state.uncertainEffects : [];
+    for (const effect of legacyEffects) {
+      if (seenEffectIds.has(effect.id)) continue;
+      seenEffectIds.add(effect.id);
+      const recovered = { ...effect };
+      if (recovered.repeatAuthorization && !recovered.repeatAuthorization.id) {
+        // Old run snapshots used an unscoped boolean-like grant; it cannot be
+        // safely replayed as a one-shot authorization under the new protocol.
+        delete recovered.repeatAuthorization;
+      }
+      uncertainEffects.push(recovered);
+    }
+  }
+
+  const resolutions = entries
+    .filter((entry): entry is Extract<TranscriptEntry, { kind: "effect_resolution" }> =>
+      entry.kind === "effect_resolution" && activeAssistantIds.has(entry.payload.assistantEntryId),
+    )
+    .sort((left, right) => left.seq - right.seq);
+  const latestResolution = new Map<string, Extract<TranscriptEntry, { kind: "effect_resolution" }>>();
+  for (const resolution of resolutions) latestResolution.set(resolution.payload.effectId, resolution);
+
+  const consumedAuthorizationIds = new Set<string>();
+  for (const node of assistantNodes) {
+    for (const [toolCallId, start] of node.toolStarts) {
+      const authorizationId = start.payload.repeatAuthorizationId;
+      if (!authorizationId) continue;
+      // A committed not_executed result proves dispatch did not consume the grant.
+      if (node.toolResultOutcomes.get(toolCallId) !== "not_executed") {
+        consumedAuthorizationIds.add(authorizationId);
+      }
+    }
+  }
+
+  for (const effect of uncertainEffects) {
+    const resolution = latestResolution.get(effect.id);
+    if (!resolution || resolution.payload.fingerprint !== effect.fingerprint
+      || consumedAuthorizationIds.has(resolution.payload.authorizationId)) continue;
+    effect.repeatAuthorization = {
+      id: resolution.payload.authorizationId,
+      source: "user",
+      grantedAt: resolution.payload.grantedAt,
+    };
+  }
+
+  return {
+    ...(todoItems ? { todoItems, todoItemsSource } : {}),
+    uncertainEffects,
+  };
 }
 
 /** 模型上下文内部提示（送达失败 / 中断边界等）的插入位置：beforeSeq 前插一条。 */
@@ -410,6 +585,18 @@ function makeUiMessage(node: ActiveNode): CanonicalUiMessage | null {
       aliases: new Set([node.entry.id, ...(node.entry.turnId ? [node.entry.turnId] : [])]),
     };
   }
+  if (node.kind === "compaction") {
+    return {
+      message: {
+        id: node.entry.id,
+        role: "model",
+        content: "",
+        at: node.entry.at,
+        compaction: { trigger: node.entry.payload.trigger },
+      },
+      aliases: new Set([node.entry.id]),
+    };
+  }
   const groupId = node.entry.turnId ?? node.entry.id;
   return {
     message: {
@@ -426,10 +613,110 @@ function applyPatch(
   target: CanonicalUiMessage,
   patch: TranscriptPresentationPatch,
 ): void {
-  Object.assign(target.message, patch);
+  const { delta, ...fields } = patch;
+  Object.assign(target.message, fields);
+  if (!delta) return;
+  if (delta.reasoningBlockUpserts?.length) {
+    target.message.reasoningBlocks = mergeItemsById(
+      target.message.reasoningBlocks ?? [], delta.reasoningBlockUpserts, (item) => item.id,
+    );
+    if (patch.reasoning === undefined) {
+      target.message.reasoning = target.message.reasoningBlocks.map((block) => block.content).filter(Boolean).join("\n\n");
+    }
+  }
+  if (delta.processMessageUpserts?.length) {
+    target.message.processMessages = mergeItemsById(
+      target.message.processMessages ?? [], delta.processMessageUpserts, (item) => item.id,
+    );
+  }
+  if (delta.agentRoundUpserts?.length) {
+    target.message.agentRounds = mergeItemsById(
+      target.message.agentRounds ?? [], delta.agentRoundUpserts, (item) => item.id,
+    );
+  }
+  if (delta.taskDelegationUpserts?.length) {
+    target.message.taskDelegations = mergeItemsById(
+      target.message.taskDelegations ?? [], delta.taskDelegationUpserts, (item) => item.invocationId,
+    );
+  }
+  if (delta.toolExecutionUpserts?.length) {
+    target.message.toolExecutions = mergeItemsById(
+      target.message.toolExecutions ?? [], delta.toolExecutionUpserts, (item) => item.id,
+    );
+  }
+}
+
+/** Fold compact item updates into a replay-safe projection patch. */
+function mergePresentationPatch(
+  previous: TranscriptPresentationPatch | undefined,
+  incoming: TranscriptPresentationPatch,
+): TranscriptPresentationPatch {
+  const merged = { ...(previous ?? {}), ...incoming } as TranscriptPresentationPatch & Record<string, unknown>;
+  const delta = { ...(previous?.delta ?? {}) } as Record<string, unknown>;
+  const nextDelta = (incoming.delta ?? {}) as Record<string, unknown>;
+  const collections = [
+    { field: "reasoningBlocks", upserts: "reasoningBlockUpserts", appends: "reasoningBlockAppends", id: "id" },
+    { field: "processMessages", upserts: "processMessageUpserts", appends: "processMessageAppends", id: "id" },
+    { field: "agentRounds", upserts: "agentRoundUpserts", appends: undefined, id: "id" },
+    { field: "taskDelegations", upserts: "taskDelegationUpserts", appends: undefined, id: "invocationId" },
+    { field: "toolExecutions", upserts: "toolExecutionUpserts", appends: undefined, id: "id" },
+  ] as const;
+
+  for (const collection of collections) {
+    const { field, upserts, id } = collection;
+    if (Object.prototype.hasOwnProperty.call(incoming, field)) {
+      delete delta[upserts];
+      if (collection.appends) delete delta[collection.appends];
+    }
+    const getId = (item: Record<string, unknown>) => String(item[id] ?? "");
+    let folded = (delta[upserts] as Array<Record<string, unknown>> | undefined) ?? [];
+    const upsertItems = nextDelta[upserts] as Array<Record<string, unknown>> | undefined;
+    if (upsertItems?.length) folded = mergeItemsById(folded, upsertItems, getId);
+
+    if (collection.appends) {
+      const appends = nextDelta[collection.appends] as Array<{ id: string; content: string }> | undefined;
+      if (appends?.length) {
+        const baseItems = (merged[field] ?? []) as unknown as Array<Record<string, unknown>>;
+        for (const append of appends) {
+          const existing = [...folded, ...baseItems].find((item) => getId(item) === append.id);
+          const updated = {
+            ...(existing ?? { [id]: append.id, content: "" }),
+            content: `${String(existing?.content ?? "")}${append.content}`,
+          };
+          folded = mergeItemsById(folded, [updated], getId);
+        }
+      }
+      delete delta[collection.appends];
+    }
+    if (folded.length) delta[upserts] = folded;
+    else delete delta[upserts];
+  }
+
+  if (Object.keys(delta).length) merged.delta = delta as TranscriptPresentationPatch["delta"];
+  else delete merged.delta;
+  return merged;
+}
+
+function mergeItemsById<T>(current: T[], updates: T[], getId: (item: T) => string): T[] {
+  const merged = [...current];
+  const indexes = new Map(merged.map((item, index) => [getId(item), index]));
+  for (const update of updates) {
+    const id = getId(update);
+    const index = indexes.get(id);
+    if (index === undefined) {
+      indexes.set(id, merged.length);
+      merged.push(update);
+    } else {
+      merged[index] = update;
+    }
+  }
+  return merged;
 }
 
 function nodeStateFromActive(node: ActiveNode): ConversationProjectionNodeState {
+  if (node.kind === "compaction") {
+    return { kind: "compaction", entryId: node.entry.id, messageId: node.entry.id };
+  }
   return node.kind === "user"
     ? {
       kind: "user",
@@ -473,7 +760,7 @@ function projectSeedDelta(
   for (const item of messages) byAlias.set(item.message.id, item);
   const state: ConversationProjectionState = {
     nodes: (seed.state?.nodes ?? seed.messages.map((message) => ({
-      kind: message.role === "user" ? "user" : "assistant",
+      kind: message.compaction ? "compaction" as const : message.role === "user" ? "user" as const : "assistant" as const,
       entryId: message.id,
       messageId: message.id,
     }))).map((node) => ({ ...node })),
@@ -508,7 +795,7 @@ function projectSeedDelta(
       patches.set(entry.payload.messageId, {
         revision: entry.payload.patchRevision,
         seq: entry.seq,
-        patch: { ...(current?.patch ?? {}), ...entry.payload.patch },
+        patch: mergePresentationPatch(current?.patch, entry.payload.patch),
       });
     }
   }
@@ -602,6 +889,24 @@ function projectSeedDelta(
         retainMessagesForState();
         break;
       }
+      case "compaction_checkpoint": {
+        // 与全量路径同构：标记节点跟随增量条目进入 state.nodes，
+        // 后续 rewind 截断时随覆盖前缀一起保留或消失。
+        state.nodes.push({ kind: "compaction", entryId: entry.id, messageId: entry.id });
+        const item: CanonicalUiMessage = {
+          message: {
+            id: entry.id,
+            role: "model",
+            content: "",
+            at: entry.at,
+            compaction: { trigger: entry.payload.trigger },
+          },
+          aliases: new Set([entry.id]),
+        };
+        messages.push(item);
+        byAlias.set(entry.id, item);
+        break;
+      }
       default:
         break;
     }
@@ -644,7 +949,7 @@ function projectionFromActive(
       allPatches.set(entry.payload.messageId, {
         revision: entry.payload.patchRevision,
         seq: entry.seq,
-        patch: { ...(current?.patch ?? {}), ...entry.payload.patch },
+        patch: mergePresentationPatch(current?.patch, entry.payload.patch),
       });
     }
   }
@@ -727,6 +1032,8 @@ export function buildFullModelContext(
   return {
     messages: result.messages,
     uncertainEffects: result.uncertainEffects,
+    ...(result.todoItems ? { todoItems: result.todoItems } : {}),
+    ...(result.todoItemsSource ? { todoItemsSource: result.todoItemsSource } : {}),
     throughSeq: result.throughSeq,
   };
 }
@@ -736,14 +1043,18 @@ export function buildFullModelContextWithSources(
   entries: TranscriptEntry[],
   runReader: TranscriptRunReader,
 ): MaterializedTranscriptWithSources {
+  runReader = memoizeRunReader(runReader);
   const active = reduceActiveTranscript(entries);
   const materialized = materializeNodes(active.nodes, runReader);
+  const recovery = materializeRecoveryState(entries, active.nodes, runReader, materialized.uncertainEffects);
   const delivery = failedDeliveryNotesWithSources(entries, active.nodes);
   const interruption = interruptionNotesWithSources(entries, active.nodes);
   const withInternalNotes = insertInternalNotes(materialized, [...delivery.notes, ...interruption.notes]);
   return {
     messages: withInternalNotes.messages,
-    uncertainEffects: materialized.uncertainEffects,
+    uncertainEffects: recovery.uncertainEffects,
+    ...(recovery.todoItems ? { todoItems: recovery.todoItems } : {}),
+    ...(recovery.todoItemsSource ? { todoItemsSource: recovery.todoItemsSource } : {}),
     throughSeq: active.throughSeq,
     sourceSeqs: withInternalNotes.sourceSeqs,
   };
@@ -762,8 +1073,11 @@ export function buildCompactionSourceView(
   const checkpoint = latestValidCompaction(entries, active);
   if (!checkpoint) return buildFullModelContextWithSources(entries, runReader);
 
+  runReader = memoizeRunReader(runReader);
   const suffix = active.nodes.filter((node) => node.entry.seq > checkpoint.payload.sourceThroughSeq);
   const materialized = materializeNodes(suffix, runReader);
+  const allActiveMaterialized = materializeNodes(active.nodes, runReader);
+  const recovery = materializeRecoveryState(entries, active.nodes, runReader, allActiveMaterialized.uncertainEffects);
   const delivery = failedDeliveryNotesWithSources(entries, active.nodes, checkpoint.payload.sourceThroughSeq);
   const interruption = interruptionNotesWithSources(entries, active.nodes, checkpoint.payload.sourceThroughSeq);
   const suffixWithInternalNotes = insertInternalNotes(materialized, [...delivery.notes, ...interruption.notes]);
@@ -772,7 +1086,9 @@ export function buildCompactionSourceView(
       checkpoint.payload.replacement,
       ...suffixWithInternalNotes.messages,
     ],
-    uncertainEffects: materialized.uncertainEffects,
+    uncertainEffects: recovery.uncertainEffects,
+    ...(recovery.todoItems ? { todoItems: recovery.todoItems } : {}),
+    ...(recovery.todoItemsSource ? { todoItemsSource: recovery.todoItemsSource } : {}),
     throughSeq: active.throughSeq,
     // 旧摘要对应的源边界是上一个检查点的 sourceThroughSeq：切点覆盖它时，
     // 新检查点即完整接管旧检查点所代表的历史。
@@ -811,12 +1127,14 @@ export function buildModelContextFromCompactedView(
   const checkpoint = latestValidCompaction(entries, active);
   if (!checkpoint) return buildFullModelContext(entries, runReader);
 
+  runReader = memoizeRunReader(runReader);
   const suffix = active.nodes.filter((node) => node.entry.seq > checkpoint.payload.sourceThroughSeq);
   const materialized = materializeNodes(suffix, runReader);
   // Uncertain side effects are execution state, not prompt history. Keep the
   // Phase 1 guard semantics even when their originating tool round is inside
   // the compacted prefix.
   const allActiveMaterialized = materializeNodes(active.nodes, runReader);
+  const recovery = materializeRecoveryState(entries, active.nodes, runReader, allActiveMaterialized.uncertainEffects);
   const delivery = failedDeliveryNotesWithSources(entries, active.nodes, checkpoint.payload.sourceThroughSeq);
   const interruption = interruptionNotesWithSources(entries, active.nodes, checkpoint.payload.sourceThroughSeq);
   const suffixWithInternalNotes = insertInternalNotes(materialized, [...delivery.notes, ...interruption.notes]);
@@ -825,7 +1143,9 @@ export function buildModelContextFromCompactedView(
       checkpoint.payload.replacement,
       ...suffixWithInternalNotes.messages,
     ],
-    uncertainEffects: allActiveMaterialized.uncertainEffects,
+    uncertainEffects: recovery.uncertainEffects,
+    ...(recovery.todoItems ? { todoItems: recovery.todoItems } : {}),
+    ...(recovery.todoItemsSource ? { todoItemsSource: recovery.todoItemsSource } : {}),
     throughSeq: active.throughSeq,
   };
 }

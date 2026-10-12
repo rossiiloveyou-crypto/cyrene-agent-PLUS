@@ -19,10 +19,22 @@ export function createGitHubAppUpdateService(options: {
   });
 }
 
-export function scheduleStartupUpdateCheck(service: AppUpdateService, delayMs = 10_000): () => void {
+/** 启动 10 秒后查一次，之后每 6 小时再查一次（对齐公告的轮询节奏） */
+export function scheduleStartupUpdateCheck(
+  service: AppUpdateService,
+  delayMs = 10_000,
+  intervalMs = 6 * 60 * 60 * 1000,
+): () => void {
   const timer = setTimeout(() => {
     void service.check();
   }, delayMs);
   timer.unref?.();
-  return () => clearTimeout(timer);
+  const interval = setInterval(() => {
+    void service.check();
+  }, intervalMs);
+  interval.unref?.();
+  return () => {
+    clearTimeout(timer);
+    clearInterval(interval);
+  };
 }

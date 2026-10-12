@@ -19,9 +19,11 @@ export interface GitStatusFile {
 
 export interface GitStatusSnapshot {
   current: string;
+  tracking?: string | null;
   ahead: number;
   behind: number;
   files: GitStatusFile[];
+  conflicted?: string[];
 }
 
 export interface GitClient {
@@ -40,7 +42,7 @@ export interface GitClient {
   commit(message: string): Promise<string>;
   checkout(branch: string): Promise<void>;
   checkoutNewBranch(branch: string): Promise<void>;
-  push(remote: string): Promise<void>;
+  push(remote: string, branch?: string, setUpstream?: boolean): Promise<void>;
   revert(commit: string): Promise<void>;
   getGitDir(): Promise<string>;
 }
@@ -85,7 +87,7 @@ export interface GitLogEntry {
 }
 
 export interface GitServiceDeps {
-  getSession: (sessionId: string) => ChatSession | null;
+  getSession: (sessionId: string) => Pick<ChatSession, "mode" | "workspaceBinding"> | null;
   resolveExecutable: () => Promise<ResolvedGitExecutable | null>;
   createClient?: (input: { workspaceRoot: string; executable: ResolvedGitExecutable }) => GitClient;
   workspaceWatcher?: GitWorkspaceWatcher;
@@ -200,6 +202,8 @@ export function createGitService(deps: GitServiceDeps): GitService {
         throw new Error("请提供要提交的仓库内文件路径");
       }
       const client = await clientForTrustedContext(ctx);
+      const status = await client.getStatus();
+      if (status.conflicted?.length) throw new Error("存在冲突文件，请先处理冲突后再提交");
       await client.add(paths);
       const result = await client.commit(message.trim());
       emitChanged(ctx.sessionId);
@@ -218,9 +222,13 @@ export function createGitService(deps: GitServiceDeps): GitService {
     async push(ctx, remote = "origin") {
       if (!/^[A-Za-z0-9._-]+$/.test(remote)) throw new Error("远端名称不合法");
       const client = await clientForTrustedContext(ctx);
-      await client.push(remote);
+      const status = await client.getStatus();
+      const branch = status.current;
+      const setUpstream = !status.tracking && branch !== "HEAD";
+      if (setUpstream) await client.push(remote, branch, true);
+      else await client.push(remote);
       emitChanged(ctx.sessionId);
-      return `已推送到 ${remote}`;
+      return setUpstream ? `已推送到 ${remote}/${branch} 并建立跟踪关系` : `已推送到 ${remote}`;
     },
 
     async revert(ctx, commit) {
@@ -270,7 +278,12 @@ export function createGitService(deps: GitServiceDeps): GitService {
 
         const [status, branches] = await Promise.all([client.getStatus(), client.getBranches()]);
         const lines = await client.getLineStats(status.files);
-        const files = status.files.map((file) => normalizeFileChange(file, lines.byPath[file.path]));
+        const conflictedPaths = new Set(status.conflicted ?? []);
+        const files = status.files.map((file) => normalizeFileChange(
+          file,
+          lines.byPath[file.path],
+          conflictedPaths.has(file.path),
+        ));
         return {
           sessionId,
           state: "ready",
@@ -282,6 +295,7 @@ export function createGitService(deps: GitServiceDeps): GitService {
             current: status.current === "HEAD" ? null : status.current,
             detached: status.current === "HEAD",
             branches,
+            tracking: status.tracking,
           },
           files,
           summary: summarizeFiles(files),
@@ -311,8 +325,10 @@ function createSimpleGitClient(input: { workspaceRoot: string; executable: Resol
       const status = await git.status();
       return {
         current: status.current ?? "HEAD",
+        tracking: status.tracking,
         ahead: status.ahead,
         behind: status.behind,
+        conflicted: status.conflicted,
         files: status.files.map((file) => ({
           path: file.path,
           fromPath: file.from,
@@ -365,7 +381,10 @@ function createSimpleGitClient(input: { workspaceRoot: string; executable: Resol
     },
     checkout: async (branch) => { await git.checkout(branch); },
     checkoutNewBranch: async (branch) => { await git.checkoutLocalBranch(branch); },
-    push: async (remote) => { await git.push(remote); },
+    async push(remote, branch, setUpstream) {
+      if (setUpstream && branch) await git.push(["--set-upstream", remote, branch]);
+      else await git.push(remote);
+    },
     revert: async (commit) => { await git.raw(["revert", "--no-edit", commit]); },
     async getDiff(options) {
       const args = options.staged ? ["--cached"] : [];
@@ -437,8 +456,12 @@ function isCodeGitStatus(value: ResolvedCodeSession | CodeGitStatus): value is C
   return "state" in value;
 }
 
-function normalizeFileChange(file: GitStatusFile, lines = { insertions: 0, deletions: 0 }): CodeGitFileChange {
-  const kind = classifyFileKind(file);
+function normalizeFileChange(
+  file: GitStatusFile,
+  lines = { insertions: 0, deletions: 0 },
+  conflicted = false,
+): CodeGitFileChange {
+  const kind = classifyFileKind(file, conflicted);
   return {
     path: file.path,
     ...(file.fromPath ? { fromPath: file.fromPath } : {}),
@@ -449,9 +472,9 @@ function normalizeFileChange(file: GitStatusFile, lines = { insertions: 0, delet
   };
 }
 
-function classifyFileKind(file: GitStatusFile): CodeGitChangeKind {
+function classifyFileKind(file: GitStatusFile, conflicted = false): CodeGitChangeKind {
   const code = `${file.index}${file.workingDir}`;
-  if (code.includes("U")) return "conflicted";
+  if (conflicted || code.includes("U")) return "conflicted";
   if (code.includes("?")) return "added";
   if (code.includes("R") || file.fromPath) return "renamed";
   if (code.includes("D")) return "deleted";

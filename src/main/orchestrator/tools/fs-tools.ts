@@ -57,7 +57,7 @@ async function executeReadFile(args: Record<string, unknown>): Promise<string> {
     return JSON.stringify({
       success: false,
       errorCode: "FILE_NOT_FOUND",
-      error: "文件不存在或无法访问: " + filePath + "。不要重复读取相同路径，请先用 search_text 或 list_dir 重新定位文件。",
+      error: "文件不存在或无法访问: " + filePath + "。不要重复读取相同路径，请先用 Grep 或 Glob 重新定位文件。",
       retryable: true,
     });
   }
@@ -82,7 +82,7 @@ async function executeReadFile(args: Record<string, unknown>): Promise<string> {
     return JSON.stringify({
       success: false,
       errorCode: "FILE_TOO_LARGE",
-      error: `文件超过 ${humanBytes(READ_MAX_BYTES)}（当前 ${humanBytes(stat.size)}），read_file 暂不支持读取。可用 search_text 直接获取匹配行的上下文。`,
+      error: `文件超过 ${humanBytes(READ_MAX_BYTES)}（当前 ${humanBytes(stat.size)}），Read 暂不支持读取。可用 Grep 获取匹配行的上下文。`,
       path: filePath,
       size: humanBytes(stat.size),
       retryable: false,
@@ -97,7 +97,7 @@ async function executeReadFile(args: Record<string, unknown>): Promise<string> {
     return JSON.stringify({
       success: false,
       errorCode: "BINARY_FILE",
-      error: "这看起来是二进制文件，read_file 只支持文本。如果是图片，请改用 read_image。",
+      error: "这看起来是二进制文件，Read 只支持文本和图片。如果是图片，请直接用 Read 读取。",
       path: filePath,
       size: humanBytes(stat.size),
       retryable: false,
@@ -161,10 +161,13 @@ toolRegistry.register({
     "- 凭印象猜内容（绝对不行，必须先 read）\n" +
     "- 读图片 → read_image\n" +
     "- 列目录 → list_dir\n\n" +
+    "用户本轮附加文件时，会提供绝对路径；读取附件必须先调用本工具。\n" +
     "参数：path (必填，绝对路径)，startLine (可选，默认 1)，maxLines (可选，默认 500)。",
   enabled: true,
   risk: "fs-read",
-  modes: ["learn", "code", "work"],
+  modes: ["chat", "learn", "code", "work"],
+  chatBuiltin: true,
+  requiresFileAttachments: true,
   effectKind: "read" as const,
   // 只读同步文件读取；不会改工作区或 Harness 父状态。
   isConcurrencySafe: () => true,
@@ -446,7 +449,7 @@ function resolveWriteFilePolicy(args: Record<string, unknown>): VerificationPoli
   // 配置文件名 -> code（精确匹配）
   const codeConfigFiles = new Set([
     "package.json", "tsconfig.json", "tsconfig.main.json", "tsconfig.preload.json",
-    "vite.config.ts", "vite.config.js", "vitest.config.ts",
+    "vite.config.ts", "vite.config.mts", "vite.config.js", "vitest.config.ts", "vitest.config.mts",
     ".eslintrc", ".eslintrc.js", ".eslintrc.json", ".prettierrc",
     "babel.config.js", "babel.config.json", "webpack.config.js",
   ]);
@@ -584,17 +587,18 @@ toolRegistry.register({
     "读取本地图片文件，交给视觉模型分析后返回文字描述。支持 png/jpg/jpeg/gif/webp/bmp/svg，最大 5MB。\n\n" +
     "何时用：\n" +
     "- 用户提到截图、图片，想知道内容\n" +
-    "- 用户说'看看这张图''图片里是什么'\n" +
-    "- 环境信息里说'当前模型支持查看图片'时\n\n" +
+    "- 用户说'看看这张图''图片里是什么'\n\n" +
     "不要用于：\n" +
-    "- 环境信息说'不支持查看图片'时（直接告诉用户看不了，不要调）\n" +
     "- 读文本文件 → read_file\n" +
     "- 批量读图（逐张调用，不要一次性塞多张）\n\n" +
     "若未配置视觉模型会返回错误，届时如实告诉用户看不了。" +
+    "用户本轮附加图片时，会提供绝对路径；图片只在调用本工具时读取。\n" +
     "参数：path (必填，绝对路径)。",
   enabled: true,
   risk: "fs-read",
-  modes: ["learn", "code", "work"],
+  modes: ["chat", "learn", "code", "work"],
+  chatBuiltin: true,
+  requiresFileAttachments: true,
   effectKind: "read" as const,
   verificationPolicy: "none" as const,
   needsContext: true,

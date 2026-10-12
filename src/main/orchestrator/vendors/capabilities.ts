@@ -30,6 +30,5 @@ export function getCapabilityOrOpenAI(provider: string): ProviderCapability {
     thinkingField: null,
     cacheStrategy: "none",
     testStrategy: "text",
-    supportsVision: false,
   };
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { format, isValid, parseISO } from "date-fns";
 import { zhCN } from "date-fns/locale";
-import { CalendarDays, ChevronLeft, ChevronRight, ImagePlus, LoaderCircle, X } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, ImagePlus, LoaderCircle, Mars, Shield, Venus, X } from "lucide-react";
 import { DayPicker } from "react-day-picker";
 import { Dialog, Popover } from "radix-ui";
 import { FALLBACK_TIMEZONE, normalizeTimezoneOptionValue, TIMEZONE_OPTIONS } from "../../../settings/timezone-options";
@@ -19,6 +19,7 @@ interface UserProfile {
   birthday: string;
   defaultCity: string;
   timezone: string;
+  replyLanguage: string;
 }
 
 interface UserApi {
@@ -41,7 +42,16 @@ const EMPTY_PROFILE: UserProfile = {
   birthday: "",
   defaultCity: "",
   timezone: FALLBACK_TIMEZONE,
+  replyLanguage: "auto",
 };
+
+// 回复语言候选：auto 表示跟随界面语言，其余为显式 BCP 47 值。
+const REPLY_LANGUAGE_OPTIONS = [
+  { value: "auto", labelKey: "ui.profile.replyLanguageAuto" },
+  { value: "zh-CN", labelKey: "ui.profile.replyLanguageZh" },
+  { value: "en", labelKey: "ui.profile.replyLanguageEn" },
+  { value: "ja-JP", labelKey: "ui.profile.replyLanguageJa" },
+];
 
 function getUserApi(): UserApi | undefined {
   return (window as typeof window & { user?: UserApi }).user;
@@ -175,17 +185,22 @@ export function UserProfileDialog({ open, onOpenChange, avatarUrl }: UserProfile
               <fieldset className="cy-user-profile__field cy-user-profile__gender-field">
                 <legend>{t("ui.profile.gender")}</legend>
                 <div className="cy-user-profile__segmented" role="group" aria-label={t("ui.profile.gender")}>
-                  {(["secret", "male", "female"] as const).map((gender) => (
-                    <button
-                      key={gender}
-                      type="button"
-                      aria-pressed={profile.gender === gender}
-                      className={profile.gender === gender ? "is-selected" : ""}
-                      onClick={() => updateProfile("gender", gender)}
-                    >
-                      {t(`ui.profile.gender${gender === "secret" ? "Secret" : gender === "male" ? "Male" : "Female"}`)}
-                    </button>
-                  ))}
+                  {(["secret", "male", "female"] as const).map((gender) => {
+                    // 男女用符号本身表示，保密用盾牌
+                    const GenderIcon = gender === "male" ? Mars : gender === "female" ? Venus : Shield;
+                    return (
+                      <button
+                        key={gender}
+                        type="button"
+                        aria-pressed={profile.gender === gender}
+                        className={profile.gender === gender ? "is-selected" : ""}
+                        onClick={() => updateProfile("gender", gender)}
+                      >
+                        <GenderIcon size={15} aria-hidden="true" />
+                        {t(`ui.profile.gender${gender === "secret" ? "Secret" : gender === "male" ? "Male" : "Female"}`)}
+                      </button>
+                    );
+                  })}
                 </div>
               </fieldset>
 
@@ -244,7 +259,18 @@ export function UserProfileDialog({ open, onOpenChange, avatarUrl }: UserProfile
                   options={TIMEZONE_OPTIONS.map(({ value, label }) => ({ value, label }))}
                   onChange={(value) => updateProfile("timezone", normalizeTimezoneOptionValue(value))}
                   ariaLabel={t("ui.profile.timezone")}
-                  contentClassName="cy-user-profile__timezone-options"
+                  contentClassName="cy-user-profile__select-options"
+                />
+              </label>
+
+              <label className="cy-user-profile__field">
+                <span>{t("ui.profile.replyLanguage")}</span>
+                <SettingsSelect
+                  value={profile.replyLanguage}
+                  options={REPLY_LANGUAGE_OPTIONS.map(({ value, labelKey }) => ({ value, label: t(labelKey) }))}
+                  onChange={(value) => updateProfile("replyLanguage", value)}
+                  ariaLabel={t("ui.profile.replyLanguage")}
+                  contentClassName="cy-user-profile__select-options"
                 />
               </label>
             </div>

@@ -19,7 +19,6 @@ const openAICapability: ProviderCapability = {
   thinkingField: "reasoning_content",
   cacheStrategy: "none",
   testStrategy: "text",
-  supportsVision: true,
 };
 
 const anthropicCapability: ProviderCapability = {
@@ -355,7 +354,7 @@ describe("streamChatWithSdk", () => {
     expect(response.assistantMessage.rawAssistant).toEqual(output);
   });
 
-  it("omits rawAssistant when the stream breaks without a terminal event", async () => {
+  it("fails the Responses stream when it ends without a terminal event", async () => {
     const adapter = new ResponsesAdapter("chatgpt", responsesCapability);
     const deps: SdkStreamRuntimeDeps = {
       openAI: unusedFactory,
@@ -365,15 +364,34 @@ describe("streamChatWithSdk", () => {
       anthropic: unusedFactory,
     };
 
-    const response = await streamChatWithSdk({
+    await expect(streamChatWithSdk({
       adapter,
       request,
       config: responsesConfig,
       timeoutMs: 1_000,
-    }, deps);
+    }, deps)).rejects.toMatchObject({
+      code: "E_MODEL_RESPONSE_PARSE_FAILED",
+      message: expect.stringContaining("未收到终态事件"),
+    });
+  });
 
-    expect(response).toMatchObject({ text: "partial", finishReason: "unknown" });
-    expect(response.assistantMessage.rawAssistant).toBeUndefined();
+  it("fails when a Responses terminal event has no output array", async () => {
+    const adapter = new ResponsesAdapter("chatgpt", responsesCapability);
+    const deps: SdkStreamRuntimeDeps = {
+      openAI: unusedFactory,
+      responses: async () => iterableOf({ type: "response.completed", response: { id: "resp_1" } }),
+      anthropic: unusedFactory,
+    };
+
+    await expect(streamChatWithSdk({
+      adapter,
+      request,
+      config: responsesConfig,
+      timeoutMs: 1_000,
+    }, deps)).rejects.toMatchObject({
+      code: "E_MODEL_RESPONSE_PARSE_FAILED",
+      message: expect.stringContaining("缺少 output 项"),
+    });
   });
 
   it("closes unclosed Responses tool calls on finish and replays them via rawAssistant", async () => {

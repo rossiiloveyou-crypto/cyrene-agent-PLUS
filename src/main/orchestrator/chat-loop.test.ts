@@ -47,14 +47,18 @@ const capability: ProviderCapability = {
   thinkingField: null,
   cacheStrategy: "none",
   testStrategy: "text",
-  supportsVision: false,
 };
 
 class FakeAdapter implements ChatVendorAdapter {
-  readonly id = "test";
+  readonly id: string;
   readonly transport = "openai" as const;
-  capability = capability;
+  capability: ProviderCapability;
   readonly requests: ChatRequest[] = [];
+
+  constructor(id = "test") {
+    this.id = id;
+    this.capability = { ...capability, id, displayName: id };
+  }
 
   buildRequest(req: ChatRequest): HttpRequest {
     this.requests.push(req);
@@ -451,6 +455,79 @@ describe("runChatLoop", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("remembers stream-unavailable fallback across a later retry", async () => {
+    const adapter = new FakeAdapter("chatgpt");
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response("stream unsupported", { status: 400 }))
+      .mockResolvedValueOnce(new Response("temporarily unavailable", { status: 503, headers: { "retry-after": "0" } }))
+      .mockResolvedValueOnce(new Response('{"text":"恢复回复"}', {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    const result = await runChatLoop({
+      settings: { provider: "chatgpt", baseUrl: "https://test", model: "m", apiKey: "k", contextWindowTokens: 256000, modelRequestMaxRetries: 1 },
+      adapter,
+      messages: [{ role: "user", content: "在吗" }],
+      soulSystemBaseContent: "SOUL_SYSTEM",
+      timeoutMs: 30_000,
+      fallbackRevealIntervalMs: 0,
+    });
+
+    expect(result.reply).toBe("恢复回复");
+    expect(adapter.requests.map((request) => request.stream)).toEqual([true, false, false]);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not start image caption fallback after a quota rejection", async () => {
+    const adapter = new FakeAdapter("chatgpt");
+    const imageCaptionFallback = vi.fn(async () => [{ role: "user" as const, content: "caption" }]);
+    let attempts = 0;
+    const streamChat: NonNullable<ChatLoopOptions["streamChat"]> = async () => {
+      attempts += 1;
+      throw Object.assign(new Error("HTTP 429"), {
+        status: 429,
+        response: { data: { error: { code: "organization_usage_limit_exceeded" } } },
+      });
+    };
+
+    await expect(runChatLoop({
+      settings: { provider: "chatgpt", baseUrl: "https://test", model: "m", apiKey: "k", contextWindowTokens: 256000, modelRequestMaxRetries: 1 },
+      adapter,
+      messages: [{ role: "user", content: "看这张图" }],
+      soulSystemBaseContent: "SOUL_SYSTEM",
+      timeoutMs: 30_000,
+      imageCaptionFallback,
+      streamChat,
+    })).rejects.toThrow("HTTP 429");
+
+    expect(attempts).toBe(2);
+    expect(imageCaptionFallback).not.toHaveBeenCalled();
+  });
+
+  it("does not wait past the remaining chat-run budget", async () => {
+    const adapter = new FakeAdapter("chatgpt");
+    let attempts = 0;
+    const streamChat: NonNullable<ChatLoopOptions["streamChat"]> = async () => {
+      attempts += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      throw Object.assign(new Error("HTTP 503"), {
+        status: 503,
+        headers: new Headers({ "retry-after": "0.5" }),
+      });
+    };
+
+    await expect(runChatLoop({
+      settings: { provider: "chatgpt", baseUrl: "https://test", model: "m", apiKey: "k", contextWindowTokens: 256000, modelRequestMaxRetries: 1 },
+      adapter,
+      messages: [{ role: "user", content: "在吗" }],
+      soulSystemBaseContent: "SOUL_SYSTEM",
+      timeoutMs: 100,
+      streamChat,
+    })).rejects.toThrow("超过本轮剩余时间");
+    expect(attempts).toBe(1);
+  });
+
   it("does not retry after a stream has already emitted visible text", async () => {
     const adapter = new FakeAdapter();
     let pulls = 0;
@@ -475,26 +552,103 @@ describe("runChatLoop", () => {
       messages: [{ role: "user", content: "在吗" }],
       soulSystemBaseContent: "SOUL_SYSTEM",
       timeoutMs: 30_000,
-    })).rejects.toThrow("connection dropped");
+    })).rejects.toThrow("模型服务请求失败");
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     expect(adapter.requests).toHaveLength(1);
   });
 
-  it.each([401, 429, 500])("does not retry HTTP %s as a non-stream request", async (status) => {
-    const adapter = new FakeAdapter();
+  it("retries an authentication failure within the configured budget", async () => {
+    const status = 401;
+    const adapter = new FakeAdapter("chatgpt");
     globalThis.fetch = vi.fn(async () => new Response("request failed", { status })) as unknown as typeof fetch;
 
     await expect(runChatLoop({
-      settings: { provider: "test", baseUrl: "https://test", model: "m", apiKey: "k", contextWindowTokens: 256000 },
+      settings: { provider: "chatgpt", baseUrl: "https://test", model: "m", apiKey: "k", contextWindowTokens: 256000, modelRequestMaxRetries: 1 },
       adapter,
       messages: [{ role: "user", content: "在吗" }],
       soulSystemBaseContent: "SOUL_SYSTEM",
       timeoutMs: 30_000,
     })).rejects.toThrow(`HTTP ${status}`);
 
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    expect(adapter.requests.map((request) => request.stream)).toEqual([true]);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(adapter.requests.map((request) => request.stream)).toEqual([true, true]);
+  });
+
+  it.each([429, 500])("retries an empty-output transient HTTP %s and reports progress", async (status) => {
+    const adapter = new FakeAdapter("chatgpt");
+    const events: Array<{ type: string; status?: unknown }> = [];
+    let attempts = 0;
+    const streamChat: NonNullable<ChatLoopOptions["streamChat"]> = async (input) => {
+      adapter.buildStreamRequest(input.request);
+      attempts += 1;
+      if (attempts === 1) {
+        throw Object.assign(new Error(`HTTP ${status}`), {
+          status,
+          headers: new Headers({ "retry-after": "0" }),
+        });
+      }
+      return adapter.parseResponse({ text: "恢复了" });
+    };
+
+    const result = await runChatLoop({
+      settings: { provider: "chatgpt", baseUrl: "https://test", model: "m", apiKey: "k", contextWindowTokens: 256000, modelRequestMaxRetries: 1 },
+      adapter,
+      messages: [{ role: "user", content: "在吗" }],
+      soulSystemBaseContent: "SOUL_SYSTEM",
+      timeoutMs: 30_000,
+      fallbackRevealIntervalMs: 0,
+      streamChat,
+      onEvent: (event) => events.push({ type: event.type, status: event.status }),
+    });
+
+    expect(result.reply).toBe("恢复了");
+    expect(attempts).toBe(2);
+    expect(events.filter((event) => event.type === "model_retry").map((event) => (event.status as { phase: string }).phase))
+      .toEqual(["waiting", "attempting", "cleared"]);
+  });
+
+  it("retries an explicit quota failure returned as HTTP 429 within the configured budget", async () => {
+    const adapter = new FakeAdapter("chatgpt");
+    let attempts = 0;
+    const streamChat: NonNullable<ChatLoopOptions["streamChat"]> = async () => {
+      attempts += 1;
+      throw Object.assign(new Error("HTTP 429"), {
+        status: 429,
+        response: { data: { error: { code: "organization_usage_limit_exceeded" } } },
+      });
+    };
+
+    await expect(runChatLoop({
+      settings: { provider: "chatgpt", baseUrl: "https://test", model: "m", apiKey: "k", contextWindowTokens: 256000, modelRequestMaxRetries: 1 },
+      adapter,
+      messages: [{ role: "user", content: "在吗" }],
+      soulSystemBaseContent: "SOUL_SYSTEM",
+      timeoutMs: 30_000,
+      streamChat,
+    })).rejects.toThrow("HTTP 429");
+
+    expect(attempts).toBe(2);
+  });
+
+  it("does not retry after a reasoning delta became visible", async () => {
+    const adapter = new FakeAdapter("chatgpt");
+    let attempts = 0;
+    const streamChat: NonNullable<ChatLoopOptions["streamChat"]> = async (input) => {
+      attempts += 1;
+      input.onDelta?.({ type: "reasoning_delta", delta: "正在分析" });
+      throw Object.assign(new Error("connection dropped"), { code: "ECONNRESET" });
+    };
+
+    await expect(runChatLoop({
+      settings: { provider: "chatgpt", baseUrl: "https://test", model: "m", apiKey: "k", contextWindowTokens: 256000, modelRequestMaxRetries: 5 },
+      adapter,
+      messages: [{ role: "user", content: "在吗" }],
+      soulSystemBaseContent: "SOUL_SYSTEM",
+      timeoutMs: 30_000,
+      streamChat,
+    })).rejects.toThrow("模型服务请求失败");
+    expect(attempts).toBe(1);
   });
 
   it("merges Anthropic-style usage split across stream events", async () => {

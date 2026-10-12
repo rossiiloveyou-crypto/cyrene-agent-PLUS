@@ -34,13 +34,10 @@ import {
   addMemory,
   deleteUserMemoryVectors,
   getEntriesBySource,
-  hasImportedDocumentChunks,
-  importDocumentForTurn,
   initRAG,
   isUserMemoryVectorStoreReady,
   resetRAG,
   searchMemoryEntries,
-  searchImportedDocumentChunksForImportIds,
 } from "./index";
 
 let tmpDir = "";
@@ -57,28 +54,9 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe("turn document imports", () => {
+describe("user memory vector store", () => {
   it("reports that user memory vectors are writable after RAG initialization", () => {
     expect(isUserMemoryVectorStoreReady()).toBe(true);
-  });
-
-  it("returns an importId and chunk count for a turn document import", async () => {
-    const result = await importDocumentForTurn("one paragraph\n\ntwo paragraph", "turn-doc.md");
-
-    expect(result.importId).toMatch(/^import-/);
-    expect(result.chunkCount).toBeGreaterThan(0);
-
-    const chunks = await searchImportedDocumentChunksForImportIds("paragraph", [result.importId], 3);
-    expect(chunks.length).toBeGreaterThan(0);
-    expect(chunks.every((chunk) => chunk.importId === result.importId)).toBe(true);
-  });
-
-  it("reports whether an importId still has stored document chunks", async () => {
-    expect(hasImportedDocumentChunks("import-missing")).toBe(false);
-
-    const result = await importDocumentForTurn("one paragraph", "turn-doc.md");
-
-    expect(hasImportedDocumentChunks(result.importId)).toBe(true);
   });
 });
 

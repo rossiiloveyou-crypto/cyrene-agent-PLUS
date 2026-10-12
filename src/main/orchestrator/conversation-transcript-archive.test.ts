@@ -139,7 +139,9 @@ describe("ConversationTranscriptArchive", () => {
     });
     await archive.archiveThrough("c1", 2);
     const projection = await journal.readProjection("c1");
-    expect(projection.messages.map((message) => message.content)).toEqual(["first", "answer"]);
+    // 归档边界之后紧跟压缩分隔标记（marker），UI 历史完整保留。
+    expect(projection.messages.map((message) => message.content)).toEqual(["first", "answer", ""]);
+    expect(projection.messages[2]?.compaction).toEqual({ trigger: "manual" });
   });
 
   it("投影快照损坏且前缀已归档时从 audit segments 重建 UI", async () => {
@@ -151,8 +153,10 @@ describe("ConversationTranscriptArchive", () => {
     snapshot.projection = { throughSeq: 0, messages: [] };
     await fs.promises.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
     const projection = await new ConversationJournalService(store).readProjection("c1");
-    expect(projection.messages).toHaveLength(42);
+    // 42 条消息 + 1 条压缩分隔标记；marker 落在 checkpoint 之后、suffix 消息之前。
+    expect(projection.messages).toHaveLength(43);
     expect(projection.messages[0]?.content).toBe("message-1");
+    expect(projection.messages[40]?.compaction).toEqual({ trigger: "manual" });
   });
 
   it("健康完整 projection 不扫描 audit segments，非零残缺则按 digest 重建", async () => {
@@ -164,7 +168,8 @@ describe("ConversationTranscriptArchive", () => {
     const journal = new ConversationJournalService(store);
     const auditSpy = vi.spyOn(store, "readAuditEntries");
     const healthy = await journal.readProjection("c1");
-    expect(healthy.messages).toHaveLength(42);
+    // 同上：42 条消息 + 1 条压缩分隔标记
+    expect(healthy.messages).toHaveLength(43);
     expect(auditSpy).not.toHaveBeenCalled();
 
     const snapshotPath = path.join(root, "transcripts", transcriptStorageKey("c1"), "snapshot.json");
@@ -174,7 +179,7 @@ describe("ConversationTranscriptArchive", () => {
     snapshot.projection.messages = snapshot.projection.messages.slice(1);
     await fs.promises.writeFile(snapshotPath, JSON.stringify(snapshot), "utf8");
     const repaired = await new ConversationJournalService(store).readProjection("c1");
-    expect(repaired.messages).toHaveLength(42);
+    expect(repaired.messages).toHaveLength(43);
     expect(auditSpy).toHaveBeenCalled();
   });
 

@@ -392,7 +392,7 @@ export function registerDocumentTools(): void {
       "- 用户通过 ask_user_choice 选择了风格 → 用对应 style 参数直接生成\n\n" +
       "不要用于：\n" +
       "- 表格数据（用 write_excel）\n" +
-      "- 轻量笔记（用 write_file）\n" +
+      "- 轻量笔记（用 Write）\n" +
       "- 需要复杂排版（页眉页脚/目录/图片/表格）→ 才考虑 invoke_skill(docx)\n\n" +
       "style 可选值（见 skills/docx/styles/catalog.md）：default(商务) / academic(学术) / clean(极简) / elegant(优雅) / formal(公文)。\n" +
       "参数：filename（只传文件名，如 AI新闻汇总.docx，不要传绝对路径；输出目录由系统固定为桌面），title（标题），paragraphs（段落数组），style（可选预设风格）。",

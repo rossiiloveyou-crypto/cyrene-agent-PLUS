@@ -40,6 +40,21 @@ describe("React chat sticker messages", () => {
 });
 
 describe("formal answer visibility", () => {
+  it("attaches transient retry status to the visible waiting state", () => {
+    const message: ChatMessageItem = {
+      id: "assistant-retrying",
+      role: "assistant",
+      content: "",
+      waitingForFirstEvent: true,
+      modelRetry: { phase: "waiting", retryNumber: 2, maxRetries: 5, delayMs: 3000 },
+    };
+
+    expect(createMessageItems([message], [])).toMatchObject([{
+      role: "waiting",
+      extraInfo: { modelRetry: { phase: "waiting", retryNumber: 2, maxRetries: 5, delayMs: 3000 } },
+    }]);
+  });
+
   it("keeps an interrupted run in the process area without creating an empty assistant bubble", () => {
     const message: ChatMessageItem = {
       id: "assistant-interrupted",
@@ -260,6 +275,23 @@ describe("bound channel message presentation", () => {
   });
 });
 
+describe("compaction marker presentation", () => {
+  it("converts a compaction marker into a single separator bubble entry", () => {
+    const message: ChatMessageItem = {
+      id: "checkpoint-1",
+      role: "assistant",
+      content: "",
+      compaction: { trigger: "manual" },
+    };
+    expect(createMessageItems([message], [])).toEqual([{
+      key: "checkpoint-1",
+      role: "compaction",
+      content: "",
+      extraInfo: {},
+    }]);
+  });
+});
+
 describe("review panel visibility", () => {
   it("appends a review bubble when runId is set and message is not streaming", () => {
     const message: ChatMessageItem = {
@@ -335,7 +367,8 @@ describe("function-calling round presentation", () => {
     expect(html).toContain("cy-reasoning-status-art is-thinking");
     const thinkingArt = html.match(/cy-reasoning-status-art is-thinking[^>]*><img src="([^"]+)"/)?.[1];
     const completedArt = html.match(/cy-reasoning-status-art is-complete[^>]*><img src="([^"]+)"/)?.[1];
-    expect(completedArt).toBe(thinkingArt);
+    expect(thinkingArt).toContain(encodeURIComponent("思考中.png"));
+    expect(completedArt).toContain(encodeURIComponent("提醒.png"));
     expect(html).toContain("昔涟已完成 · 浏览 1 个目录");
     expect(html).toContain("昔涟正在读取文件");
     expect(html).toContain("先看项目结构");

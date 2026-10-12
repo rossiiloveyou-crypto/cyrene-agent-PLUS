@@ -95,7 +95,7 @@ export function PlanModeToggle({ conversationId, workspaceRoot }: PlanModeToggle
       placement="topRight"
       open={open}
       onOpenChange={setOpen}
-      overlayClassName="cy-plan-popover"
+      rootClassName="cy-composer-menu-popover cy-plan-popover"
     >
       <button type="button" className={`cy-composer__agent-button cy-plan-control ${active ? "is-active" : ""}`} aria-pressed={active}>
         <img className="cy-plan-icon" src={reminderIconUrl} alt="" />

@@ -5,12 +5,12 @@
 // → 每配置取中位数聚合，写 JSON 报告并打印控制台摘要。
 //
 // 用法：
-//   npm run perf:chat-baseline                    # 完整基线（B: 3数据集×2规模×2滚动×5次；A: 缩减矩阵×3次）
-//   npm run perf:chat-baseline -- --smoke         # 冒烟：单配置验证全链路（构建+驱动+报告）
-//   npm run perf:chat-baseline -- --runs 1 --only-b  # 快速验证：B 通道 12 配置各 1 次（探针计数确定性高，阶段间验证用）
-//   npm run perf:chat-baseline -- --skip-build    # 复用已有 dist/perf-* 产物（调试 harness 用）
-//   npm run perf:chat-baseline -- --out <file>    # 指定报告输出路径
-//   npm run perf:chat-baseline -- --headed --record-video <dir>  # 将每次可见窗口回放录为 WebM
+//   pnpm run perf:chat-baseline                    # 完整基线（B: 3数据集×2规模×2滚动×5次；A: 缩减矩阵×3次）
+//   pnpm run perf:chat-baseline -- --smoke         # 冒烟：单配置验证全链路（构建+驱动+报告）
+//   pnpm run perf:chat-baseline -- --runs 1 --only-b  # 快速验证：B 通道 12 配置各 1 次（探针计数确定性高，阶段间验证用）
+//   pnpm run perf:chat-baseline -- --skip-build    # 复用已有 dist/perf-* 产物（调试 harness 用）
+//   pnpm run perf:chat-baseline -- --out <file>    # 指定报告输出路径
+//   pnpm run perf:chat-baseline -- --headed --record-video <dir>  # 将每次可见窗口回放录为 WebM
 
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";

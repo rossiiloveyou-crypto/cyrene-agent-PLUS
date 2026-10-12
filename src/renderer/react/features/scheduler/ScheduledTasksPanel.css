@@ -4,8 +4,14 @@
   margin: 0 auto;
   padding: 44px 0 52px;
   overflow: auto;
+  /* 内容列本身是居中容器，滚动条会停在内容列右边缘而非窗口右侧，因此直接隐藏，保留滚轮与键盘滚动 */
+  scrollbar-width: none;
   color: var(--rb-text-primary);
   font-family: var(--rb-font-ui);
+}
+
+.cy-scheduled-page::-webkit-scrollbar {
+  display: none;
 }
 
 .cy-scheduled-header,

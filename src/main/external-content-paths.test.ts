@@ -56,8 +56,7 @@ describe("resolveExternalContentPaths", () => {
       path.join(userData, "prompts"),
       path.join(installRoot, "prompts"),
     ]);
-    expect(result.builtinSkillDirectory).toBe(path.join(installRoot, "defaults", "skills"));
-    expect(result.installSkillDirectory).toBe(path.join(installRoot, "skills"));
+    expect(result.builtinSkillDirectory).toBe(path.join(installRoot, "skills"));
     expect(result.userSkillDirectories).toEqual([path.join(userData, "skills")]);
   });
 });
@@ -83,34 +82,33 @@ describe("external content lookup", () => {
 
   it("prefers a user-installed skill asset over the shipped asset", () => {
     const root = temporaryDirectory();
-    const builtinSkills = path.join(root, "defaults", "skills");
-    const installSkills = path.join(root, "skills");
+    const builtinSkills = path.join(root, "install", "skills");
     const userDataSkills = path.join(root, "user-data", "skills");
     const relativeAsset = path.join("styles", "default.json");
 
-    for (const directory of [builtinSkills, installSkills, userDataSkills]) {
+    for (const directory of [builtinSkills, userDataSkills]) {
       fs.mkdirSync(path.join(directory, "xlsx", "styles"), { recursive: true });
       fs.writeFileSync(path.join(directory, "xlsx", relativeAsset), directory, "utf8");
     }
 
     expect(findSkillPath("xlsx", relativeAsset, {
       builtinSkillDirectory: builtinSkills,
-      userSkillDirectories: [installSkills, userDataSkills],
+      userSkillDirectories: [userDataSkills],
     })).toBe(path.join(userDataSkills, "xlsx", relativeAsset));
   });
 
-  it("treats the legacy packaged skills folder as builtin when defaults are absent", () => {
+  it("scans the shipped skills folder as builtin and the userData folder as user", () => {
     const root = temporaryDirectory();
-    const legacySkills = path.join(root, "skills");
+    const installSkills = path.join(root, "install", "skills");
     const userDataSkills = path.join(root, "user-data", "skills");
-    fs.mkdirSync(legacySkills, { recursive: true });
+    fs.mkdirSync(installSkills, { recursive: true });
+    fs.mkdirSync(userDataSkills, { recursive: true });
 
     expect(resolveSkillScanSources({
-      builtinSkillDirectory: path.join(root, "defaults", "skills"),
-      installSkillDirectory: legacySkills,
-      userSkillDirectories: [legacySkills, userDataSkills],
+      builtinSkillDirectory: installSkills,
+      userSkillDirectories: [userDataSkills],
     })).toEqual([
-      { directory: legacySkills, source: "builtin" },
+      { directory: installSkills, source: "builtin" },
       { directory: userDataSkills, source: "user" },
     ]);
   });

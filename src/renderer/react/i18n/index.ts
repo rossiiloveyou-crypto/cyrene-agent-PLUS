@@ -10,15 +10,18 @@
 import i18next from "i18next";
 import { useCallback, useSyncExternalStore } from "react";
 import en from "./en.json";
+import jaJP from "./ja-JP.json";
 import zhCN from "./zh-CN.json";
+import { UI_LANGUAGE_FALLBACK } from "../../../shared/ui-language";
 
-export const UI_LOCALE_FALLBACK = "zh-CN";
+export const UI_LOCALE_FALLBACK = UI_LANGUAGE_FALLBACK;
 
 void i18next.init({
   lng: UI_LOCALE_FALLBACK,
   fallbackLng: UI_LOCALE_FALLBACK,
   resources: {
     en: { translation: en },
+    "ja-JP": { translation: jaJP },
     "zh-CN": { translation: zhCN },
   },
   interpolation: { escapeValue: false },
@@ -72,4 +75,19 @@ export function useTranslation() {
     [locale],
   );
   return { t: translate, locale };
+}
+
+/**
+ * 角色昵称是运行时动态值，key 只能运行时拼接；资源里查不到时原样返回昵称。
+ * 传入组件的 t（来自 useTranslation）即可随语言切换自动刷新。
+ */
+export function translateCharacterName(nickname: string, t: (key: string) => string): string {
+  const key = `characterNames.${nickname}`;
+  const translated = t(key);
+  return translated === key ? nickname : translated;
+}
+
+/** 非 React 模块按当前语言即时取角色名；查不到回退昵称。 */
+export function getCharacterName(nickname: string): string {
+  return translateCharacterName(nickname, t);
 }

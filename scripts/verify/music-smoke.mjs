@@ -14,7 +14,7 @@ const electronPath = require("electron");
 const entry = path.join(repoRoot, "dist", "main", "main", "music", "music-smoke-entry.js");
 if (!fs.existsSync(entry)) {
   console.error(`[music-smoke-runner] compiled entry not found: ${entry}`);
-  console.error("[music-smoke-runner] run 'npm run build:main' first");
+  console.error("[music-smoke-runner] run 'pnpm run build:main' first");
   process.exit(1);
 }
 

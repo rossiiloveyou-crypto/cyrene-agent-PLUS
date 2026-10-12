@@ -9,6 +9,7 @@ import type { MusicCardData } from "./music-card";
 import type { TodoItem } from "./todo-types";
 import type { TaskDelegationPresentation } from "./task-session";
 import type { ContextUsageSnapshot } from "./context-usage";
+import type { BrowserElementSelection } from "./browser-panel-types";
 
 // - schemaVersion 用于以后改 schema 时的迁移判断；当前固定 1。
 
@@ -128,10 +129,21 @@ export interface ChatMessageChannelSource {
   senderName?: string;
 }
 
+/**
+ * 上下文压缩标记消息：由轨迹投影层从 compaction_checkpoint 条目生成，
+ * 只存在于 UI 消息流（含投影缓存快照），不进入模型上下文与会话存储。
+ */
+export interface ChatMessageCompactionMark {
+  /** automatic = 发送前预算触发的自动压缩；manual = 环形图手动压缩。 */
+  trigger: "automatic" | "manual";
+}
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
+  /** 存在即表示本条是压缩分隔标记（见 ChatMessageCompactionMark），正文恒为空。 */
+  compaction?: ChatMessageCompactionMark;
   /** 模型公开返回的推理过程；不包含隐藏或加密思考。 */
   reasoning?: string;
   reasoningBlocks?: ReasoningBlock[];
@@ -173,7 +185,28 @@ export interface ChatMessage {
   contextUsage?: ContextUsageSnapshot;
 }
 
-export type MessageAttachment = ImageMessageAttachment | DocumentMessageAttachment;
+/**
+ * Incremental presentation updates used only by transcript checkpoint writes.
+ * These operations are folded into the normal ChatMessage fields when a
+ * transcript projection is materialized; they are never exposed to the UI.
+ */
+export interface ChatPresentationDelta {
+  reasoningBlockUpserts?: ReasoningBlock[];
+  reasoningBlockAppends?: Array<{ id: string; content: string }>;
+  processMessageUpserts?: ProcessMessageRecord[];
+  processMessageAppends?: Array<{ id: string; content: string }>;
+  agentRoundUpserts?: AgentRoundRecord[];
+  taskDelegationUpserts?: TaskDelegationDisplayRecord[];
+  toolExecutionUpserts?: ToolExecutionRecord[];
+}
+
+export type ChatPresentationCheckpointPatch = Partial<Pick<ChatMessage,
+  "content" | "reasoning" | "reasoningBlocks" | "processMessages" | "agentRounds" |
+  "taskDelegations" | "channelSource" | "sticker" | "toolExecutions" | "runActivity" |
+  "runSnapshot" | "ttsCacheKey" | "ttsCacheVersion" | "musicCard" | "contextUsage"
+>> & { delta?: ChatPresentationDelta };
+
+export type MessageAttachment = ImageMessageAttachment | DocumentMessageAttachment | WebElementMessageAttachment;
 
 export interface ImageMessageAttachment {
   kind: "image";
@@ -197,6 +230,12 @@ export interface DocumentMessageAttachment {
   reason?: string;
 }
 
+export interface WebElementMessageAttachment {
+  kind: "web-element";
+  name: string;
+  element: BrowserElementSelection;
+}
+
 /** 对话工作区绑定：将一个可信目录绑定到对话 */
 export interface ConversationWorkspaceBinding {
   /** 规范化后的绝对路径（realpath + Windows 标准化） */
@@ -212,14 +251,15 @@ export interface ConversationWorkspaceBinding {
  * blob: 预览 URL、预处理状态等瞬态数据不落盘，派发时由渲染层重建。
  */
 export interface PendingChatAttachment {
-  kind: "image" | "document";
+  kind: "image" | "document" | "web-element";
   name: string;
   /** 主进程落盘的附件绝对路径（临时文件或用户文件），派发时按它重新读取。 */
-  filePath: string;
+  filePath?: string;
   mime?: string;
   caption?: string;
   /** 截图标注标记：标注像素已由截图 helper 绘入图片文件，此标记供派发时的 caption 提示词分支与展示使用。 */
   hasAnnotations?: boolean;
+  element?: BrowserElementSelection;
 }
 
 /**
@@ -307,6 +347,8 @@ export interface ChatSession {
   pinned?: boolean;
   /** 当前会话选择的已保存模型；缺失时使用默认模型。 */
   modelProfileId?: string;
+  /** 摘要模式的增量缓冲；只记录成功终态的正式回复。 */
+  summaryMemoryProgress?: SummaryMemoryProgress;
   /**
    * 本对话固定的当前模型（从属于 modelProfileId 绑定，Invariant B）。
    * 缺省 = 旧会话：继续跟随绑定档案默认模型的动态解析（兼容性例外，不回填）。
@@ -319,10 +361,28 @@ export interface ChatSession {
    * 避免 UI 显示过期数据（known-issues 问题 3）。
    */
   currentContextUsage?: ContextUsageSnapshot;
+  /**
+   * 派生字段（不落盘）：按当前模型配置实时解析出的上下文容量。
+   * 快照里的 contextWindowTokens 是生成那一刻的口径，模型绑定或模型设置变更后会过期，
+   * 主进程在读出口覆盖此值，渲染端用它替换环形图分母，避免展示陈旧容量。
+   */
+  contextWindowTokens?: number;
   /** 会话级待发队列：旧会话无此字段视为空队列（向后兼容）。 */
   pendingMessages?: PendingChatMessage[];
   /** 待发派发状态：认领后 run 确认接受前存在；残留即恢复入口（向后兼容缺省为无）。 */
   pendingDispatch?: PendingDispatchState;
+}
+
+export interface SummaryMemoryPendingTurn {
+  assistantEntryId: string;
+  userTurnId?: string;
+  userText: string;
+  assistantText: string;
+}
+
+export interface SummaryMemoryProgress {
+  lastProcessedAssistantId?: string;
+  pendingTurns: SummaryMemoryPendingTurn[];
 }
 
 /**

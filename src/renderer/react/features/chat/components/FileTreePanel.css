@@ -84,7 +84,7 @@
   gap: 8px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--rb-border-default, #f0ebee);
-  background: rgb(255 247 250 / 92%);
+  background: var(--rb-bg-2);
 }
 
 .cy-file-preview__path {
@@ -124,7 +124,7 @@
 }
 
 .cy-file-preview__line:hover {
-  background: rgb(0 0 0 / 2%);
+  background: var(--rb-surface-hover);
 }
 
 .cy-file-preview__lineno {

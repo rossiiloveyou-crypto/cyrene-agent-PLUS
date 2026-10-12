@@ -18,7 +18,6 @@ const capability: ProviderCapability = {
   thinkingField: null,
   cacheStrategy: "none",
   testStrategy: "text",
-  supportsVision: true,
 };
 
 const cfg: VendorConfig = {
@@ -124,7 +123,7 @@ describe("ResponsesAdapter — 消息形态映射", () => {
     });
   });
 
-  test("无 rawAssistant 的 assistant 消息退化构造（input_text + function_call）", () => {
+  test("无 rawAssistant 的 assistant 消息使用 Responses assistant 文本形状并保留工具调用", () => {
     const { body } = makeBody([
       { role: "user", content: "搜歌" },
       {
@@ -134,10 +133,7 @@ describe("ResponsesAdapter — 消息形态映射", () => {
       },
     ]);
     const input = body.input as Array<Record<string, unknown>>;
-    expect(input[1]).toEqual({
-      role: "assistant",
-      content: [{ type: "input_text", text: "我来搜" }],
-    });
+    expect(input[1]).toEqual({ role: "assistant", content: "我来搜" });
     expect(input[2]).toEqual({
       type: "function_call",
       call_id: "call_1",
@@ -372,10 +368,41 @@ describe("ResponsesAdapter — rawAssistant 多轮回放", () => {
     expect(input[0]).toMatchObject({ type: "message" });
   });
 
-  test("rawAssistant 优先于 content/toolCalls 退化构造", () => {
-    // 有 rawAssistant 时不再从 content 退化构造 assistant input_text
+  test("异协议、空或不可回放底稿时从统一正文和工具调用重建", () => {
+    for (const rawAssistant of [
+      [{ type: "text", text: "Anthropic reply" }, { type: "tool_use", id: "foreign-call" }],
+      [],
+      [{ type: "mystery_item" }],
+    ]) {
+      const { body } = makeBody([{
+        role: "assistant",
+        content: "恢复正文",
+        toolCalls: [{ id: "call_fallback", name: "lookup", arguments: "{}" }],
+        rawAssistant,
+      }]);
+      expect(body.input).toEqual([
+        { role: "assistant", content: "恢复正文" },
+        { type: "function_call", call_id: "call_fallback", name: "lookup", arguments: "{}" },
+      ]);
+    }
+  });
+
+  test("有效 Responses 底稿与未知项混合时保留有效项且不重复重建", () => {
+    const { body } = makeBody([{
+      role: "assistant",
+      content: "回复",
+      toolCalls: [{ id: "call_1", name: "music_search", arguments: "{}" }],
+      rawAssistant: [{ type: "foreign_item" }, messageItem, functionCallItem],
+    }]);
+    const input = body.input as Array<Record<string, unknown>>;
+    expect(input).toHaveLength(2);
+    expect(input[0]).toMatchObject({ type: "message", id: "msg_1" });
+    expect(input[1]).toMatchObject({ type: "function_call", call_id: "call_1" });
+  });
+
+  test("rawAssistant 已覆盖正文时不重复构造统一字段", () => {
     const { body } = makeBody([
-      { role: "assistant", content: "旧正文", rawAssistant: [messageItem] },
+      { role: "assistant", content: "回复", rawAssistant: [messageItem] },
     ], { config: { baseUrl: "https://api.deepseek.com" } });
     const input = body.input as Array<Record<string, unknown>>;
     expect(input).toHaveLength(1);

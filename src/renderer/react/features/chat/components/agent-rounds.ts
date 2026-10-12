@@ -11,6 +11,11 @@ import type {
 // 以响应运行时语言切换（t() 不能出现在模块顶层常量里）。
 
 const LIVE_TOOL_LABEL_KEYS: Record<string, string> = {
+  Read: "agentRounds.liveReadFile",
+  Write: "agentRounds.liveWriteFile",
+  Edit: "agentRounds.liveEditFile",
+  Glob: "agentRounds.liveListDir",
+  Grep: "agentRounds.liveSearchText",
   list_dir: "agentRounds.liveListDir",
   read_file: "agentRounds.liveReadFile",
   write_file: "agentRounds.liveWriteFile",
@@ -21,6 +26,11 @@ const LIVE_TOOL_LABEL_KEYS: Record<string, string> = {
 };
 
 const TOOL_LABEL_KEYS: Record<string, string> = {
+  Read: "agentRounds.toolReadFile",
+  Write: "agentRounds.toolWriteFile",
+  Edit: "agentRounds.toolStrReplace",
+  Glob: "agentRounds.toolListDir",
+  Grep: "agentRounds.toolSearchText",
   list_dir: "agentRounds.toolListDir",
   read_file: "agentRounds.toolReadFile",
   write_file: "agentRounds.toolWriteFile",
@@ -34,6 +44,11 @@ const TOOL_LABEL_KEYS: Record<string, string> = {
 };
 
 const SUMMARY_TOOL_KEYS: Record<string, string> = {
+  Read: "agentRounds.summaryReadFile",
+  Write: "agentRounds.summaryWriteFile",
+  Edit: "agentRounds.summaryEditFile",
+  Glob: "agentRounds.summaryListDir",
+  Grep: "agentRounds.summarySearchText",
   list_dir: "agentRounds.summaryListDir",
   read_file: "agentRounds.summaryReadFile",
   write_file: "agentRounds.summaryWriteFile",

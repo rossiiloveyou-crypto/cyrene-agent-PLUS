@@ -8,19 +8,27 @@ import {
   type MomentFeedItem,
 } from "../../../../shared/moments-types";
 import { resolveAsset } from "../../../../shared/renderer-base";
-import { useTranslation } from "../../i18n";
+import { useCyreneAvatar } from "../../hooks/useCyreneAvatar";
+import { translateCharacterName, useTranslation } from "../../i18n";
 import { useFeedback } from "../../components/feedback/FeedbackProvider";
 import { formatMomentTime } from "./moments-utils";
 
-const CYRENE_AVATAR_URL = resolveAsset("avatars/cyrene-avatar.png");
 
 /**
  * 正文按 @昵称 切片：点名片段高亮显示（QQ 群的蓝色 @ 手感）。
  * 昵称来自 post.mentions（主进程白名单），文本里的其他 @ 不着色。
  */
-function renderPostText(text: string, mentions: readonly string[] | undefined, cyreneLabel: string) {
+function renderPostText(
+  text: string,
+  mentions: readonly string[] | undefined,
+  cyreneLabel: string,
+  characterName: (nickname: string) => string,
+) {
   if (!mentions || mentions.length === 0) return text;
-  const displayNames = mentions.map((name) => (name === "cyrene" ? cyreneLabel : name));
+  // 正文里可能写中文昵称，也可能写本地化名，两种都算点名片段
+  const displayNames = mentions.flatMap((name) =>
+    name === "cyrene" ? [cyreneLabel] : [name, characterName(name)],
+  );
   // 找出每个 @昵称 在文本中的位置，按出现顺序切片
   const marks: Array<{ start: number; end: number }> = [];
   for (const display of displayNames) {
@@ -70,6 +78,7 @@ export function MomentPostCard({
   onComment,
 }: MomentPostCardProps) {
   const { t } = useTranslation();
+  const cyreneAvatarUrl = useCyreneAvatar();
   // 统一反馈入口：删除动态走危险确认
   const feedback = useFeedback();
   const { post, comments, likes } = item;
@@ -79,9 +88,9 @@ export function MomentPostCard({
   const [commentError, setCommentError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
-  // 作者显示名：昔涟/用户走既定名，其余一律按角色人设昵称原样显示
+  // 作者显示名：昔涟/用户走既定名，其余角色昵称按当前语言翻译
   const authorName = (author: MomentAuthor): string =>
-    author === "cyrene" ? t("moments.cyreneName") : author === "user" ? userDisplayName : author;
+    author === "cyrene" ? t("moments.cyreneName") : author === "user" ? userDisplayName : translateCharacterName(author, t);
   const isCharacterAuthor = (author: MomentAuthor): boolean => author !== "user" && author !== "cyrene";
 
   const likedByUser = likes.some((like) => like.actor === "user");
@@ -123,7 +132,7 @@ export function MomentPostCard({
     <article className="moment-card" id={`moment-post-${post.id}`}>
       <div className="moment-card__avatar">
         {post.author === "cyrene" ? (
-          <img src={CYRENE_AVATAR_URL} alt={t("moments.cyreneName")} draggable={false} />
+          <img src={cyreneAvatarUrl} alt={t("moments.cyreneName")} draggable={false} />
         ) : userAvatarUrl ? (
           <img src={userAvatarUrl} alt={userDisplayName} draggable={false} />
         ) : (
@@ -135,7 +144,7 @@ export function MomentPostCard({
         <div className="moment-card__name">{authorName(post.author)}</div>
         {post.title && <div className="moment-card__title">{post.title}</div>}
         {post.text && (
-          <div className="moment-card__text">{renderPostText(post.text, post.mentions, t("moments.cyreneName"))}</div>
+          <div className="moment-card__text">{renderPostText(post.text, post.mentions, t("moments.cyreneName"), (name) => translateCharacterName(name, t))}</div>
         )}
 
         {post.media.length > 0 && (

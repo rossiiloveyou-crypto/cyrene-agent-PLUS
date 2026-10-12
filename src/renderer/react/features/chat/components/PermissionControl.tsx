@@ -79,7 +79,7 @@ export function PermissionControl() {
         setOpen(nextOpen);
         if (nextOpen) void refresh();
       }}
-      overlayClassName="cy-permission-popover"
+      rootClassName="cy-composer-menu-popover"
       content={
         <div className="cy-permission-panel">
           <strong>{t("permission.panelTitle")}</strong>

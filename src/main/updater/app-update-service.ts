@@ -79,9 +79,10 @@ export function createAppUpdateService(options: CreateAppUpdateServiceOptions): 
     releaseNotes: normalizeReleaseNotes(info?.releaseNotes) ?? state.releaseNotes,
     percent: 100,
   }));
+  // 错误只带错误码，用户可读文案由渲染层按码翻译；下载中报错按下载失败归档
   updater.on("error", () => publish({
     phase: "error",
-    error: "暂时无法检查更新，请稍后再试。",
+    error: downloadPromise ? "download_failed" : "check_failed",
   }));
 
   return {
@@ -94,7 +95,7 @@ export function createAppUpdateService(options: CreateAppUpdateServiceOptions): 
       if (!checkPromise) {
         publish({ phase: "checking" });
         checkPromise = updater.checkForUpdates().catch(() => {
-          publish({ phase: "error", error: "暂时无法检查更新，请稍后再试。" });
+          publish({ phase: "error", error: "check_failed" });
         }).finally(() => {
           checkPromise = null;
         });
@@ -107,7 +108,7 @@ export function createAppUpdateService(options: CreateAppUpdateServiceOptions): 
       if (!downloadPromise && state.phase !== "downloaded") {
         publish({ phase: "downloading", percent: state.percent ?? 0 });
         downloadPromise = updater.downloadUpdate().catch(() => {
-          publish({ phase: "error", error: "更新下载失败，请稍后再试。" });
+          publish({ phase: "error", error: "download_failed" });
         }).finally(() => {
           downloadPromise = null;
         });

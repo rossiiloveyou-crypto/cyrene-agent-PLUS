@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, Input, Modal, Radio, Spin } from "antd";
 import { BookOpen, Heart, Images } from "lucide-react";
-import type { SettingsApi } from "../../../settings/shared/types";
+import type { ModelSettings, SettingsApi } from "../../../settings/shared/types";
 import { useTranslation } from "../../i18n";
 import { SettingsInput, SettingsSlider, SettingsSwitch } from "../../components/ui/SettingsControls";
 import { StickerManagerModal } from "./StickerManagerModal";
@@ -32,6 +32,7 @@ function readValues(config: Partial<Values>): Values {
 export function CyreneSettingsPanel() {
   const { t } = useTranslation();
   const [values, setValues] = useState<Values>(defaults);
+  const [memoryMode, setMemoryMode] = useState<ModelSettings["memoryMode"]>("vector");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -51,7 +52,7 @@ export function CyreneSettingsPanel() {
     let active = true;
     const api = settingsApi();
     if (!api) { setNotice({ type: "error", text: t("settingsPage.cyrene.unavailable") }); setLoading(false); return; }
-    void api.getConfig().then((config) => { if (active) { setValues(readValues(config)); setLoading(false); } }).catch(() => { if (active) { setNotice({ type: "error", text: t("settingsPage.cyrene.loadFailed") }); setLoading(false); } });
+    void api.getConfig().then((config) => { if (active) { setValues(readValues(config)); setMemoryMode(config.memoryMode === "summary" || config.memoryMode === "wiki" || config.memoryMode === "off" ? config.memoryMode : "vector"); setLoading(false); } }).catch(() => { if (active) { setNotice({ type: "error", text: t("settingsPage.cyrene.loadFailed") }); setLoading(false); } });
     void api.getRerankerStatus?.().then((status) => { if (active) setRerankerInstalled(status.standard); }).catch(() => {});
     const modelConfig = (window as Window & { modelConfig?: { getModelInstallStatus?: () => Promise<{ embedding?: { bgem3?: boolean } }> } }).modelConfig;
     void modelConfig?.getModelInstallStatus?.().then((status) => { if (active) setEmbeddingInstalled(Boolean(status.embedding?.bgem3)); }).catch(() => {});
@@ -71,7 +72,13 @@ export function CyreneSettingsPanel() {
     try {
       await api.saveConfig({ ...values, embeddingDimensions: values.embeddingDimensions && values.embeddingDimensions > 0 ? Math.min(65536, Math.round(values.embeddingDimensions)) : undefined });
       setNotice({ type: "success", text: t("settingsPage.cyrene.saved") });
-    } catch { setNotice({ type: "error", text: t("settingsPage.cyrene.saveFailed") }); }
+    } catch {
+      try {
+        const persisted = await api.getConfig();
+        setValues(readValues(persisted));
+      } catch { /* keep the current form if config reload also fails */ }
+      setNotice({ type: "error", text: t("settingsPage.cyrene.saveFailed") });
+    }
     finally { setSaving(false); }
   }
 
@@ -156,12 +163,13 @@ export function CyreneSettingsPanel() {
           <div className="cy-settings-row cy-cyrene-actions"><Button onClick={() => void openStickerManager()}>{t("settingsPage.cyrene.manageStickers")}</Button><Button onClick={openStickerDialog}>{t("settingsPage.cyrene.addSticker")}</Button></div>
         </Card>
       </section>
-      <section className="cy-settings-section"><div className="cy-settings-section__heading"><h2><BookOpen size={18} />{t("settingsPage.cyrene.retrievalTitle")}</h2><p>{t("settingsPage.cyrene.retrievalDescription")}</p></div>
-        <Card><div className="cy-settings-row"><div className="cy-settings-row__copy"><strong>{t("settingsPage.cyrene.embeddingModel")}</strong><span>{t("settingsPage.cyrene.embeddingHint")}</span></div><Button className="cy-cyrene-model-choice" onClick={() => void selectEmbedding()}>BGE-M3 · {embeddingInstalled === null ? t("settingsPage.cyrene.unknown") : embeddingInstalled ? t("settingsPage.cyrene.installed") : t("settingsPage.cyrene.notInstalled")}</Button></div>
-          <div className="cy-settings-row"><div className="cy-settings-row__copy"><strong>{t("settingsPage.cyrene.embeddingDimensions")}</strong><span>{t("settingsPage.cyrene.embeddingDimensionsHint")}</span></div><SettingsInput className="cy-cyrene-dimensions" type="number" min={1} max={65536} value={values.embeddingDimensions ?? ""} placeholder={t("settingsPage.cyrene.autoDetect")} aria-label={t("settingsPage.cyrene.embeddingDimensions")} onChange={(event) => update("embeddingDimensions", event.target.value ? Number(event.target.value) : undefined)} /></div>
-          <div className="cy-settings-row cy-cyrene-radio-row"><div className="cy-settings-row__copy"><strong>{t("settingsPage.cyrene.reranker")}</strong><span>{rerankerInstalled === null ? t("settingsPage.cyrene.unknown") : rerankerInstalled ? t("settingsPage.cyrene.installed") : t("settingsPage.cyrene.notInstalled")}</span></div><Radio.Group value={rerankerMode} optionType="button" buttonStyle="solid" onChange={(event) => void selectReranker(event.target.value as "standard" | "none")}><Radio.Button value="standard">bge-reranker-base</Radio.Button><Radio.Button value="none">{t("settingsPage.cyrene.off")}</Radio.Button></Radio.Group></div>
+      {memoryMode === "vector" && <section className="cy-settings-section"><div className="cy-settings-section__heading"><h2><BookOpen size={18} />{t("settingsPage.cyrene.retrievalTitle")}</h2><p>{t("settingsPage.cyrene.retrievalDescription")}</p></div>
+        <Card>
+            <div className="cy-settings-row"><div className="cy-settings-row__copy"><strong>{t("settingsPage.cyrene.embeddingModel")}</strong><span>{t("settingsPage.cyrene.embeddingHint")}</span></div><Button className="cy-cyrene-model-choice" onClick={() => void selectEmbedding()}>BGE-M3 · {embeddingInstalled === null ? t("settingsPage.cyrene.unknown") : embeddingInstalled ? t("settingsPage.cyrene.installed") : t("settingsPage.cyrene.notInstalled")}</Button></div>
+            <div className="cy-settings-row"><div className="cy-settings-row__copy"><strong>{t("settingsPage.cyrene.embeddingDimensions")}</strong><span>{t("settingsPage.cyrene.embeddingDimensionsHint")}</span></div><SettingsInput className="cy-cyrene-dimensions" type="number" min={1} max={65536} value={values.embeddingDimensions ?? ""} placeholder={t("settingsPage.cyrene.autoDetect")} aria-label={t("settingsPage.cyrene.embeddingDimensions")} onChange={(event) => update("embeddingDimensions", event.target.value ? Number(event.target.value) : undefined)} /></div>
+            <div className="cy-settings-row cy-cyrene-radio-row"><div className="cy-settings-row__copy"><strong>{t("settingsPage.cyrene.reranker")}</strong><span>{rerankerInstalled === null ? t("settingsPage.cyrene.unknown") : rerankerInstalled ? t("settingsPage.cyrene.installed") : t("settingsPage.cyrene.notInstalled")}</span></div><Radio.Group value={rerankerMode} optionType="button" buttonStyle="solid" onChange={(event) => void selectReranker(event.target.value as "standard" | "none")}><Radio.Button value="standard">bge-reranker-base</Radio.Button><Radio.Button value="none">{t("settingsPage.cyrene.off")}</Radio.Button></Radio.Group></div>
         </Card>
-      </section>
+      </section>}
       <div className="cy-settings-form-footer"><Button type="primary" loading={saving} onClick={() => void save()}>{t("settingsPage.cyrene.save")}</Button></div>
     </>}
     <Modal className="cy-settings-theme-modal" open={addOpen} title={t("settingsPage.cyrene.addSticker")} okText={t("settingsPage.cyrene.add")} cancelText={t("settingsPage.cyrene.cancel")} okButtonProps={{ loading: addBusy }} onOk={() => void addSticker()} onCancel={() => setAddOpen(false)} destroyOnHidden><div className="cy-cyrene-sticker-form">{addError && <Alert type="error" showIcon title={addError} />}<label><span>{t("settingsPage.cyrene.stickerFile")}</span><div className="cy-cyrene-sticker-file"><Button onClick={() => void pickStickerFile()}>{t("settingsPage.cyrene.chooseFile")}</Button><span>{pickedPath.split(/[\\/]/).pop() || t("settingsPage.cyrene.noFile")}</span></div></label><label><span>{t("settingsPage.cyrene.stickerId")}</span><SettingsInput value={stickerId} onChange={(event) => setStickerId(event.target.value)} /></label><label><span>{t("settingsPage.cyrene.stickerDescriptionField")}</span><SettingsInput value={stickerDescription} onChange={(event) => setStickerDescription(event.target.value)} /></label><label><span>{t("settingsPage.cyrene.stickerPhrases")}</span><Input.TextArea rows={3} value={stickerPhrases} onChange={(event) => setStickerPhrases(event.target.value)} /></label></div></Modal>

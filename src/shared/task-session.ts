@@ -4,6 +4,11 @@ export type TaskSessionStatus = "running" | "completed" | "failed" | "cancelled"
 
 export type TaskSubagentType = "general" | "document" | "search";
 
+export type TaskAccessMode = "read_only" | "write";
+
+export const DEFAULT_TASK_MAX_PARALLEL_TOOL_CALLS = 4;
+export const MAX_PARALLEL_TOOL_CALLS = 12;
+
 export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
 export interface TodoItem {
@@ -28,9 +33,11 @@ export interface TaskTranscriptMessage {
 export interface TaskTraceRecord {
   id: string;
   at: number;
-  kind: "round" | "progress" | "reasoning" | "tool" | "todo" | "terminal";
-  phase?: "start" | "delta" | "end";
+  roundId?: string;
+  kind: "round" | "candidate" | "progress" | "reasoning" | "tool" | "todo" | "terminal";
+  phase?: "start" | "delta" | "end" | "discard";
   label?: string;
+  displayName?: string;
   content?: string;
   status?: string;
 }
@@ -43,6 +50,9 @@ export interface TaskSession {
   childRunId: string;
   description: string;
   subagentType: TaskSubagentType;
+  /** 当前上下文绑定的黄金裔；关闭后保留旧记录但不再恢复该上下文。 */
+  companionId?: string;
+  contextOpen?: boolean;
   mode: "work" | "code";
   resolvedWorkspaceRoot?: string;
   status: TaskSessionStatus;

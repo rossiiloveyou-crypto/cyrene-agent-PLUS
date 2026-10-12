@@ -366,7 +366,7 @@ function registerStrReplaceTool(): void {
         return JSON.stringify({
           success: false,
           errorCode: "FILE_NOT_FOUND",
-          error: `文件不存在：${filePath}。不要重复相同路径，请先用 read_file 或 search_text 确认文件存在。`,
+          error: `文件不存在：${filePath}。不要重复相同路径，请先用 Read 或 Grep 确认文件存在。`,
           retryable: true,
         });
       }
