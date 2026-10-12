@@ -37,7 +37,7 @@
 | `.cyrene-merge-analysis/heb-p4/p4-verify.txt` | ✅ 本报告同批落盘 | 见 §三 全量核验清单 |
 | `.cyrene-merge-analysis/heb-p4/p4-merge-msg.txt` | ✅ 3795 B（实际使用的提交信息留档，与 `git log -1 --format=%B HEAD^1` 逐字一致） | `git log -1 --format=%B 9cceeeac` |
 | `.cyrene-merge-analysis/heb-p4/p4-docs-msg.txt` | ✅ 1935 B（文档提交信息留档） | `git log -1 --format=%B 3b5f0fd7` |
-| `.cyrene-merge-analysis/heb-p4/p4-status-after.txt` | ✅ 第三笔提交后的完整 `git status --porcelain`（收尾留档 = P5 的起点状态） | 见 §九.2 |
+| `.cyrene-merge-analysis/heb-p4/p4-status-after.txt`（4216 B / 68 行） | ✅ 第三笔提交后的完整 `git status --porcelain`（**= P5 的起点状态**） | 见 §九.2 |
 | `.cyrene-merge-analysis/heb-p4/p4-make-verify.ps1`（12259 B） | ✅ **`p4-verify.txt` 的生成脚本**（可复跑：`& .cyrene-merge-analysis/heb-p4/p4-make-verify.ps1`） | 判据 J-23 的"证据自带运行痕迹" |
 | `.cyrene-merge-analysis/heb-p4/p4-status-before.txt` | ✅ 提交前状态留证（803 行） | — |
 | `.cyrene-merge-analysis/heb-p4/p4-index-namestatus.txt`（40307 B） | ✅ 提交前索引构成留证 | 731 行 |
@@ -219,7 +219,7 @@ $ git status --porcelain | 状态码分组
 | **T4** 文档独立提交 | ✅ | `3b5f0fd74f90d129e151830bb8e3c4ece0347fbf` · **7 文件** · `src/` 命中 **0** |
 | **T5** 无内容丢失（两父各看一次） | ✅（1 条单独登记） | A3：分布逐项相同；官方独有 88 条**逐条归因**，其中 4 条见 §五 5.4 |
 | **T6** 11 项基线不退化 | ✅ | A9：**11/11**，HEAD 树 ≡ 工作区 |
-| **T7** `p4-verify.txt` 落盘 | ✅ | **12954 B / 186 行**（由 `p4-make-verify.ps1` 实测生成，**每条都带口径与判定**） |
+| **T7** `p4-verify.txt` 落盘 | ✅ | **12917 B / 186 行**（由 `p4-make-verify.ps1` 实测生成，**每条都带口径与判定**） |
 | **T8** `wip/*` 决策落盘 | ✅ | §五 5.5（**判定：三个 ref 全部保留**，理由与代价均已量化） |
 
 **非目标遵守情况**（逐条确认）：
@@ -428,9 +428,10 @@ git -C E:\AI_Chating\cyrene-agent checkout 8fe5ba7a -- src/main/channels/convers
 
 ## 九、给下一个 Phase（P5）的交接提示
 
-1. 🔴 **起点**：`HEAD` = **`3b5f0fd7`**（第三笔文档提交）→ 其父 = merge commit **`9cceeeac`**（两父 `9920635f` + `8fe5ba7a`）→ 其父 = 文档提交 `3b5f0fd7` 的上一笔。
+1. 🔴 **起点**（按角色引用，**不要按字面抄 HEAD 定值**）：`HEAD` = **P4 收尾文档提交** → 其父 = **P4 文档提交 `3b5f0fd7`** → 其父 = **merge commit `9cceeeac`**（两父 `9920635f` + `8fe5ba7a`）。
+   实测的对应值（2026-10-12）：收尾文档提交 = **`c2f35ae6`**。
    **合并状态已结束**（`MERGE_HEAD` / `MERGE_MSG` / `MERGE_MODE` 三者 NOT 在场）；`ORIG_HEAD` 在场（正常）。
-2. 🔴 **工作树干净**：`git status --porcelain` = **68 行 `??`**，**无任何 `M`/`D`/`A`/`R`/`UU`**；`git diff --name-only HEAD` = **0**。
+2. 🔴 **工作树干净**：`git status --porcelain` = **68 行 `??`**，**无任何 `M`/`D`/`A`/`R`/`UU`**；`git diff --name-only HEAD` = **0**（留档：`.cyrene-merge-analysis/heb-p4/p4-status-after.txt`，4216 B）。
 3. 🔴 **P5 第一件事是 `pnpm install`**（H-15 销账点）。装前**先备份 `node_modules`**（P1 备份在 `E:\AI_Work\备份\cyrene-pre-P1-2026-10-04\`，实测 MATCH ✅）。
    装完必须记录两个数字：① renderer **4 错 → 0 错**；② 全量测试 **1 失败 → 1 失败（只剩 `class-name-contract`）**。
 4. 🔴 **必须接收 §五 5.4 的待拍板项**（渠道 4 文件：确认删除 or 恢复）。**这是本次合并唯一一处"内容层面的开口"**，不要漏。
