@@ -2539,7 +2539,8 @@
     },
     "version": {
       "menuEntry": "Version",
-      "firstStable": "Stable release"
+      "firstStable": "Stable release",
+      "forkPlus": "Personal fork PLUS"
     },
     "website": {
       "menuEntry": "Website"

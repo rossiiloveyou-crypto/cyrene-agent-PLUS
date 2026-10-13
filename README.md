@@ -5,12 +5,8 @@
 <h1 align="center">Cyrene-Agent</h1>
 
 <p align="center">
-  <a href="./README.en.md">English</a> | <strong>中文</strong>
-</p>
-
-<p align="center">
-  <strong>主仓库</strong>：<a href="https://github.com/Playa-Cyrene/Cyrene-Agent">GitHub</a> ・
-  <strong>国内镜像</strong>：<a href="https://gitee.com/playa0/cyrene-agent">Gitee</a>
+  <strong>本仓库</strong>：<a href="https://github.com/rossiiloveyou-crypto/cyrene-agent-PLUS">GitHub</a> ・
+  <strong>上游原仓库</strong>：<a href="https://github.com/Playa-0v0/Cyrene-Agent">GitHub</a> / <a href="https://gitee.com/playa0/cyrene-agent">Gitee 镜像</a>
 </p>
 
 > ## 🚩 这是个人分支（fork），不是原项目
@@ -18,10 +14,9 @@
 > **Cyrene-Agent 的作者是 [Playa-0v0](https://github.com/Playa-0v0)，唯一官方仓库是 https://github.com/Playa-0v0/Cyrene-Agent 。**
 >
 > - 想要 **下载安装包、看完整文档、提问、反馈 Bug、提 PR** → **请一律前往原仓库**（GitHub 访问不畅时用作者的 Gitee 镜像）。
-> - 本仓库只是在**上游 `1.2.2` 的基础上叠加了两批本地改动**：*渠道白名单与权限重做*、*记忆与群聊专项加强（区块隔离 + 记忆管理控制台 + 彻底擦除一个人）*。
->   它**不代表上游立场**，**不承诺跟进上游后续版本**，也**没有获得作者的背书**。
-> - **只是想正常使用昔涟 → 请用上游版本。** 本分支适合想提前试用「记忆按区块隔离」「按人彻底擦除」「渠道按账号授权」的人。
-> - 本分支自身的问题 → 请在**本仓库**开 Issue；上游本身的问题 / 功能建议 → 请去**上游**提。
+> - 本分支 = **上游 `1.3.0`** ＋ **本地自建功能**。**不代表上游立场**、**不承诺跟进后续版本**、**未获作者背书**。
+> - 🆕 **本分支到底加了什么、怎么装、怎么验 → 见 [FORK-ADDITIONS.md](./FORK-ADDITIONS.md)**（一句话版：记忆按区块隔离 · 按人彻底擦除 · 渠道按账号授权 · 群聊语料与旁听 · 记忆管理控制台 · 用量徽章 · 关键词策略）。
+> - **只是想正常使用昔涟 → 请用上游版本。** 本分支自身的问题 → 请在**本仓库**开 Issue；上游本身的问题 → 请去**上游**提。
 
 **Cyrene-Agent 是一个以《崩坏：星穹铁道》昔涟为核心角色的 Windows Live2D AI 桌面伴侣。**
 

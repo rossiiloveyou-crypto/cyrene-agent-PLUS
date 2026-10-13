@@ -60,6 +60,9 @@ export function resolveAppUpdateView(state: AppUpdateState): AppUpdateView {
 /** 版本 → 纪念称号文案 key；想让某个版本带头衔（如 1.3.0 的"正式版"）就加一行 */
 const VERSION_TITLE_KEYS: Record<string, string> = {
   "1.3.0": "ui.version.firstStable",
+  // cyrene-agent-PLUS（个人分支）：与上游 1.3.0 同基线，但带本地自建功能 ⇒ 单独给头衔，
+  // 避免在「关于」里被误读成上游正式版。上游那一行原样保留。
+  "1.3.0-PLUS": "ui.version.forkPlus",
 };
 
 /** 查版本称号：有条目返回文案 key（组件层用 t() 翻译），普通版本返回 null 只显示 v 号 */

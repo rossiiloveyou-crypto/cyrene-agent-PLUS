@@ -2539,7 +2539,8 @@
     },
     "version": {
       "menuEntry": "版本",
-      "firstStable": "正式版"
+      "firstStable": "正式版",
+      "forkPlus": "个人分支 PLUS"
     },
     "website": {
       "menuEntry": "官网"

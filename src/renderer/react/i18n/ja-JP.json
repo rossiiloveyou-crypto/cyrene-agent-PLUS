@@ -2124,7 +2124,8 @@
     },
     "version": {
       "menuEntry": "バージョン",
-      "firstStable": "正式版"
+      "firstStable": "正式版",
+      "forkPlus": "個人フォーク PLUS"
     },
     "website": {
       "menuEntry": "公式サイト"
